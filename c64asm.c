@@ -1014,8 +1014,19 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
             long val = eval_expr(L->operand, pc, L->line_no, &undef);
             if (undef && pass_no == 2)
                 asm_error(L->line_no, L->raw, "Undefined symbol in .org expression");
+            if (origin < 0) {
+                origin = val;
+            } else if (pass_no == 2) {
+                long current_abs = origin + (long)output->len;
+                long gap = val - current_abs;
+                if (gap < 0)
+                    asm_error(L->line_no, L->raw,
+                        ".org cannot move the program counter backward (from $%04lX to $%04lX) "
+                        "-- the assembler can't overwrite bytes already assembled",
+                        current_abs, val);
+                for (long i = 0; i < gap; i++) bb_push(output, 0x00);
+            }
             pc = val;
-            if (origin < 0) origin = pc;
             if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw);
             continue;
         }

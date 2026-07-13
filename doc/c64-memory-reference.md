@@ -296,6 +296,17 @@ pointer**: the last 8 bytes of the current screen memory (`$07F8`–`$07FF`
 for the default screen at `$0400`), one per sprite, holding
 `data_address / 64`.
 
+> **Pitfall:** never place sprite data (or bitmap or screen data) at
+> `$1000`–`$1FFF` or `$9000`–`$9FFF` *within the current VIC bank*. For
+> those two address windows specifically, the VIC-II always substitutes
+> the built-in character generator ROM for its own reads, no matter what
+> is actually stored in RAM there — it's a hardwired address decoder
+> quirk, not something any register can turn off. Point a sprite pointer
+> in there and the sprite renders as character-ROM font shapes instead of
+> your data — which looks exactly like "random scrambled pixels" if you
+> don't know to expect it. `$2000` and up (as used below), or anywhere
+> below `$1000`, are both safe in the default bank.
+
 ```asm
 SCREEN      = $0400
 SPRITE_PTR0 = SCREEN + $3f8   ; = $07F8, sprite 0's pointer slot

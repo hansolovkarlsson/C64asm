@@ -562,9 +562,20 @@ class Assembler:
                 val, undef = eval_expr(operand, self.symbols, pc, line_no)
                 if undef and pass_no == 2:
                     raise AsmError(f"Undefined symbol in .org expression", line_no, raw)
-                pc = val
                 if origin is None:
-                    origin = pc
+                    origin = val
+                elif pass_no == 2:
+                    current_abs = origin + len(output)
+                    gap = val - current_abs
+                    if gap < 0:
+                        raise AsmError(
+                            f".org cannot move the program counter backward "
+                            f"(from ${current_abs:04X} to ${val:04X}) -- the "
+                            f"assembler can't overwrite bytes already assembled",
+                            line_no, raw)
+                    if gap > 0:
+                        output.extend(b'\x00' * gap)
+                pc = val
                 if label:
                     self._define_symbol(label, pc, line_no, pass_no)
                 continue
