@@ -392,10 +392,8 @@ static void tokenize_expr(const char *text, EParser *p) {
             size_t n = j - i; if (n >= MAX_IDENT) n = MAX_IDENT - 1;
             memcpy(t.text, s + i, n); t.text[n] = '\0';
             t.kind = TK_IDENT; i = j;
-        } else if (c == '*') {
-            t.kind = TK_STAR; t.text[0] = '*'; t.text[1] = '\0'; i++;
         } else if (c == '(' || c == ')' || c == '+' || c == '-' || c == '/' ||
-                   c == '<' || c == '>') {
+                   c == '<' || c == '>' || c == '*') {
             t.kind = TK_OP; t.text[0] = c; t.text[1] = '\0'; i++;
         } else {
             asm_error(p->line_no, text, "Bad character '%c' in expression '%s'", c, text);
@@ -427,7 +425,6 @@ static long parse_atom(EParser *p) {
         case TK_BIN: return strtol(t->text + 1, NULL, 2);
         case TK_DEC: return strtol(t->text, NULL, 10);
         case TK_CHAR: return (long)(unsigned char)t->text[0];
-        case TK_STAR: return p->pc;
         case TK_IDENT: {
             Symbol *s = find_symbol(t->text);
             if (s) return s->value;
@@ -435,6 +432,13 @@ static long parse_atom(EParser *p) {
             return 0;
         }
         case TK_OP:
+            if (t->text[0] == '*') {
+                /* A '*' reached here (needing a single atom) can only mean
+                 * the current PC -- an infix multiply would already have
+                 * been consumed by parse_term's loop before parse_atom
+                 * was called. */
+                return p->pc;
+            }
             if (t->text[0] == '(') {
                 long v = parse_expr(p);
                 Token *close = ep_next(p);

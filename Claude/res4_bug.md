@@ -1,3 +1,11 @@
+res4_bug.md
+
+# Prompt
+
+That's better. Now it prints the correct message, however it doesn't cycle the border colors as the code says. Could it be the wrong memory address used for border color?
+
+# Result
+
 `$D020` is exactly right — that's the correct VIC-II border color register on every C64 memory map, and the listing confirms the assembler encoded it correctly (`STA $D020` / `INC $D020`, absolute mode, little-endian). So the address isn't the problem.
 
 The real issue is **timing**: the delay loop only spins Y through 256 values —

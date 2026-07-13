@@ -1,3 +1,12 @@
+res3_bug.md
+
+# Prompt
+
+
+The prg doesn't work. I used Vice and the C64SC option. It produces some graphical characters and then it doesn't do anything else. Is there a particular setting I have to do in the Vice emulator?
+
+# Result
+
 Good catch — that's not a VICE setting issue, it's a real bug in the assembler's text-encoding logic that I should have caught. Let me explain what's happening and fix it.
 
 **The bug:** My `ascii_to_petscii()` function has the upper/lowercase mapping backwards. On the C64's default character set, PETSCII codes `$41`–`$5A` display as uppercase letters (same as plain ASCII), but codes `$C1`–`$DA` display as line-drawing/card-suit graphics symbols — not letters. My code mapped already-uppercase input (`"HELLO, C64!"`) into that `$C1`–`$DA` graphics range, so instead of "HELLO, C64!" you got a row of box-drawing characters. That matches exactly what you saw. After that the program falls into its intentional infinite border-color-cycling loop, which is quiet/subtle — that part's not actually broken, just easy to mistake for "it stopped."

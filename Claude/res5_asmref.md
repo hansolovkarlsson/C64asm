@@ -1,3 +1,11 @@
+res5_asmref.md
+
+# Prompt
+
+I'd like a reference manual for the assembler
+
+# Response
+
 This should be a proper reference document rather than something you read once in chat — I'll build it as a standalone Markdown file you can keep alongside the source.Let me verify a few claims in the manual against the actual code before shipping it, to make sure nothing drifted:Confirmed accurate — `01 02` (numeric), `41 42` (PETSCII "AB"), `00`. Now let's package it up:Covers:
 
 1. Command-line usage

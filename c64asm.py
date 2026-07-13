@@ -269,7 +269,6 @@ class ExprParser:
           | (?P<char>'(\\.|[^'])')
           | (?P<dec>[0-9]+)
           | (?P<ident>[A-Za-z_.][A-Za-z0-9_]*)
-          | (?P<star>\*)
           | (?P<op>[()+\-*/<>])
         )
     """, re.VERBOSE)
@@ -370,14 +369,17 @@ class ExprParser:
             if inner.startswith('\\'):
                 inner = inner[1:]
             return ord(inner)
-        if kind == 'star':
-            return self.pc
         if kind == 'ident':
             name = tok
             if name in self.symbols:
                 return self.symbols[name]
             self.undefined = True
             return 0  # placeholder during pass 1 / forward reference
+        if kind == 'op' and tok == '*':
+            # A '*' reached here (needing a single atom) can only mean the
+            # current PC -- an infix multiply would already have been
+            # consumed by parse_term's loop before parse_atom was called.
+            return self.pc
         if kind == 'op' and tok == '(':
             val = self.parse_expr()
             k2, t2 = self.next()
