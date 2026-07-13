@@ -1,8 +1,10 @@
 res1_py.md
 
-# Make a complete Commodore 64 assembler
+# Prompt
 
-## Output
+Make a complete Commodore 64 assembler
+
+# Response
 
 I'll build this as a full two-pass 6502/6510 assembler that takes standard assembly source and produces a C64-loadable `.prg` file. Let me set it up and test it against a real program.Let me fix a bug in the BASIC stub handling — the address-length feedback loop needs a proper fixed-point calculation rather than the tangled logic I first wrote.Now let's replace the old `_basic_stub` method with a correct fixed-point version:Now let's write a test program to exercise the assembler — a classic "print HELLO and change border color" C64 program:The stub math checks out (SYS 2061 → code starts at $080D, matching the listing). Let me test a few more edge cases — zero-page vs absolute disambiguation, indirect addressing, `.word`, and low/high byte operators:
 
