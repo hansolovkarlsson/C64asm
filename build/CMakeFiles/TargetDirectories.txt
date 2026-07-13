@@ -1,0 +1,3 @@
+/Users/hans/Documents/Projects/C64/asm/build/CMakeFiles/c64asm.dir
+/Users/hans/Documents/Projects/C64/asm/build/CMakeFiles/edit_cache.dir
+/Users/hans/Documents/Projects/C64/asm/build/CMakeFiles/rebuild_cache.dir

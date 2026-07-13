@@ -1,0 +1,8 @@
+/Users/hans/Documents/Projects/C64/asm
+Error - failed to retrieve executable path, falling back to getcwd() + argv[0]
+DriveROM: Error - 2000 ROM image not found. Hardware-level 2000 emulation is not available.
+DriveROM: Error - 4000 ROM image not found. Hardware-level 4000 emulation is not available.
+DriveROM: Error - CMDHD ROM image not found. Hardware-level CMDHD emulation is not available.
+Filesystem Image Probe: Error - Import GCR: Unknown GCR image version 48.
+Tape: Error - Cannot open file `hello.prg'
+Error - could not read CRT header.
