@@ -27,47 +27,115 @@
 
 CHROUT = $ffd2
 JOY2   = $dc00
+VOICE1_FREQ_LO = $d400
+VOICE1_FREQ_HI = $d401
+VOICE1_CTRL    = $d404
+VOICE1_AD      = $d405
+VOICE1_SR      = $d406
+SID_VOLUME     = $d418
 SCREEN = $0400
 COLOR  = $d800
+BITMAP = $2000   ; 8K-aligned bitmap data; same proven-safe address bounce.asm uses
 
-SHIP_DATA = $0d00   ; 64-byte aligned; clear of code, and NOT in the VIC's
+SHIP_DATA = $0e00   ; 64-byte aligned; clear of code, and NOT in the VIC's
                       ; $1000-$1FFF character-ROM shadow range (see
                       ; c64-memory-reference.md sec4 -- this exact mistake
                       ; broke a sprite in an earlier demo)
 SPRITE_PTR0 = SCREEN + $3f8
 
-ptr           = $fb   ; temporary 16-bit pointer, used only during setup
-ship_x        = $02
-ship_y        = $03
-vx_dir        = $04   ; 0 = moving left,  1 = moving right
-vx_mag        = $05   ; 0-3
-vy_dir        = $06   ; 0 = moving up,    1 = moving down
-vy_mag        = $07   ; 0-3
-fuel          = $08   ; 0-80
-physics_delay = $09
-fuel_delay    = $0a
-thrust_flag   = $0b
-left_flag     = $0c
-right_flag    = $0d
-joy_state     = $0e
+ptr             = $fb   ; temporary 16-bit pointer, used only during setup
+ship_x          = $02
+ship_y          = $03
+vx_dir          = $04   ; 0 = moving left,  1 = moving right
+vx_mag          = $05   ; 0-3
+vy_dir          = $06   ; 0 = moving up,    1 = moving down
+vy_mag          = $07   ; 0-3
+fuel            = $08   ; 0-80
+physics_delay   = $09
+fuel_delay      = $0a
+thrust_flag     = $0b
+left_flag       = $0c
+right_flag      = $0d
+joy_state       = $0e
+ground_row_here = $0f   ; scratch: terrain row under the ship, recomputed
+                          ; each frame by check_landing; also reused (as
+                          ; rows_remaining) by draw_terrain during setup,
+                          ; since that always finishes long before
+                          ; check_landing ever runs
+rows_remaining  = $0f
+ground_y_here   = $10
+last_fuel_cols  = $11   ; scratch: fuel-bar column count as of the last
+                          ; frame it changed, so draw_fuel_bar can detect
+                          ; when (and only when) it needs to do anything
+fuel_ptr        = $12   ; 2 bytes ($12/$13): bitmap address of the
+                          ; current rightmost lit fuel-bar column
+engine_playing  = $14   ; 0/1: is the thruster sound currently gated on?
 
-MAX_V         = 3
-PHYSICS_DELAY = 4      ; frames between physics ticks
+MAX_V         = 2      ; lowered from 3 -- a lower top speed means SAFE_V
+                          ; (below) covers nearly the whole speed range,
+                          ; instead of leaving only a 1-unit margin
+PHYSICS_DELAY = 6      ; frames between physics ticks (was 4) -- slower
+                          ; gravity and slower-feeling thrust response,
+                          ; more time to react
+FUEL_START    = 100    ; was 80; a bit more margin now that a full flight
+                          ; takes longer in frames
 FUEL_DELAY    = 3      ; frames between fuel decrements while thrusting
-FUEL_START    = 80
 
 YMIN     = 50
 XMIN     = 24
 XMAX     = 250
-GROUND_Y = 210          ; sprite Y at which the ship has touched down
 
-GROUND_ROW    = 20      ; character row the ground line is drawn on
-PAD_COL_START = 15
-PAD_COL_END   = 25       ; inclusive
+PAD_ROW = 20            ; the terrain row value that marks the flat landing pad
+SAFE_V  = 2              ; landing is safe if both vx_mag and vy_mag <= this
+                          ; (loosened from 1 -- see the header comment)
 
-PAD_XMIN = 140           ; sprite-X range over the pad, for the landing check
-PAD_XMAX = 224
-SAFE_V   = 1              ; landing is safe if both vx_mag and vy_mag <= this
+; Hand-authored 40-column terrain height profile (character row 0-24,
+; higher number = lower on screen), validated in a Python simulation
+; before use: hills on both sides, an 11-column flat pad (columns 15-25)
+; at PAD_ROW so the landing-success check (see check_landing) can just
+; compare against a single row value rather than tracking a separate,
+; independently-maintained pixel range that could drift out of sync with
+; the drawn terrain.
+H0 = 16
+H1 = 15
+H2 = 17
+H3 = 19
+H4 = 18
+H5 = 16
+H6 = 15
+H7 = 17
+H8 = 19
+H9 = 21
+H10 = 20
+H11 = 18
+H12 = 16
+H13 = 15
+H14 = 17
+H15 = 20
+H16 = 20
+H17 = 20
+H18 = 20
+H19 = 20
+H20 = 20
+H21 = 20
+H22 = 20
+H23 = 20
+H24 = 20
+H25 = 20
+H26 = 18
+H27 = 16
+H28 = 15
+H29 = 17
+H30 = 19
+H31 = 21
+H32 = 22
+H33 = 20
+H34 = 18
+H35 = 17
+H36 = 19
+H37 = 21
+H38 = 20
+H39 = 18
 
         .basic
 
@@ -81,13 +149,22 @@ start:
         lda #%00000000
         sta $dc03
 
-        ; --- clear the screen to spaces, black background ---
+        lda #$0f
+        sta SID_VOLUME            ; full volume, no filter
+        lda #$00
+        sta VOICE1_CTRL            ; make sure voice 1 starts silent
+        sta engine_playing
+
+        ; --- fill the screen memory nibble data (fg=high nibble, bg=low
+        ; nibble, per 8x8 cell) with grey terrain on black sky. This is
+        ; standard (non-multicolor) bitmap mode, where SCREEN holds this
+        ; per-cell color data and COLOR RAM is not used at all. ---
         lda #<SCREEN
         sta ptr
         lda #>SCREEN
         sta ptr+1
         ldx #4
-        lda #$20
+        lda #$c0                ; grey terrain (high nibble) on black sky (low nibble)
 clear_screen:
         ldy #$00
 clear_screen_byte:
@@ -98,50 +175,78 @@ clear_screen_byte:
         dex
         bne clear_screen
 
-        lda #<COLOR
-        sta ptr
-        lda #>COLOR
-        sta ptr+1
-        ldx #4
-        lda #1                 ; white (matches the ground/pad characters)
-clear_color:
-        ldy #$00
-clear_color_byte:
-        sta (ptr),y
-        iny
-        bne clear_color_byte
-        inc ptr+1
-        dex
-        bne clear_color
-
         lda #0
         sta $d020
         sta $d021
 
-        ; --- draw the ground line, with a differently-colored landing pad ---
-        lda #<(SCREEN + GROUND_ROW*40)
+        ; --- switch on standard bitmap mode ---
+        lda $d011
+        ora #%00100000           ; BMM
+        sta $d011
+        lda $d018
+        and #%11110000           ; keep the screen-pointer bits (still $0400)
+        ora #%00001000           ; bitmap pointer bit 3 set -> bitmap at $2000
+        sta $d018
+
+        ; --- clear the 8K bitmap (32 pages of 256 bytes) to all-sky ---
+        lda #<BITMAP
         sta ptr
-        lda #>(SCREEN + GROUND_ROW*40)
+        lda #>BITMAP
+        sta ptr+1
+        ldx #32
+        lda #$00
+clear_bitmap:
+        ldy #$00
+clear_bitmap_byte:
+        sta (ptr),y
+        iny
+        bne clear_bitmap_byte
+        inc ptr+1
+        dex
+        bne clear_bitmap
+
+        ; --- color the landing pad columns (15-25) green, all 25 rows;
+        ; safe to do for every row even above the terrain line, since the
+        ; sky rows there show black background regardless of this
+        ; foreground nibble (no bits are set for the VIC to draw with it) ---
+        lda #<(SCREEN + 15)
+        sta ptr
+        lda #>(SCREEN + 15)
+        sta ptr+1
+        ldx #25
+draw_pad_color_row:
+        ldy #$00
+        lda #$50                 ; green terrain (high nibble) on black sky
+draw_pad_color_byte:
+        sta (ptr),y
+        iny
+        cpy #11
+        bne draw_pad_color_byte
+        clc
+        lda ptr
+        adc #40
+        sta ptr
+        lda ptr+1
+        adc #0
+        sta ptr+1
+        dex
+        bne draw_pad_color_row
+
+        ; --- color row 0 (the fuel bar) yellow on black, once ---
+        lda #<SCREEN
+        sta ptr
+        lda #>SCREEN
         sta ptr+1
         ldy #$00
-        lda #$2a                ; screen code '*'
-draw_ground:
+        lda #$70                 ; yellow fuel bar (high nibble) on black (low nibble)
+color_fuel_row:
         sta (ptr),y
         iny
         cpy #40
-        bne draw_ground
+        bne color_fuel_row
 
-        lda #<(COLOR + GROUND_ROW*40 + PAD_COL_START)
-        sta ptr
-        lda #>(COLOR + GROUND_ROW*40 + PAD_COL_START)
-        sta ptr+1
-        ldy #$00
-        lda #5                   ; green -- the landing pad
-draw_pad_color:
-        sta (ptr),y
-        iny
-        cpy #(PAD_COL_END - PAD_COL_START + 1)
-        bne draw_pad_color
+        jsr draw_terrain
+        jsr init_fuel_bar
 
         ; --- set up the ship sprite ---
         lda #(SHIP_DATA / 64)
@@ -175,6 +280,7 @@ main_loop:
         jsr wait_frame
         jsr read_input
         jsr consume_fuel
+        jsr update_engine_sound
         jsr do_physics
         jsr update_sprite
         jsr draw_fuel_bar
@@ -270,6 +376,47 @@ fuel_not_empty:
         sta fuel_delay
         dec fuel
 consume_fuel_done:
+        rts
+
+; Keeps the thruster engine sound gated on for as long as any thruster
+; is active this frame, and gated off otherwise -- checked once per
+; frame, but only actually *written* to the SID on the frame the state
+; changes, so holding a thruster down doesn't repeatedly retrigger the
+; envelope's attack phase (which would make it stutter instead of
+; sounding like one continuous engine note). Uses a sustain-heavy
+; envelope, unlike the fire-and-forget effects elsewhere in this
+; project, since this needs to keep sounding for as long as the gate is
+; held rather than naturally fade out on its own.
+update_engine_sound:
+        lda thrust_flag
+        ora left_flag
+        ora right_flag
+        beq engine_should_stop
+
+        lda engine_playing
+        bne engine_sound_done      ; already playing -- don't retrigger
+        lda #$00
+        sta VOICE1_FREQ_LO
+        lda #$08
+        sta VOICE1_FREQ_HI
+        lda #$00
+        sta VOICE1_AD               ; attack 0, decay 0
+        lda #$f8
+        sta VOICE1_SR                ; sustain 15 (holds while gated), release 8
+        lda #%10000001                 ; noise waveform, gate on
+        sta VOICE1_CTRL
+        lda #1
+        sta engine_playing
+        rts
+
+engine_should_stop:
+        lda engine_playing
+        beq engine_sound_done
+        lda #%10000000            ; noise waveform, gate off
+        sta VOICE1_CTRL
+        lda #0
+        sta engine_playing
+engine_sound_done:
         rts
 
 ; One tick of acceleration toward accel_want_dir (0 or 1), applied to a
@@ -413,55 +560,195 @@ update_sprite:
         sta $d001
         rts
 
-; Draws the fuel gauge as a bar of '*' characters on the top row, one
-; character per 2 fuel units (a plain LSR, since fuel's 0-80 range and
-; the screen's 40-column width happen to divide evenly -- much simpler
-; than a general decimal conversion routine, which the 6502 has no
-; hardware support for anyway).
-draw_fuel_bar:
-        lda #<SCREEN
+; Fills each of the 40 columns' bitmap cells solid from its terrain row
+; down to the bottom of the screen (row 24), using the precomputed
+; terrain_addr table so no runtime multiplication is needed.
+draw_terrain:
+        ldx #$00
+draw_terrain_loop:
+        txa
+        asl a
+        tay
+        lda terrain_addr,y
         sta ptr
-        lda #>SCREEN
+        lda terrain_addr+1,y
         sta ptr+1
+
+        lda #25
+        sec
+        sbc terrain_row,x
+        sta rows_remaining
+
+        lda #$ff
+draw_terrain_row:
         ldy #$00
-        lda #$20
-clear_fuel_row:
+draw_terrain_byte:
         sta (ptr),y
         iny
-        cpy #40
-        bne clear_fuel_row
+        cpy #8
+        bne draw_terrain_byte
+        pha                       ; save $ff -- about to clobber A for the 16-bit add
+        clc
+        lda ptr
+        adc #<320                 ; advance one full row down (40 cols * 8 bytes)
+        sta ptr
+        lda ptr+1
+        adc #>320
+        sta ptr+1
+        pla
+        dec rows_remaining
+        bne draw_terrain_row
 
+        inx
+        cpx #40
+        bne draw_terrain_loop
+        rts
+
+; Fills the initial fuel bar (called once at start/restart) and sets up
+; fuel_ptr/last_fuel_cols for draw_fuel_bar's per-frame delta updates.
+; The column count is clamped to 40 (the screen width): FUEL_START can be
+; larger than 2*40, and without this clamp a full-fuel bar would try to
+; draw past the last column and corrupt row 1 of the terrain bitmap, one
+; column for every 2 fuel units over 80 -- exactly what was happening
+; with FUEL_START=100 and no clamp, and the likely cause of the reported
+; "flickering yellow mess" (real terrain data getting overwritten every
+; single frame near the left edge).
+init_fuel_bar:
+        lda #<BITMAP
+        sta ptr
+        lda #>BITMAP
+        sta ptr+1
+
+        lda #(FUEL_START/2)
+        cmp #41
+        bcc init_fuel_cols_ok
+        lda #40
+init_fuel_cols_ok:
+        sta last_fuel_cols
+        tax
+init_fuel_col:
+        ldy #$00
+        lda #$ff
+init_fuel_byte:
+        sta (ptr),y
+        iny
+        cpy #8
+        bne init_fuel_byte
+        clc
+        lda ptr
+        adc #8
+        sta ptr
+        lda ptr+1
+        adc #0
+        sta ptr+1
+        dex
+        bne init_fuel_col
+
+        ; ptr now points just past the last lit column; step back 8 for
+        ; that column's own address, which becomes fuel_ptr
+        sec
+        lda ptr
+        sbc #8
+        sta fuel_ptr
+        lda ptr+1
+        sbc #0
+        sta fuel_ptr+1
+        rts
+
+; Per-frame: if the fuel-bar column count (clamped the same way as
+; init_fuel_bar) has decreased since the last change, erases exactly the
+; one column that dropped off and steps fuel_ptr one column to the left.
+; Not a full redraw -- this does nothing at all on the great majority of
+; frames where fuel hasn't changed, which avoids both wasted CPU time and
+; the visible flicker that came from clearing and redrawing the whole
+; 320-byte row every single frame regardless of whether anything had
+; actually changed.
+draw_fuel_bar:
         lda fuel
         lsr a
+        cmp #41
+        bcc fuel_cols_check_ok
+        lda #40
+fuel_cols_check_ok:
+        cmp last_fuel_cols
         beq draw_fuel_done
-        tax
+        sta last_fuel_cols
+
         ldy #$00
-        lda #$2a
-draw_fuel_loop:
-        sta (ptr),y
+        lda #$00
+clear_one_fuel_col:
+        sta (fuel_ptr),y
         iny
-        dex
-        bne draw_fuel_loop
+        cpy #8
+        bne clear_one_fuel_col
+
+        sec
+        lda fuel_ptr
+        sbc #8
+        sta fuel_ptr
+        lda fuel_ptr+1
+        sbc #0
+        sta fuel_ptr+1
 draw_fuel_done:
         rts
 
+; Looks up the terrain height at the ship's current column and compares
+; against it instead of a single flat ground level. "On the pad" now
+; just means the terrain row there equals PAD_ROW -- tying the landing
+; check directly to the same data the terrain was drawn from, rather
+; than maintaining a separate pixel range that could drift out of sync.
 check_landing:
+        lda ship_x
+        sec
+        sbc #XMIN
+        lsr a
+        lsr a
+        lsr a
+        tax
+        lda terrain_row,x
+        sta ground_row_here
+        asl a
+        asl a
+        asl a
+        clc
+        adc #YMIN
+        sta ground_y_here
+
         lda ship_y
-        cmp #GROUND_Y
+        cmp ground_y_here
         bcc check_landing_done
 
-        lda ship_x
-        cmp #PAD_XMIN
-        bcc do_crash
-        lda ship_x
-        cmp #PAD_XMAX+1
-        bcs do_crash
+        ; Touched down -- snap to the exact ground surface and do one
+        ; final sprite update, on both outcomes, so the ship visually
+        ; rests right at the terrain line instead of appearing to
+        ; overlap however many pixels it overshot by on the final move.
+        lda ground_y_here
+        sta ship_y
+        jsr update_sprite
+
+        lda ground_row_here
+        cmp #PAD_ROW
+        bne do_crash
         lda vy_mag
         cmp #SAFE_V+1
         bcs do_crash
         lda vx_mag
         cmp #SAFE_V+1
         bcs do_crash
+
+        ; Switch back to standard text mode before printing anything --
+        ; bitmap mode has no mechanism to render PETSCII text at all.
+        ; CHROUT's clear-screen and character output both assume SCREEN
+        ; memory holds character codes; in bitmap mode it holds color
+        ; nibbles instead, so "printing" a message there was really just
+        ; overwriting each cell's color with the character code's numeric
+        ; value, while the old terrain/ship pixels stayed in the bitmap
+        ; underneath -- which is exactly the "mess of colored blobs".
+        lda $d011
+        and #%11011111           ; clear BMM
+        sta $d011
+        lda #$14                  ; screen at $0400, characters at $1000
+        sta $d018                  ; (the standard default char ROM shadow)
 
         lda #$93                 ; clear screen
         jsr CHROUT
@@ -471,9 +758,24 @@ check_landing:
         lda #<msg_success2
         ldy #>msg_success2
         jsr print_msg
+
+        lda #%10000000            ; make sure the engine sound is off --
+        sta VOICE1_CTRL            ; thrust might have been held right up
+        lda #0                      ; to touchdown
+        sta engine_playing
+        jsr play_success_melody
+
         jmp show_try_again
 
 do_crash:
+        jsr show_explosion
+
+        lda $d011
+        and #%11011111
+        sta $d011
+        lda #$14
+        sta $d018
+
         lda #$93
         jsr CHROUT
         lda #<msg_crash1
@@ -490,6 +792,91 @@ show_try_again:
         jmp wait_for_restart
 
 check_landing_done:
+        rts
+
+; A quick "boom": the sprite doubles in size and flashes through a few
+; fire colors for about a quarter of a second (each color held 2 frames,
+; synced via wait_frame same as everywhere else), then disappears
+; entirely. Runs while still in bitmap mode, at the ship's actual crash
+; position (already snapped to the ground by check_landing above), so it
+; visibly happens right where the ship hit.
+show_explosion:
+        ; the engine sound might still be gated on if thrust was held
+        ; right up to the moment of impact -- silence it before the
+        ; crash sound so they don't overlap
+        lda #%10000000
+        sta VOICE1_CTRL
+        lda #0
+        sta engine_playing
+
+        lda #$00
+        sta VOICE1_CTRL           ; force gate off first (fresh retrigger)
+        lda #$00
+        sta VOICE1_FREQ_LO
+        lda #$04
+        sta VOICE1_FREQ_HI        ; low pitch for a deep boom
+        lda #$0f
+        sta VOICE1_AD              ; attack 0, decay 15 (long, rumbling decay)
+        lda #$00
+        sta VOICE1_SR               ; sustain 0, release 0
+        lda #%10000001                ; noise waveform, gate on
+        sta VOICE1_CTRL
+
+        lda #%00000001
+        sta $d01d                ; sprite 0 X-expand
+        sta $d017                 ; sprite 0 Y-expand
+        ldx #$00
+explosion_loop:
+        lda explosion_colors,x
+        sta $d027
+        jsr wait_frame
+        jsr wait_frame
+        inx
+        cpx #8
+        bne explosion_loop
+        lda #0
+        sta $d015                 ; hide the ship
+        sta $d01d                  ; tidy up the expand bits (harmless either way now)
+        sta $d017
+        rts
+
+; A short 5-note ascending arpeggio played once on a successful landing.
+; Each note is gated on, held briefly, then gated off with a short gap
+; before the next -- unlike the engine sound, these are meant to be
+; individually audible notes, not one continuous tone, so each one gets
+; its own fresh gate 0->1 transition (needed to retrigger the envelope's
+; attack) rather than just changing frequency while gated on.
+play_success_melody:
+        ldx #$00
+melody_loop:
+        lda #$00
+        sta VOICE1_CTRL             ; gate off first (fresh retrigger)
+        lda melody_freq_lo,x
+        sta VOICE1_FREQ_LO
+        lda melody_freq_hi,x
+        sta VOICE1_FREQ_HI
+        lda #$00
+        sta VOICE1_AD                 ; attack 0, decay 0 -- snappy onset
+        lda #$a0
+        sta VOICE1_SR                  ; sustain 10 (holds while gated), release 0
+        lda #%00010001                  ; triangle waveform, gate on
+        sta VOICE1_CTRL
+
+        jsr wait_frame
+        jsr wait_frame
+        jsr wait_frame
+        jsr wait_frame
+        jsr wait_frame
+        jsr wait_frame
+
+        lda #%00010000              ; triangle waveform, gate off
+        sta VOICE1_CTRL
+        jsr wait_frame
+        jsr wait_frame
+
+        inx
+        cpx #5
+        bne melody_loop
         rts
 
 ; Polls the keyboard for Y (matrix column 3, bit 1) and, once pressed,
@@ -520,7 +907,31 @@ print_msg_loop:
 print_msg_done:
         rts
 
-        * = $0c00
+; terrain_row[col] is the character row (0-24) the ground starts at for
+; that column. terrain_addr[col] is the corresponding starting bitmap
+; address for that column's fill (row*320 + col*8 bytes into the 8K
+; bitmap) -- computed here at assemble time from the same H0-H39
+; constants terrain_row uses, rather than at runtime, since the 6502 has
+; no multiply instruction and this only needs computing once anyway.
+terrain_row:
+        .byte H0,H1,H2,H3,H4,H5,H6,H7,H8,H9
+        .byte H10,H11,H12,H13,H14,H15,H16,H17,H18,H19
+        .byte H20,H21,H22,H23,H24,H25,H26,H27,H28,H29
+        .byte H30,H31,H32,H33,H34,H35,H36,H37,H38,H39
+
+terrain_addr:
+        .word BITMAP+H0*320+0*8,   BITMAP+H1*320+1*8,   BITMAP+H2*320+2*8,   BITMAP+H3*320+3*8
+        .word BITMAP+H4*320+4*8,   BITMAP+H5*320+5*8,   BITMAP+H6*320+6*8,   BITMAP+H7*320+7*8
+        .word BITMAP+H8*320+8*8,   BITMAP+H9*320+9*8,   BITMAP+H10*320+10*8, BITMAP+H11*320+11*8
+        .word BITMAP+H12*320+12*8, BITMAP+H13*320+13*8, BITMAP+H14*320+14*8, BITMAP+H15*320+15*8
+        .word BITMAP+H16*320+16*8, BITMAP+H17*320+17*8, BITMAP+H18*320+18*8, BITMAP+H19*320+19*8
+        .word BITMAP+H20*320+20*8, BITMAP+H21*320+21*8, BITMAP+H22*320+22*8, BITMAP+H23*320+23*8
+        .word BITMAP+H24*320+24*8, BITMAP+H25*320+25*8, BITMAP+H26*320+26*8, BITMAP+H27*320+27*8
+        .word BITMAP+H28*320+28*8, BITMAP+H29*320+29*8, BITMAP+H30*320+30*8, BITMAP+H31*320+31*8
+        .word BITMAP+H32*320+32*8, BITMAP+H33*320+33*8, BITMAP+H34*320+34*8, BITMAP+H35*320+35*8
+        .word BITMAP+H36*320+36*8, BITMAP+H37*320+37*8, BITMAP+H38*320+38*8, BITMAP+H39*320+39*8
+
+        * = $0cf0
 accel_want_dir: .byte 0
 
 msg_success1:
@@ -538,6 +949,16 @@ msg_crash2:
 msg_try_again:
         .text "PRESS Y TO TRY AGAIN."
         .byte $0d,0
+
+; yellow, orange, red, white, repeated twice -- a quick fire-colored flash
+explosion_colors:
+        .byte 7,8,2,1,7,8,2,1
+
+; an ascending 5-note arpeggio for the success melody
+melody_freq_lo:
+        .byte $00,$00,$00,$00,$00
+melody_freq_hi:
+        .byte $0c,$10,$14,$18,$20
 
         * = SHIP_DATA
 ship_data:
