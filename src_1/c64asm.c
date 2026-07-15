@@ -377,7 +377,12 @@ static void tokenize_expr(const char *text, EParser *p) {
             t.kind = TK_DEC; i = j;
         } else if (c == '\'') {
             size_t j = i + 1;
-            char inner;
+            char inner = '\0';   /* asm_error() below never actually returns
+                                     (it always exit()s), but the compiler
+                                     has no way to know that -- initializing
+                                     this avoids a spurious "used
+                                     uninitialized" warning on the
+                                     technically-unreachable fallthrough path */
             if (j < len && s[j] == '\\' && j + 1 < len) { inner = s[j+1]; j += 2; }
             else if (j < len) { inner = s[j]; j += 1; }
             else asm_error(p->line_no, text, "Bad character literal in expression '%s'", text);

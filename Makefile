@@ -1,39 +1,29 @@
-CC        := cc
-CSTD      := -std=c99
-WARN      := -Wall -Wextra
-RELFLAGS  := $(CSTD) $(WARN) -O2
-DBGFLAGS  := $(CSTD) $(WARN) -g -O0
+# Makefile for c64asm, built from its per-module source files.
+#
+#   make          builds ./c64asm
+#   make clean    removes build artifacts
+#
+# Works with gcc or clang; on macOS the Xcode command-line tools provide
+# a `cc` that behaves the same way, so this Makefile needs no changes
+# there.
 
-SRC_DIR   := src
-BIN_DIR   := bin
-EX_DIR    := examples
+CC      ?= cc
+CFLAGS  ?= -std=c99 -O2 -Wall -Wextra
+SRC_DIR := src
+BIN_DIR := bin
+SOURCES := $(wildcard $(SRC_DIR)/*.c)
+OBJECTS := $(SOURCES:.c=.o)
+TARGET  := $(BIN_DIR)/c64asm
 
-SRC       := $(SRC_DIR)/c64asm.c
-TARGET    := $(BIN_DIR)/c64asm
+.PHONY: all clean
 
-.PHONY: all debug clean run example
-
-# Default build: optimized release binary in bin/
-all: CFLAGS := $(RELFLAGS)
 all: $(TARGET)
 
-# Debug build: symbols, no optimization (for lldb / VS Code debugger)
-debug: CFLAGS := $(DBGFLAGS)
-debug: $(TARGET)
+$(TARGET): $(OBJECTS)
+	$(CC) $(CFLAGS) -o $@ $(OBJECTS)
 
-$(TARGET): $(SRC) | $(BIN_DIR)
-	$(CC) $(CFLAGS) -o $@ $(SRC)
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BIN_DIR):
-	mkdir -p $(BIN_DIR)
-
-# Assemble the sample program in examples/ as a smoke test
-example: all
-	./$(TARGET) $(EX_DIR)/hello.asm -o $(BIN_DIR)/hello.prg --listing $(BIN_DIR)/hello.lst
-
-old_clean:
-	#rm -rf $(BIN_DIR)
-	#mkdir -p $(BIN_DIR)
-	#touch $(BIN_DIR)/.gitkeep
 clean:
-	rm $(TARGET)
+	rm -f $(SRC_DIR)/*.o $(TARGET)

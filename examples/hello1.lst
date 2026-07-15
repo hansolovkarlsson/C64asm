@@ -1,0 +1,16 @@
+; c64asm listing  (origin $0801, 41 bytes)
+
+080D  A2 00     start:  ldx #0
+080F  BD 1C 08  loop:   lda text,x
+0812  F0 07             beq done
+0814  20 D2 FF          jsr CHROUT
+0817  E8                inx
+0818  4C 0F 08          jmp loop
+081B  60        done:   rts
+
+Symbol table:
+  CHROUT               = $FFD2
+  done                 = $081B
+  loop                 = $080F
+  start                = $080D
+  text                 = $081C
