@@ -1,0 +1,120 @@
+; c64asm listing  (origin $0801, 319 bytes)
+
+080D  AD 11 D0          lda $d011
+0810  09 20             ora #%00100000        ; BMM
+0812  8D 11 D0          sta $d011
+0815  AD 18 D0          lda $d018
+0818  29 F0             and #%11110000        ; keep the screen-pointer bits (still $0400)
+081A  09 08             ora #%00001000        ; bitmap pointer bit 3 set -> bitmap at $2000
+081C  8D 18 D0          sta $d018
+081F  A9 00             lda #<BITMAP
+0821  85 FB             sta ptr
+0823  A9 20             lda #>BITMAP
+0825  85 FC             sta ptr+1
+0827  A2 20             ldx #32
+0829  A9 00             lda #$00
+082B  A0 00             ldy #$00
+082D  91 FB             sta (ptr),y
+082F  C8                iny
+0830  D0 FB             bne clear_bitmap_byte
+0832  E6 FC             inc ptr+1
+0834  CA                dex
+0835  D0 F4             bne clear_bitmap
+0837  A9 00             lda #<SCREEN
+0839  85 FB             sta ptr
+083B  A9 04             lda #>SCREEN
+083D  85 FC             sta ptr+1
+083F  A2 04             ldx #4
+0841  A9 16             lda #%00010110       ; fg = white(1), bg = blue(6)
+0843  A0 00             ldy #$00
+0845  91 FB             sta (ptr),y
+0847  C8                iny
+0848  D0 FB             bne fill_colors_byte
+084A  E6 FC             inc ptr+1
+084C  CA                dex
+084D  D0 F4             bne fill_colors
+084F  A9 06             lda #6               ; border matches the bitmap's background color
+0851  8D 20 D0          sta $d020
+0854  A9 24             lda #(SPRITE_DATA / 64)
+0856  8D F8 07          sta SPRITE_PTR0
+0859  A9 01             lda #1               ; sprite color = white
+085B  8D 27 D0          sta $d027
+085E  A9 01             lda #%00000001
+0860  8D 15 D0          sta $d015            ; enable sprite 0 (only)
+0863  A9 18             lda #XMIN
+0865  85 02             sta xpos
+0867  A9 32             lda #YMIN
+0869  85 03             sta ypos
+086B  A9 01             lda #1
+086D  85 04             sta xdir             ; start out moving right...
+086F  85 05             sta ydir             ; ...and down
+0871  20 7A 08          jsr wait_frame
+0874  20 82 08          jsr move_sprite
+0877  4C 71 08          jmp main_loop
+087A  AD 12 D0          lda $d012
+087D  C9 FB             cmp #$fb
+087F  D0 F9             bne wait_frame
+0881  60                rts
+0882  A5 04             lda xdir
+0884  F0 0F             beq move_left
+0886  E6 02             inc xpos
+0888  A5 02             lda xpos
+088A  C9 FA             cmp #XMAX
+088C  D0 13             bne x_done
+088E  A9 00             lda #0
+0890  85 04             sta xdir             ; hit the right edge -- reverse
+0892  4C A1 08          jmp x_done
+0895  C6 02             dec xpos
+0897  A5 02             lda xpos
+0899  C9 18             cmp #XMIN
+089B  D0 04             bne x_done
+089D  A9 01             lda #1
+089F  85 04             sta xdir             ; hit the left edge -- reverse
+08A1  A5 05             lda ydir
+08A3  F0 0F             beq move_up
+08A5  E6 03             inc ypos
+08A7  A5 03             lda ypos
+08A9  C9 DC             cmp #YMAX
+08AB  D0 13             bne y_done
+08AD  A9 00             lda #0
+08AF  85 05             sta ydir             ; hit the bottom edge -- reverse
+08B1  4C C0 08          jmp y_done
+08B4  C6 03             dec ypos
+08B6  A5 03             lda ypos
+08B8  C9 32             cmp #YMIN
+08BA  D0 04             bne y_done
+08BC  A9 01             lda #1
+08BE  85 05             sta ydir             ; hit the top edge -- reverse
+08C0  A5 02             lda xpos
+08C2  8D 00 D0          sta $d000
+08C5  A5 03             lda ypos
+08C7  8D 01 D0          sta $d001
+08CA  60                rts
+
+Symbol table:
+  BITMAP               = $2000
+  SCREEN               = $0400
+  SPRITE_DATA          = $0900
+  SPRITE_PTR0          = $07F8
+  XMAX                 = $00FA
+  XMIN                 = $0018
+  YMAX                 = $00DC
+  YMIN                 = $0032
+  clear_bitmap         = $082B
+  clear_bitmap_byte    = $082D
+  fill_colors          = $0843
+  fill_colors_byte     = $0845
+  main_loop            = $0871
+  move_left            = $0895
+  move_sprite          = $0882
+  move_up              = $08B4
+  ptr                  = $00FB
+  sprite_data          = $0900
+  start                = $080D
+  wait_frame           = $087A
+  x_done               = $08A1
+  xdir                 = $0004
+  xpos                 = $0002
+  y_done               = $08C0
+  ydir                 = $0005
+  ypos                 = $0003

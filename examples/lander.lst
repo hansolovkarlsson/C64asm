@@ -1,0 +1,704 @@
+; c64asm listing  (origin $0801, 1599 bytes)
+
+080D  A9 FF             lda #%11111111
+080F  8D 02 DC          sta $dc02
+0812  A9 00             lda #%00000000
+0814  8D 03 DC          sta $dc03
+0817  A9 0F             lda #$0f
+0819  8D 18 D4          sta SID_VOLUME            ; full volume, no filter
+081C  A9 00             lda #$00
+081E  8D 04 D4          sta VOICE1_CTRL            ; make sure voice 1 starts silent
+0821  85 14             sta engine_playing
+0823  A9 00             lda #<SCREEN
+0825  85 FB             sta ptr
+0827  A9 04             lda #>SCREEN
+0829  85 FC             sta ptr+1
+082B  A2 04             ldx #4
+082D  A9 C0             lda #$c0                ; grey terrain (high nibble) on black sky (low nibble)
+082F  A0 00             ldy #$00
+0831  91 FB             sta (ptr),y
+0833  C8                iny
+0834  D0 FB             bne clear_screen_byte
+0836  E6 FC             inc ptr+1
+0838  CA                dex
+0839  D0 F4             bne clear_screen
+083B  A9 00             lda #0
+083D  8D 20 D0          sta $d020
+0840  8D 21 D0          sta $d021
+0843  AD 11 D0          lda $d011
+0846  09 20             ora #%00100000           ; BMM
+0848  8D 11 D0          sta $d011
+084B  AD 18 D0          lda $d018
+084E  29 F0             and #%11110000           ; keep the screen-pointer bits (still $0400)
+0850  09 08             ora #%00001000           ; bitmap pointer bit 3 set -> bitmap at $2000
+0852  8D 18 D0          sta $d018
+0855  A9 00             lda #<BITMAP
+0857  85 FB             sta ptr
+0859  A9 20             lda #>BITMAP
+085B  85 FC             sta ptr+1
+085D  A2 20             ldx #32
+085F  A9 00             lda #$00
+0861  A0 00             ldy #$00
+0863  91 FB             sta (ptr),y
+0865  C8                iny
+0866  D0 FB             bne clear_bitmap_byte
+0868  E6 FC             inc ptr+1
+086A  CA                dex
+086B  D0 F4             bne clear_bitmap
+086D  A9 0F             lda #<(SCREEN + 15)
+086F  85 FB             sta ptr
+0871  A9 04             lda #>(SCREEN + 15)
+0873  85 FC             sta ptr+1
+0875  A2 19             ldx #25
+0877  A0 00             ldy #$00
+0879  A9 50             lda #$50                 ; green terrain (high nibble) on black sky
+087B  91 FB             sta (ptr),y
+087D  C8                iny
+087E  C0 0B             cpy #11
+0880  D0 F9             bne draw_pad_color_byte
+0882  18                clc
+0883  A5 FB             lda ptr
+0885  69 28             adc #40
+0887  85 FB             sta ptr
+0889  A5 FC             lda ptr+1
+088B  69 00             adc #0
+088D  85 FC             sta ptr+1
+088F  CA                dex
+0890  D0 E5             bne draw_pad_color_row
+0892  A9 00             lda #<SCREEN
+0894  85 FB             sta ptr
+0896  A9 04             lda #>SCREEN
+0898  85 FC             sta ptr+1
+089A  A0 00             ldy #$00
+089C  A9 70             lda #$70                 ; yellow fuel bar (high nibble) on black (low nibble)
+089E  91 FB             sta (ptr),y
+08A0  C8                iny
+08A1  C0 28             cpy #40
+08A3  D0 F9             bne color_fuel_row
+08A5  20 8D 0A          jsr draw_terrain
+08A8  20 C8 0A          jsr init_fuel_bar
+08AB  A9 38             lda #(SHIP_DATA / 64)
+08AD  8D F8 07          sta SPRITE_PTR0
+08B0  A9 01             lda #1                    ; white
+08B2  8D 27 D0          sta $d027
+08B5  A9 01             lda #%00000001
+08B7  8D 15 D0          sta $d015
+08BA  A9 80             lda #128
+08BC  85 02             sta ship_x
+08BE  A9 32             lda #YMIN
+08C0  85 03             sta ship_y
+08C2  A9 01             lda #1
+08C4  85 04             sta vx_dir
+08C6  A9 00             lda #0
+08C8  85 05             sta vx_mag
+08CA  A9 01             lda #1
+08CC  85 06             sta vy_dir
+08CE  A9 00             lda #0
+08D0  85 07             sta vy_mag
+08D2  A9 64             lda #FUEL_START
+08D4  85 08             sta fuel
+08D6  A9 06             lda #PHYSICS_DELAY
+08D8  85 09             sta physics_delay
+08DA  A9 03             lda #FUEL_DELAY
+08DC  85 0A             sta fuel_delay
+08DE  20 F9 08          jsr wait_frame
+08E1  20 01 09          jsr read_input
+08E4  20 5B 09          jsr consume_fuel
+08E7  20 7B 09          jsr update_engine_sound
+08EA  20 F5 09          jsr do_physics
+08ED  20 82 0A          jsr update_sprite
+08F0  20 04 0B          jsr draw_fuel_bar
+08F3  20 2C 0B          jsr check_landing
+08F6  4C DE 08          jmp main_loop
+08F9  AD 12 D0          lda $d012
+08FC  C9 FB             cmp #$fb
+08FE  D0 F9             bne wait_frame
+0900  60                rts
+0901  AD 00 DC          lda JOY2
+0904  85 0E             sta joy_state
+0906  A9 00             lda #0
+0908  85 0B             sta thrust_flag
+090A  A5 0E             lda joy_state
+090C  29 01             and #%00000001
+090E  F0 0E             beq set_thrust
+0910  78                sei
+0911  A9 FD             lda #%11111101
+0913  8D 00 DC          sta $dc00
+0916  AD 01 DC          lda $dc01
+0919  58                cli
+091A  29 02             and #%00000010          ; W
+091C  D0 04             bne no_thrust_key
+091E  A9 01             lda #1
+0920  85 0B             sta thrust_flag
+0922  A9 00             lda #0
+0924  85 0C             sta left_flag
+0926  A5 0E             lda joy_state
+0928  29 04             and #%00000100
+092A  F0 0E             beq set_left
+092C  78                sei
+092D  A9 FD             lda #%11111101
+092F  8D 00 DC          sta $dc00
+0932  AD 01 DC          lda $dc01
+0935  58                cli
+0936  29 04             and #%00000100          ; A
+0938  D0 04             bne no_left_key
+093A  A9 01             lda #1
+093C  85 0C             sta left_flag
+093E  A9 00             lda #0
+0940  85 0D             sta right_flag
+0942  A5 0E             lda joy_state
+0944  29 08             and #%00001000
+0946  F0 0E             beq set_right
+0948  78                sei
+0949  A9 FB             lda #%11111011           ; select keyboard column 2 (has D)
+094B  8D 00 DC          sta $dc00
+094E  AD 01 DC          lda $dc01
+0951  58                cli
+0952  29 04             and #%00000100           ; D
+0954  D0 04             bne no_right_key
+0956  A9 01             lda #1
+0958  85 0D             sta right_flag
+095A  60                rts
+095B  A5 08             lda fuel
+095D  D0 09             bne fuel_not_empty
+095F  A9 00             lda #0
+0961  85 0B             sta thrust_flag
+0963  85 0C             sta left_flag
+0965  85 0D             sta right_flag
+0967  60                rts
+0968  A5 0B             lda thrust_flag
+096A  05 0C             ora left_flag
+096C  05 0D             ora right_flag
+096E  F0 0A             beq consume_fuel_done
+0970  C6 0A             dec fuel_delay
+0972  D0 06             bne consume_fuel_done
+0974  A9 03             lda #FUEL_DELAY
+0976  85 0A             sta fuel_delay
+0978  C6 08             dec fuel
+097A  60                rts
+097B  A5 0B             lda thrust_flag
+097D  05 0C             ora left_flag
+097F  05 0D             ora right_flag
+0981  F0 22             beq engine_should_stop
+0983  A5 14             lda engine_playing
+0985  D0 2B             bne engine_sound_done      ; already playing -- don't retrigger
+0987  A9 00             lda #$00
+0989  8D 00 D4          sta VOICE1_FREQ_LO
+098C  A9 08             lda #$08
+098E  8D 01 D4          sta VOICE1_FREQ_HI
+0991  A9 00             lda #$00
+0993  8D 05 D4          sta VOICE1_AD               ; attack 0, decay 0
+0996  A9 F8             lda #$f8
+0998  8D 06 D4          sta VOICE1_SR                ; sustain 15 (holds while gated), release 8
+099B  A9 81             lda #%10000001                 ; noise waveform, gate on
+099D  8D 04 D4          sta VOICE1_CTRL
+09A0  A9 01             lda #1
+09A2  85 14             sta engine_playing
+09A4  60                rts
+09A5  A5 14             lda engine_playing
+09A7  F0 09             beq engine_sound_done
+09A9  A9 80             lda #%10000000            ; noise waveform, gate off
+09AB  8D 04 D4          sta VOICE1_CTRL
+09AE  A9 00             lda #0
+09B0  85 14             sta engine_playing
+09B2  60                rts
+09B3  A6 06             ldx vy_dir
+09B5  EC F0 0C          cpx accel_want_dir
+09B8  F0 11             beq accel_v_same
+09BA  A5 07             lda vy_mag
+09BC  D0 0A             bne accel_v_decrement
+09BE  AD F0 0C          lda accel_want_dir
+09C1  85 06             sta vy_dir
+09C3  A9 01             lda #1
+09C5  85 07             sta vy_mag
+09C7  60                rts
+09C8  C6 07             dec vy_mag
+09CA  60                rts
+09CB  A5 07             lda vy_mag
+09CD  C9 02             cmp #MAX_V
+09CF  F0 02             beq accel_v_done
+09D1  E6 07             inc vy_mag
+09D3  60                rts
+09D4  A6 04             ldx vx_dir
+09D6  EC F0 0C          cpx accel_want_dir
+09D9  F0 11             beq accel_h_same
+09DB  A5 05             lda vx_mag
+09DD  D0 0A             bne accel_h_decrement
+09DF  AD F0 0C          lda accel_want_dir
+09E2  85 04             sta vx_dir
+09E4  A9 01             lda #1
+09E6  85 05             sta vx_mag
+09E8  60                rts
+09E9  C6 05             dec vx_mag
+09EB  60                rts
+09EC  A5 05             lda vx_mag
+09EE  C9 02             cmp #MAX_V
+09F0  F0 02             beq accel_h_done
+09F2  E6 05             inc vx_mag
+09F4  60                rts
+09F5  C6 09             dec physics_delay
+09F7  F0 03             beq physics_tick
+09F9  4C 81 0A          jmp physics_done
+09FC  A9 06             lda #PHYSICS_DELAY
+09FE  85 09             sta physics_delay
+0A00  A5 0B             lda thrust_flag
+0A02  D0 0B             bne v_want_up
+0A04  A9 01             lda #1
+0A06  8D F0 0C          sta accel_want_dir
+0A09  20 B3 09          jsr accel_v
+0A0C  4C 17 0A          jmp v_move
+0A0F  A9 00             lda #0
+0A11  8D F0 0C          sta accel_want_dir
+0A14  20 B3 09          jsr accel_v
+0A17  A5 06             lda vy_dir
+0A19  F0 0A             beq v_moving_up
+0A1B  A5 03             lda ship_y
+0A1D  18                clc
+0A1E  65 07             adc vy_mag
+0A20  85 03             sta ship_y
+0A22  4C 38 0A          jmp h_accel
+0A25  A5 03             lda ship_y
+0A27  38                sec
+0A28  E5 07             sbc vy_mag
+0A2A  85 03             sta ship_y
+0A2C  C9 32             cmp #YMIN
+0A2E  B0 08             bcs h_accel
+0A30  A9 32             lda #YMIN
+0A32  85 03             sta ship_y
+0A34  A9 00             lda #0
+0A36  85 07             sta vy_mag
+0A38  A5 0C             lda left_flag
+0A3A  D0 0D             bne h_want_left
+0A3C  A5 0D             lda right_flag
+0A3E  D0 14             bne h_want_right
+0A40  A5 05             lda vx_mag
+0A42  F0 18             beq h_move
+0A44  C6 05             dec vx_mag
+0A46  4C 5C 0A          jmp h_move
+0A49  A9 00             lda #0
+0A4B  8D F0 0C          sta accel_want_dir
+0A4E  20 D4 09          jsr accel_h
+0A51  4C 5C 0A          jmp h_move
+0A54  A9 01             lda #1
+0A56  8D F0 0C          sta accel_want_dir
+0A59  20 D4 09          jsr accel_h
+0A5C  A5 04             lda vx_dir
+0A5E  F0 12             beq h_moving_left
+0A60  A5 02             lda ship_x
+0A62  18                clc
+0A63  65 05             adc vx_mag
+0A65  85 02             sta ship_x
+0A67  C9 FA             cmp #XMAX
+0A69  90 16             bcc physics_done
+0A6B  A9 FA             lda #XMAX
+0A6D  85 02             sta ship_x
+0A6F  4C 81 0A          jmp physics_done
+0A72  A5 02             lda ship_x
+0A74  38                sec
+0A75  E5 05             sbc vx_mag
+0A77  85 02             sta ship_x
+0A79  C9 18             cmp #XMIN
+0A7B  B0 04             bcs physics_done
+0A7D  A9 18             lda #XMIN
+0A7F  85 02             sta ship_x
+0A81  60                rts
+0A82  A5 02             lda ship_x
+0A84  8D 00 D0          sta $d000
+0A87  A5 03             lda ship_y
+0A89  8D 01 D0          sta $d001
+0A8C  60                rts
+0A8D  A2 00             ldx #$00
+0A8F  8A                txa
+0A90  0A                asl a
+0A91  A8                tay
+0A92  B9 9B 0C          lda terrain_addr,y
+0A95  85 FB             sta ptr
+0A97  B9 9C 0C          lda terrain_addr+1,y
+0A9A  85 FC             sta ptr+1
+0A9C  A9 19             lda #25
+0A9E  38                sec
+0A9F  FD 73 0C          sbc terrain_row,x
+0AA2  85 0F             sta rows_remaining
+0AA4  A9 FF             lda #$ff
+0AA6  A0 00             ldy #$00
+0AA8  91 FB             sta (ptr),y
+0AAA  C8                iny
+0AAB  C0 08             cpy #8
+0AAD  D0 F9             bne draw_terrain_byte
+0AAF  48                pha                       ; save $ff -- about to clobber A for the 16-bit add
+0AB0  18                clc
+0AB1  A5 FB             lda ptr
+0AB3  69 40             adc #<320                 ; advance one full row down (40 cols * 8 bytes)
+0AB5  85 FB             sta ptr
+0AB7  A5 FC             lda ptr+1
+0AB9  69 01             adc #>320
+0ABB  85 FC             sta ptr+1
+0ABD  68                pla
+0ABE  C6 0F             dec rows_remaining
+0AC0  D0 E4             bne draw_terrain_row
+0AC2  E8                inx
+0AC3  E0 28             cpx #40
+0AC5  D0 C8             bne draw_terrain_loop
+0AC7  60                rts
+0AC8  A9 00             lda #<BITMAP
+0ACA  85 FB             sta ptr
+0ACC  A9 20             lda #>BITMAP
+0ACE  85 FC             sta ptr+1
+0AD0  A9 32             lda #(FUEL_START/2)
+0AD2  C9 29             cmp #41
+0AD4  90 02             bcc init_fuel_cols_ok
+0AD6  A9 28             lda #40
+0AD8  85 11             sta last_fuel_cols
+0ADA  AA                tax
+0ADB  A0 00             ldy #$00
+0ADD  A9 FF             lda #$ff
+0ADF  91 FB             sta (ptr),y
+0AE1  C8                iny
+0AE2  C0 08             cpy #8
+0AE4  D0 F9             bne init_fuel_byte
+0AE6  18                clc
+0AE7  A5 FB             lda ptr
+0AE9  69 08             adc #8
+0AEB  85 FB             sta ptr
+0AED  A5 FC             lda ptr+1
+0AEF  69 00             adc #0
+0AF1  85 FC             sta ptr+1
+0AF3  CA                dex
+0AF4  D0 E5             bne init_fuel_col
+0AF6  38                sec
+0AF7  A5 FB             lda ptr
+0AF9  E9 08             sbc #8
+0AFB  85 12             sta fuel_ptr
+0AFD  A5 FC             lda ptr+1
+0AFF  E9 00             sbc #0
+0B01  85 13             sta fuel_ptr+1
+0B03  60                rts
+0B04  A5 08             lda fuel
+0B06  4A                lsr a
+0B07  C9 29             cmp #41
+0B09  90 02             bcc fuel_cols_check_ok
+0B0B  A9 28             lda #40
+0B0D  C5 11             cmp last_fuel_cols
+0B0F  F0 1A             beq draw_fuel_done
+0B11  85 11             sta last_fuel_cols
+0B13  A0 00             ldy #$00
+0B15  A9 00             lda #$00
+0B17  91 12             sta (fuel_ptr),y
+0B19  C8                iny
+0B1A  C0 08             cpy #8
+0B1C  D0 F9             bne clear_one_fuel_col
+0B1E  38                sec
+0B1F  A5 12             lda fuel_ptr
+0B21  E9 08             sbc #8
+0B23  85 12             sta fuel_ptr
+0B25  A5 13             lda fuel_ptr+1
+0B27  E9 00             sbc #0
+0B29  85 13             sta fuel_ptr+1
+0B2B  60                rts
+0B2C  A5 02             lda ship_x
+0B2E  38                sec
+0B2F  E9 18             sbc #XMIN
+0B31  4A                lsr a
+0B32  4A                lsr a
+0B33  4A                lsr a
+0B34  AA                tax
+0B35  BD 73 0C          lda terrain_row,x
+0B38  85 0F             sta ground_row_here
+0B3A  0A                asl a
+0B3B  0A                asl a
+0B3C  0A                asl a
+0B3D  18                clc
+0B3E  69 32             adc #YMIN
+0B40  85 10             sta ground_y_here
+0B42  A5 03             lda ship_y
+0B44  C5 10             cmp ground_y_here
+0B46  90 75             bcc check_landing_done
+0B48  A5 10             lda ground_y_here
+0B4A  85 03             sta ship_y
+0B4C  20 82 0A          jsr update_sprite
+0B4F  A5 0F             lda ground_row_here
+0B51  C9 14             cmp #PAD_ROW
+0B53  D0 3B             bne do_crash
+0B55  A5 07             lda vy_mag
+0B57  C9 03             cmp #SAFE_V+1
+0B59  B0 35             bcs do_crash
+0B5B  A5 05             lda vx_mag
+0B5D  C9 03             cmp #SAFE_V+1
+0B5F  B0 2F             bcs do_crash
+0B61  AD 11 D0          lda $d011
+0B64  29 DF             and #%11011111           ; clear BMM
+0B66  8D 11 D0          sta $d011
+0B69  A9 14             lda #$14                  ; screen at $0400, characters at $1000
+0B6B  8D 18 D0          sta $d018                  ; (the standard default char ROM shadow)
+0B6E  A9 93             lda #$93                 ; clear screen
+0B70  20 D2 FF          jsr CHROUT
+0B73  A9 F1             lda #<msg_success1
+0B75  A0 0C             ldy #>msg_success1
+0B77  20 62 0C          jsr print_msg
+0B7A  A9 10             lda #<msg_success2
+0B7C  A0 0D             ldy #>msg_success2
+0B7E  20 62 0C          jsr print_msg
+0B81  A9 80             lda #%10000000            ; make sure the engine sound is off --
+0B83  8D 04 D4          sta VOICE1_CTRL            ; thrust might have been held right up
+0B86  A9 00             lda #0                      ; to touchdown
+0B88  85 14             sta engine_playing
+0B8A  20 0C 0C          jsr play_success_melody
+0B8D  4C B3 0B          jmp show_try_again
+0B90  20 BE 0B          jsr show_explosion
+0B93  AD 11 D0          lda $d011
+0B96  29 DF             and #%11011111
+0B98  8D 11 D0          sta $d011
+0B9B  A9 14             lda #$14
+0B9D  8D 18 D0          sta $d018
+0BA0  A9 93             lda #$93
+0BA2  20 D2 FF          jsr CHROUT
+0BA5  A9 21             lda #<msg_crash1
+0BA7  A0 0D             ldy #>msg_crash1
+0BA9  20 62 0C          jsr print_msg
+0BAC  A9 2F             lda #<msg_crash2
+0BAE  A0 0D             ldy #>msg_crash2
+0BB0  20 62 0C          jsr print_msg
+0BB3  A9 4D             lda #<msg_try_again
+0BB5  A0 0D             ldy #>msg_try_again
+0BB7  20 62 0C          jsr print_msg
+0BBA  4C 51 0C          jmp wait_for_restart
+0BBD  60                rts
+0BBE  A9 80             lda #%10000000
+0BC0  8D 04 D4          sta VOICE1_CTRL
+0BC3  A9 00             lda #0
+0BC5  85 14             sta engine_playing
+0BC7  A9 00             lda #$00
+0BC9  8D 04 D4          sta VOICE1_CTRL           ; force gate off first (fresh retrigger)
+0BCC  A9 00             lda #$00
+0BCE  8D 00 D4          sta VOICE1_FREQ_LO
+0BD1  A9 04             lda #$04
+0BD3  8D 01 D4          sta VOICE1_FREQ_HI        ; low pitch for a deep boom
+0BD6  A9 0F             lda #$0f
+0BD8  8D 05 D4          sta VOICE1_AD              ; attack 0, decay 15 (long, rumbling decay)
+0BDB  A9 00             lda #$00
+0BDD  8D 06 D4          sta VOICE1_SR               ; sustain 0, release 0
+0BE0  A9 81             lda #%10000001                ; noise waveform, gate on
+0BE2  8D 04 D4          sta VOICE1_CTRL
+0BE5  A9 01             lda #%00000001
+0BE7  8D 1D D0          sta $d01d                ; sprite 0 X-expand
+0BEA  8D 17 D0          sta $d017                 ; sprite 0 Y-expand
+0BED  A2 00             ldx #$00
+0BEF  BD 64 0D          lda explosion_colors,x
+0BF2  8D 27 D0          sta $d027
+0BF5  20 F9 08          jsr wait_frame
+0BF8  20 F9 08          jsr wait_frame
+0BFB  E8                inx
+0BFC  E0 08             cpx #8
+0BFE  D0 EF             bne explosion_loop
+0C00  A9 00             lda #0
+0C02  8D 15 D0          sta $d015                 ; hide the ship
+0C05  8D 1D D0          sta $d01d                  ; tidy up the expand bits (harmless either way now)
+0C08  8D 17 D0          sta $d017
+0C0B  60                rts
+0C0C  A2 00             ldx #$00
+0C0E  A9 00             lda #$00
+0C10  8D 04 D4          sta VOICE1_CTRL             ; gate off first (fresh retrigger)
+0C13  BD 6C 0D          lda melody_freq_lo,x
+0C16  8D 00 D4          sta VOICE1_FREQ_LO
+0C19  BD 71 0D          lda melody_freq_hi,x
+0C1C  8D 01 D4          sta VOICE1_FREQ_HI
+0C1F  A9 00             lda #$00
+0C21  8D 05 D4          sta VOICE1_AD                 ; attack 0, decay 0 -- snappy onset
+0C24  A9 A0             lda #$a0
+0C26  8D 06 D4          sta VOICE1_SR                  ; sustain 10 (holds while gated), release 0
+0C29  A9 11             lda #%00010001                  ; triangle waveform, gate on
+0C2B  8D 04 D4          sta VOICE1_CTRL
+0C2E  20 F9 08          jsr wait_frame
+0C31  20 F9 08          jsr wait_frame
+0C34  20 F9 08          jsr wait_frame
+0C37  20 F9 08          jsr wait_frame
+0C3A  20 F9 08          jsr wait_frame
+0C3D  20 F9 08          jsr wait_frame
+0C40  A9 10             lda #%00010000              ; triangle waveform, gate off
+0C42  8D 04 D4          sta VOICE1_CTRL
+0C45  20 F9 08          jsr wait_frame
+0C48  20 F9 08          jsr wait_frame
+0C4B  E8                inx
+0C4C  E0 05             cpx #5
+0C4E  D0 BE             bne melody_loop
+0C50  60                rts
+0C51  78                sei
+0C52  A9 F7             lda #%11110111           ; select keyboard column 3 (has Y)
+0C54  8D 00 DC          sta $dc00
+0C57  AD 01 DC          lda $dc01
+0C5A  58                cli
+0C5B  29 02             and #%00000010           ; Y
+0C5D  D0 F2             bne wait_for_restart
+0C5F  4C 0D 08          jmp start
+0C62  85 FB             sta ptr
+0C64  84 FC             sty ptr+1
+0C66  A0 00             ldy #$00
+0C68  B1 FB             lda (ptr),y
+0C6A  F0 06             beq print_msg_done
+0C6C  20 D2 FF          jsr CHROUT
+0C6F  C8                iny
+0C70  D0 F6             bne print_msg_loop
+0C72  60                rts
+
+Symbol table:
+  BITMAP               = $2000
+  CHROUT               = $FFD2
+  COLOR                = $D800
+  FUEL_DELAY           = $0003
+  FUEL_START           = $0064
+  H0                   = $0010
+  H1                   = $000F
+  H10                  = $0014
+  H11                  = $0012
+  H12                  = $0010
+  H13                  = $000F
+  H14                  = $0011
+  H15                  = $0014
+  H16                  = $0014
+  H17                  = $0014
+  H18                  = $0014
+  H19                  = $0014
+  H2                   = $0011
+  H20                  = $0014
+  H21                  = $0014
+  H22                  = $0014
+  H23                  = $0014
+  H24                  = $0014
+  H25                  = $0014
+  H26                  = $0012
+  H27                  = $0010
+  H28                  = $000F
+  H29                  = $0011
+  H3                   = $0013
+  H30                  = $0013
+  H31                  = $0015
+  H32                  = $0016
+  H33                  = $0014
+  H34                  = $0012
+  H35                  = $0011
+  H36                  = $0013
+  H37                  = $0015
+  H38                  = $0014
+  H39                  = $0012
+  H4                   = $0012
+  H5                   = $0010
+  H6                   = $000F
+  H7                   = $0011
+  H8                   = $0013
+  H9                   = $0015
+  JOY2                 = $DC00
+  MAX_V                = $0002
+  PAD_ROW              = $0014
+  PHYSICS_DELAY        = $0006
+  SAFE_V               = $0002
+  SCREEN               = $0400
+  SHIP_DATA            = $0E00
+  SID_VOLUME           = $D418
+  SPRITE_PTR0          = $07F8
+  VOICE1_AD            = $D405
+  VOICE1_CTRL          = $D404
+  VOICE1_FREQ_HI       = $D401
+  VOICE1_FREQ_LO       = $D400
+  VOICE1_SR            = $D406
+  XMAX                 = $00FA
+  XMIN                 = $0018
+  YMIN                 = $0032
+  accel_h              = $09D4
+  accel_h_decrement    = $09E9
+  accel_h_done         = $09F4
+  accel_h_same         = $09EC
+  accel_v              = $09B3
+  accel_v_decrement    = $09C8
+  accel_v_done         = $09D3
+  accel_v_same         = $09CB
+  accel_want_dir       = $0CF0
+  check_landing        = $0B2C
+  check_landing_done   = $0BBD
+  clear_bitmap         = $0861
+  clear_bitmap_byte    = $0863
+  clear_one_fuel_col   = $0B17
+  clear_screen         = $082F
+  clear_screen_byte    = $0831
+  color_fuel_row       = $089E
+  consume_fuel         = $095B
+  consume_fuel_done    = $097A
+  do_crash             = $0B90
+  do_physics           = $09F5
+  draw_fuel_bar        = $0B04
+  draw_fuel_done       = $0B2B
+  draw_pad_color_byte  = $087B
+  draw_pad_color_row   = $0877
+  draw_terrain         = $0A8D
+  draw_terrain_byte    = $0AA8
+  draw_terrain_loop    = $0A8F
+  draw_terrain_row     = $0AA6
+  engine_playing       = $0014
+  engine_should_stop   = $09A5
+  engine_sound_done    = $09B2
+  explosion_colors     = $0D64
+  explosion_loop       = $0BEF
+  fuel                 = $0008
+  fuel_cols_check_ok   = $0B0D
+  fuel_delay           = $000A
+  fuel_not_empty       = $0968
+  fuel_ptr             = $0012
+  ground_row_here      = $000F
+  ground_y_here        = $0010
+  h_accel              = $0A38
+  h_move               = $0A5C
+  h_moving_left        = $0A72
+  h_want_left          = $0A49
+  h_want_right         = $0A54
+  init_fuel_bar        = $0AC8
+  init_fuel_byte       = $0ADF
+  init_fuel_col        = $0ADB
+  init_fuel_cols_ok    = $0AD8
+  joy_state            = $000E
+  last_fuel_cols       = $0011
+  left_flag            = $000C
+  main_loop            = $08DE
+  melody_freq_hi       = $0D71
+  melody_freq_lo       = $0D6C
+  melody_loop          = $0C0E
+  msg_crash1           = $0D21
+  msg_crash2           = $0D2F
+  msg_success1         = $0CF1
+  msg_success2         = $0D10
+  msg_try_again        = $0D4D
+  no_left_key          = $093E
+  no_right_key         = $095A
+  no_thrust_key        = $0922
+  physics_delay        = $0009
+  physics_done         = $0A81
+  physics_tick         = $09FC
+  play_success_melody  = $0C0C
+  print_msg            = $0C62
+  print_msg_done       = $0C72
+  print_msg_loop       = $0C68
+  ptr                  = $00FB
+  read_input           = $0901
+  right_flag           = $000D
+  rows_remaining       = $000F
+  set_left             = $093A
+  set_right            = $0956
+  set_thrust           = $091E
+  ship_data            = $0E00
+  ship_x               = $0002
+  ship_y               = $0003
+  show_explosion       = $0BBE
+  show_try_again       = $0BB3
+  start                = $080D
+  terrain_addr         = $0C9B
+  terrain_row          = $0C73
+  thrust_flag          = $000B
+  update_engine_sound  = $097B
+  update_sprite        = $0A82
+  v_move               = $0A17
+  v_moving_up          = $0A25
+  v_want_up            = $0A0F
+  vx_dir               = $0004
+  vx_mag               = $0005
+  vy_dir               = $0006
+  vy_mag               = $0007
+  wait_for_restart     = $0C51
+  wait_frame           = $08F9

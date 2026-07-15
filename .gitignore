@@ -1,7 +1,4 @@
-build/
-vice.log
-Notes/
-*.lst
-r
-m
-b
+notes/
+archive/
+bin/c64asm
+organization.md
