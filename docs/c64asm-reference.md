@@ -224,7 +224,110 @@ computes this for you), immediately followed by the `start:` code.
 
 ---
 
-## 8. Instruction set
+## 8. Macros
+
+```
+.macro NAME param1, param2, ...
+        ; body, referencing \param1, \param2, ...
+.endmacro
+```
+
+Invoked like a pseudo-instruction:
+
+```
+        NAME arg1, arg2
+```
+
+At the point of invocation, every `\paramname` in the macro's body is
+replaced with the corresponding argument's literal text, and the
+resulting lines are assembled exactly as if you'd typed them out by
+hand. Zero-parameter macros (`.macro NAME` with nothing after the name)
+are fine too.
+
+### Example
+
+```
+.macro PRINT msg
+        lda #<\msg
+        ldy #>\msg
+        jsr print_msg
+.endmacro
+
+        PRINT hello_msg
+        PRINT goodbye_msg
+```
+
+expands to exactly the same bytes as writing the six `lda`/`ldy`/`jsr`
+lines out by hand, twice, with `hello_msg` and `goodbye_msg`
+substituted in respectively.
+
+### Labels inside a macro body
+
+A macro is expanded as plain text substitution — a label defined inside
+a macro's body is a completely ordinary label once expanded, which
+means invoking that macro a second time defines the *same* label name
+again and fails with "Symbol already defined". The fix is to give the
+macro a parameter dedicated to making its labels unique per call, and
+use it in the label name:
+
+```
+.macro DELAY suffix
+        ldx #$00
+delay_loop\suffix:
+        dex
+        bne delay_loop\suffix
+.endmacro
+
+        DELAY 1
+        DELAY 2
+```
+
+Each invocation gets its own `delay_loop1:`/`delay_loop2:`, so both
+expand cleanly in the same file.
+
+### Rules and limitations
+
+- **Macros must be defined before they're used** — there's no
+  whole-file pre-scan for definitions, so a macro invocation earlier in
+  the file than its `.macro` block won't be recognized as one.
+- **No automatic local-label mangling** (see above) — this is a
+  deliberate simplicity trade-off, not a bug; use the suffix-parameter
+  pattern for any macro whose body defines a label.
+- **A macro invocation can't share a line with a label.** Put the label
+  on the line above instead:
+  ```
+  loop:
+          MY_MACRO arg
+  ```
+- **Macro arguments are split the same comma/paren/quote-aware way
+  directive argument lists are** (see `.byte`, §7) — which means a full
+  indexed addressing expression like `(ptr),Y` can't be passed as a
+  single argument, since its comma sits *outside* the parentheses.
+  Parameterize just the base address and bake the `,Y` into the macro
+  body itself:
+  ```
+  .macro LOAD_INDIRECT_Y base
+          ldy #$00
+          lda (\base),y
+  .endmacro
+  ```
+- **A macro name can't collide with a real mnemonic or directive** —
+  `.macro LDA ...` is rejected outright.
+- **Nested macro *definitions*** (a `.macro` block inside another
+  macro's body) **are rejected.** Nested *invocations* — one macro
+  calling another — are fine, including recursively, up to a depth of
+  16; a macro that (directly or indirectly) invokes itself past that
+  depth is reported as an error rather than hanging the assembler.
+- **Errors inside an expanded macro body are attributed to the line
+  that invoked the macro**, not a specific line inside the macro's own
+  definition. For the typically-short macro bodies this assembler is
+  meant for, that's usually enough to find the problem; it just means
+  the line number in an error message points at the call site, not
+  necessarily the exact body line at fault.
+
+---
+
+## 9. Instruction set
 
 All 56 documented NMOS 6502/6510 mnemonics are supported. Each entry below
 lists the addressing modes the instruction accepts and the opcode byte for
@@ -299,7 +402,7 @@ supported.
 
 ---
 
-## 9. Output format
+## 10. Output format
 
 The `.prg` file written is:
 
@@ -316,7 +419,7 @@ stub is the first thing written.
 
 ---
 
-## 10. Listing file format
+## 11. Listing file format
 
 When `--listing` is given, the assembler writes a text file with one line
 per assembled instruction or data-emitting directive:
@@ -347,7 +450,7 @@ only real 6502 instructions appear there.
 
 ---
 
-## 11. Error messages
+## 12. Error messages
 
 All errors are fatal (assembly stops immediately) and are printed in the
 form:
@@ -372,7 +475,7 @@ Common errors:
 
 ---
 
-## 12. Known limitations
+## 13. Known limitations
 
 - **Zero-page sizing of forward-referenced labels.** The assembler picks
   zero-page vs. absolute addressing based on whether an operand's value is
@@ -387,8 +490,9 @@ Common errors:
   addresses under `$100`, e.g. pointers in `$FB`–`$FE`) are conventionally
   defined with `=` *before* they're used, which sidesteps the issue
   entirely, and is good practice regardless.
-- **No macros, no conditional assembly, no `.include`.** Everything must
-  live in a single source file.
+- **Macros exist but are intentionally simple** (see §8): defined-before-use
+  only, no automatic local-label mangling, no conditional assembly, and
+  still **no `.include`** — everything must live in a single source file.
 - **No undocumented/illegal opcodes.**
 - **Single error at a time.** Assembly halts at the first error rather
   than collecting and reporting multiple problems.
@@ -396,7 +500,7 @@ Common errors:
 
 ---
 
-## 13. Complete example
+## 14. Complete example
 
 ```asm
 ; hello.asm - prints a message and cycles the border color

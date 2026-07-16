@@ -1,0 +1,8 @@
+; c64asm listing  (origin $C000, 6 bytes)
+
+C000  EE 20 D0      inc BORDER   ; Increment the border color value
+C003  4C 00 C0      jmp start    ; Infinite loop back to 'start'
+
+Symbol table:
+  BORDER               = $D020
+  start                = $C000

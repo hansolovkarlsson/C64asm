@@ -29,4 +29,9 @@
                                    .byte/.word/.text/.fill line can have */
 #define MAX_IDENT      128     /* longest label, mnemonic, or directive name */
 
+#define MAX_MACROS              128  /* largest macro table */
+#define MAX_MACRO_PARAMS        8    /* most parameters one macro can declare */
+#define MAX_MACRO_BODY_LINES    200  /* longest macro body, in lines */
+#define MAX_MACRO_EXPANSION_DEPTH 16 /* guards against runaway/infinite recursive macros */
+
 #endif

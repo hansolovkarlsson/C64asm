@@ -17,37 +17,11 @@
 #include "listing.h"
 
 /*
- * Splits a directive's comma-separated argument list (e.g. the operand
- * of ".byte 1, 2, \"hi\", 3") into individual trimmed argument strings,
- * respecting quotes and parentheses -- a comma inside a quoted string
- * or inside parentheses doesn't count as a separator. Not exposed via
- * assembler.h; only run_pass() below needs it, for the .byte/.word/
- * .text/.fill directives.
+ * split_args() (comma-separated argument list splitting, used below for
+ * the .byte/.word/.text/.fill directives) now lives in strutils.h/.c --
+ * it moved there once macro.c also needed it, for splitting a macro
+ * invocation's own argument list the same way.
  */
-static int split_args(const char *operand, char args[][MAX_LINE_LEN], int max_args) {
-    int count = 0;
-    int depth = 0, in_str = 0;
-    char cur[MAX_LINE_LEN]; size_t cn = 0;
-    cur[0] = '\0';
-    for (const char *p = operand; *p; p++) {
-        char ch = *p;
-        if (ch == '"') { in_str = !in_str; if (cn+1<sizeof(cur)) cur[cn++]=ch; }
-        else if (ch == '(' && !in_str) { depth++; if (cn+1<sizeof(cur)) cur[cn++]=ch; }
-        else if (ch == ')' && !in_str) { depth--; if (cn+1<sizeof(cur)) cur[cn++]=ch; }
-        else if (ch == ',' && depth == 0 && !in_str) {
-            cur[cn] = '\0';
-            trim(cur);
-            if (count < max_args) strncpy(args[count++], cur, MAX_LINE_LEN - 1);
-            cn = 0; cur[0] = '\0';
-        } else {
-            if (cn+1<sizeof(cur)) cur[cn++]=ch;
-        }
-    }
-    cur[cn] = '\0';
-    trim(cur);
-    if (cur[0] != '\0' && count < max_args) strncpy(args[count++], cur, MAX_LINE_LEN - 1);
-    return count;
-}
 
 long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
     long pc = 0x0801;     /* the conventional C64 BASIC-program start address */

@@ -136,6 +136,8 @@ BRANCHES = {'BCC','BCS','BEQ','BMI','BNE','BPL','BVC','BVS'}
 DIRECTIVES = {'.org', '*=', '.byte', '.db', '.word', '.dw', '.text', '.asc',
               '.fill', '.ds', '.res', '.basic', '.equ'}
 
+MAX_MACRO_EXPANSION_DEPTH = 16   # guards against runaway/infinite recursive macros
+
 
 class AsmError(Exception):
     def __init__(self, message, line_no=None, text=None):
@@ -521,6 +523,148 @@ def _looks_forced_absolute(expr_text):
 
 
 # ---------------------------------------------------------------------------
+# Macros
+# ---------------------------------------------------------------------------
+#
+# Macro expansion is a preprocessing step over raw source *text*, run
+# before split_line() ever sees a line -- it knows nothing about labels,
+# opcodes, or addressing modes, only about ".macro"/".endmacro" blocks,
+# parameter substitution, and recognizing when a line invokes a macro
+# name instead of a real mnemonic.
+#
+# Syntax:
+#     .macro NAME param1, param2
+#             ; body, referencing \param1, \param2
+#     .endmacro
+#
+# invoked like a pseudo-instruction:
+#     NAME arg1, arg2
+#
+# Deliberate limitations (documented, not oversights):
+#   - Macros must be defined before they're used -- there's no separate
+#     pre-scan of the whole file for macro definitions first, so this
+#     stays a simple single-pass expansion.
+#   - No automatic local-label mangling: a label defined inside a macro
+#     body will collide with "Symbol already defined" if that macro is
+#     invoked more than once. The recommended pattern is to pass a
+#     unique suffix in as a parameter and use it in the label name
+#     (e.g. "loop\suffix:" / "bne loop\suffix"), so each expansion's
+#     labels are distinct by construction.
+#   - A macro invocation can't share a line with a label ("foo: SOME_MACRO
+#     x" doesn't work) -- put the label on its own line above instead.
+
+class MacroDef:
+    def __init__(self, name, params):
+        self.name = name
+        self.params = params      # list of parameter names, no backslash
+        self.body = []            # list of raw (comment-stripped) text lines
+
+
+class MacroProcessor:
+    """Feeds raw source lines through macro expansion. Lines that are part
+    of a macro definition, or that are themselves a macro invocation
+    (expanded, recursively), never reach `emit`; every other line does,
+    via `emit(raw_line, line_no)`."""
+
+    def __init__(self, emit):
+        self.macros = {}          # NAME.upper() -> MacroDef
+        self.capturing = None     # MacroDef currently being defined, or None
+        self.expansion_depth = 0
+        self.emit = emit
+
+    def process_line(self, raw_line, line_no):
+        stripped = strip_comment(raw_line).rstrip('\n')
+        trimmed = stripped.strip()
+
+        if self.capturing is not None:
+            first_tok = trimmed.split(None, 1)[0] if trimmed else ''
+            if first_tok.upper() in ('.ENDMACRO', '.ENDM'):
+                self.macros[self.capturing.name.upper()] = self.capturing
+                self.capturing = None
+                return
+            if first_tok.upper() == '.MACRO':
+                raise AsmError(
+                    f"nested macro definitions are not supported (already defining '{self.capturing.name}')",
+                    line_no, raw_line)
+            self.capturing.body.append(stripped)
+            return
+
+        if not trimmed:
+            self.emit(raw_line, line_no)
+            return
+
+        first_tok = trimmed.split(None, 1)[0]
+
+        if first_tok.upper() == '.MACRO':
+            rest = trimmed[len(first_tok):].strip()
+            parts = rest.split(None, 1)
+            if not parts:
+                raise AsmError("'.macro' requires a name", line_no, raw_line)
+            name = parts[0]
+            if name.upper() in OPCODES or name.lower() in DIRECTIVES:
+                raise AsmError(
+                    f"macro name '{name}' conflicts with a built-in mnemonic or directive",
+                    line_no, raw_line)
+            if name.upper() in self.macros:
+                raise AsmError(f"macro '{name}' already defined", line_no, raw_line)
+            params = []
+            if len(parts) > 1:
+                params = [p.strip() for p in split_args(parts[1])]
+            self.capturing = MacroDef(name, params)
+            return
+
+        if first_tok.upper() in ('.ENDMACRO', '.ENDM'):
+            raise AsmError("'.endmacro' with no matching '.macro'", line_no, raw_line)
+
+        m = self.macros.get(first_tok.upper())
+        if m is not None:
+            arg_text = trimmed[len(first_tok):].strip()
+            args = split_args(arg_text) if arg_text else []
+            if len(args) != len(m.params):
+                raise AsmError(
+                    f"macro '{m.name}' expects {len(m.params)} argument(s), got {len(args)}",
+                    line_no, raw_line)
+            self.expansion_depth += 1
+            if self.expansion_depth > MAX_MACRO_EXPANSION_DEPTH:
+                raise AsmError(
+                    f"macro expansion nested too deep (recursive macro '{m.name}'?)",
+                    line_no, raw_line)
+            for body_line in m.body:
+                substituted = self._substitute(body_line, m.params, args, line_no)
+                self.process_line(substituted, line_no)
+            self.expansion_depth -= 1
+            return
+
+        self.emit(raw_line, line_no)
+
+    def _substitute(self, text, params, args, line_no):
+        """Replaces every \\paramname in `text` with its argument. A
+        backslash not followed by an identifier character is left as a
+        literal backslash (harmless, since this syntax has no other use
+        for one); a \\name that doesn't match any declared parameter is
+        a fatal error, to catch typos rather than silently leaving the
+        literal text in place."""
+        out = []
+        i = 0
+        n = len(text)
+        while i < n:
+            c = text[i]
+            if c == '\\' and i + 1 < n and (text[i+1].isalpha() or text[i+1] == '_'):
+                j = i + 1
+                while j < n and (text[j].isalnum() or text[j] == '_'):
+                    j += 1
+                pname = text[i+1:j]
+                if pname not in params:
+                    raise AsmError(f"unknown macro parameter '\\{pname}'", line_no, text)
+                out.append(args[params.index(pname)])
+                i = j
+            else:
+                out.append(c)
+                i += 1
+        return ''.join(out)
+
+
+# ---------------------------------------------------------------------------
 # Assembler core (two-pass)
 # ---------------------------------------------------------------------------
 
@@ -531,9 +675,13 @@ class Assembler:
         self.listing = []
 
     def load(self, source_text):
+        def emit(raw, line_no):
+            label, op, operand = split_line(raw, line_no)
+            self.lines.append((line_no, raw, label, op, operand))
+
+        macros = MacroProcessor(emit)
         for i, raw in enumerate(source_text.splitlines(), start=1):
-            label, op, operand = split_line(raw, i)
-            self.lines.append((i, raw, label, op, operand))
+            macros.process_line(raw, i)
 
     def assemble(self):
         self._pass(pass_no=1)
@@ -555,7 +703,7 @@ class Assembler:
                 origin = 0x0801
                 pc = code_start
                 if label:
-                    self._define_symbol(label, pc, line_no, pass_no)
+                    self._define_symbol(label, pc, line_no, pass_no, raw=raw)
                 continue
 
             if op == '.org':
@@ -577,16 +725,16 @@ class Assembler:
                         output.extend(b'\x00' * gap)
                 pc = val
                 if label:
-                    self._define_symbol(label, pc, line_no, pass_no)
+                    self._define_symbol(label, pc, line_no, pass_no, raw=raw)
                 continue
 
             if op == '=':
                 val, undef = eval_expr(operand, self.symbols, pc, line_no)
-                self._define_symbol(label, val, line_no, pass_no, allow_redefine=True)
+                self._define_symbol(label, val, line_no, pass_no, allow_redefine=True, raw=raw)
                 continue
 
             if label and op not in ('.org', '='):
-                self._define_symbol(label, pc, line_no, pass_no)
+                self._define_symbol(label, pc, line_no, pass_no, raw=raw)
 
             if op is None:
                 continue
@@ -711,10 +859,10 @@ class Assembler:
             target = new_target
         return stub, new_target
 
-    def _define_symbol(self, name, value, line_no, pass_no, allow_redefine=False):
+    def _define_symbol(self, name, value, line_no, pass_no, allow_redefine=False, raw=None):
         if pass_no == 1:
             if name in self.symbols and not allow_redefine and self.symbols[name] != value:
-                raise AsmError(f"Symbol '{name}' already defined", line_no)
+                raise AsmError(f"Symbol '{name}' already defined", line_no, raw)
             self.symbols[name] = value
         else:
             self.symbols[name] = value

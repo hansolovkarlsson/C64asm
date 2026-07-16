@@ -13,19 +13,6 @@
 SourceLine *g_lines;
 int g_line_count = 0;
 
-/* Removes a ';' comment from `line`, in place, stopping at the first
- * ';' that isn't inside a double-quoted string -- so a semicolon inside
- * a .text "..." string doesn't get mistaken for the start of a comment.
- * Not exposed via lineparser.h; only split_line() below needs it. */
-static void strip_comment(char *line) {
-    int in_str = 0;
-    size_t n = strlen(line);
-    for (size_t i = 0; i < n; i++) {
-        if (line[i] == '"') in_str = !in_str;
-        if (line[i] == ';' && !in_str) { line[i] = '\0'; return; }
-    }
-}
-
 /* Copies the identifier characters starting at s[pos] into `out` (up to
  * outsz-1 of them) and returns the position just past the end of the
  * identifier. Used only while picking a label or the "identifier" side

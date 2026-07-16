@@ -1,0 +1,16 @@
+; c64asm listing  (origin $1000, 39 bytes)
+
+1000  A2 00         ldx #$00     ; Clear X register (used as our string index pointer)
+1002  BD 0F 10      lda message,x ; Load character from message + X offset
+1005  F0 07         beq done     ; If character is 0 (End of String), jump to 'done'
+1007  20 D2 FF      jsr CHROUT   ; Call KERNAL to print the character in Acc
+100A  E8            inx          ; Increment X index
+100B  4C 02 10      jmp print_loop ; Repeat loop
+100E  60            rts          ; Return to BASIC
+
+Symbol table:
+  CHROUT               = $FFD2
+  done                 = $100E
+  init                 = $1000
+  message              = $100F
+  print_loop           = $1002

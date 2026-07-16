@@ -14,7 +14,7 @@ fi
 # ./c64asm input.asm -o output.prg [--listing out.lst]
 
 
-SRC="./examples/$1"
+SRC="$1"
 BASE=$(basename "$SRC" .asm)
 DIR=$(dirname "$SRC")
 OUT="${2:-$DIR/$BASE.prg}"

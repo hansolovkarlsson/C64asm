@@ -9,14 +9,19 @@ just use it.
 
 **This is not a different assembler.** Every `.asm` file that worked
 with `c64asm.c` produces byte-identical `.prg` and listing output here.
-Before this was written up, every module was cross-checked against the
-original single-file `c64asm.c` (and, separately, against the Python
-implementation) across all six of this project's demo programs —
-`hello.asm`, `edge.asm`, `bounce.asm`, `pong.asm`, `adventure.asm`, and
-`lander.asm` — plus both of the assembler's own error-handling paths
-(an out-of-range branch, and a backward `.org`), with zero differences
-in output or behavior. It also runs clean under AddressSanitizer and
-UndefinedBehaviorSanitizer.
+Every module was cross-checked against the original single-file
+`c64asm.c` (and, separately, against the Python implementation) across
+all six of this project's demo programs — `hello.asm`, `edge.asm`,
+`bounce.asm`, `pong.asm`, `adventure.asm`, and `lander.asm` — plus both
+of the assembler's own error-handling paths (an out-of-range branch, and
+a backward `.org`), with zero differences in output or behavior. Macro
+support (`macro.h`/`.c`, added after the initial split) was
+cross-checked the same three-way way, against its own set of test
+programs covering parameterized macros, zero-parameter macros, nested
+macro invocations, and every documented error case (wrong argument
+count, an unknown `\param` reference, a macro name colliding with a real
+mnemonic, and runaway recursive expansion). It also runs clean under
+AddressSanitizer and UndefinedBehaviorSanitizer.
 
 ## Building
 
@@ -46,13 +51,26 @@ data flows through the program) is:
 
 2. **`fileio.h`/`.c`** — reads the source file, one line at a time.
 
-3. **`lineparser.h`/`.c`** — the interesting one to start with if
+3. **`macro.h`/`.c`** — expands `.macro`/`.endmacro` definitions and
+   invocations. This sits directly between `fileio.c` (reading a raw
+   line) and `lineparser.c` (parsing a real one): every raw line passes
+   through `macro_process_line()` first, which either absorbs it into
+   an in-progress macro definition, expands it (recursively, if it
+   invokes a macro) into one or more *new* raw lines and feeds each of
+   those back through itself, or -- for the ordinary case, a line that
+   isn't part of any macro at all -- hands it straight to
+   `split_line()`. Worth reading once you're comfortable with
+   `lineparser.c`, since it leans on the same "what's the first token
+   on this line" style of thinking, just one layer earlier and working
+   on raw text instead of an already-recognized mnemonic.
+
+4. **`lineparser.h`/`.c`** — the interesting one to start with if
    you've never looked at how an assembler's *line* grammar works.
    Splits one raw line of text into an optional label, an optional
    mnemonic-or-directive, and an operand string. This is where
    `"loop: lda #$00 ; comment"` becomes three separate, clean pieces.
 
-4. **`expr.h`/`.c`** — a small hand-written recursive-descent parser
+5. **`expr.h`/`.c`** — a small hand-written recursive-descent parser
    for expressions like `SCREEN + 40*ROW`. If you've never written or
    read a recursive-descent parser before, this is a good one to learn
    from precisely *because* it's small: the whole grammar is four
@@ -64,18 +82,18 @@ data flows through the program) is:
    for a long time before anyone noticed — a real bug, and a good
    illustration of a subtle parsing mistake.
 
-5. **`operand.h`/`.c`** — given an instruction's operand text, works
+6. **`operand.h`/`.c`** — given an instruction's operand text, works
    out which of the 6502's 13 addressing modes it's using, purely from
    its punctuation (`#`, parentheses, a trailing `,X`). This is the
    piece that lets `LDA $10` and `LDA $1000` pick different encodings
    automatically.
 
-6. **`symtab.h`/`.c`** — the symbol table: every label and named
+7. **`symtab.h`/`.c`** — the symbol table: every label and named
    constant, and what it's bound to. Small and simple by design (see
    the comments in `symtab.c` on why a linear scan, not a hash table,
    is the right call at this codebase's scale).
 
-7. **`assembler.h`/`.c`** — the heart of the program: the two-pass loop
+8. **`assembler.h`/`.c`** — the heart of the program: the two-pass loop
    that ties everything above together into actual machine code.
    **Read the big comment block in `assembler.h` first** — it explains
    *why* an assembler needs two passes at all (in one sentence: so a
@@ -83,15 +101,15 @@ data flows through the program) is:
    important idea in the whole codebase once you're past the syntax
    details.
 
-8. **`bytebuf.h`/`.c`**, **`basicstub.h`/`.c`**, **`listing.h`/`.c`** —
+9. **`bytebuf.h`/`.c`**, **`basicstub.h`/`.c`**, **`listing.h`/`.c`** —
    three small, self-contained utilities `assembler.c` and `main.c`
    lean on: a growable output buffer, the tiny "10 SYS xxxx" BASIC
    loader the `.basic` directive emits, and the optional listing file.
    Each is short enough to read in a couple of minutes and has its
    design rationale explained in its header comment.
 
-9. **`error.h`/`.c`** and **`strutils.h`/`.c`** — small utilities used
-   everywhere else. Worth a quick look, not worth dwelling on.
+10. **`error.h`/`.c`** and **`strutils.h`/`.c`** — small utilities used
+    everywhere else. Worth a quick look, not worth dwelling on.
 
 ## Module map
 
@@ -99,8 +117,9 @@ data flows through the program) is:
 |---|---|
 | `common.h` | shared size limits (why fixed-size buffers, not dynamic strings, almost everywhere) |
 | `error.h` / `.c` | how does the assembler report a mistake and stop? |
-| `strutils.h` / `.c` | generic string helpers (trim, identifier-character tests, ASCII→PETSCII) |
+| `strutils.h` / `.c` | generic string helpers (trim, identifier-character tests, ASCII→PETSCII, comment stripping, comma-list splitting) |
 | `opcodes.h` / `.c` | what are the 6502's addressing modes, and what does each (mnemonic, mode) pair assemble to? |
+| `macro.h` / `.c` | how does `.macro`/`.endmacro` expand into real source lines before parsing ever sees them? |
 | `symtab.h` / `.c` | where are labels and constants stored, and looked up? |
 | `expr.h` / `.c` | how does `"SCREEN + 40*ROW"` become a number? |
 | `lineparser.h` / `.c` | how does one line of source text become (label, op, operand)? |

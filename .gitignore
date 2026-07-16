@@ -3,3 +3,4 @@ archive/
 bin/c64asm
 organization.md
 src/*.o
+vice.log

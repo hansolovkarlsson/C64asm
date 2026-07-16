@@ -7,6 +7,7 @@
 #include "fileio.h"
 #include "common.h"
 #include "lineparser.h"
+#include "macro.h"
 
 void load_source(const char *path) {
     FILE *f = fopen(path, "r");
@@ -26,12 +27,13 @@ void load_source(const char *path) {
     int line_no = 0;
     while (fgets(buf, sizeof(buf), f)) {
         line_no++;
-        if (g_line_count >= MAX_LINES) {
-            fprintf(stderr, "Too many source lines (max %d)\n", MAX_LINES);
-            exit(1);
-        }
-        split_line(buf, line_no, &g_lines[g_line_count]);
-        g_line_count++;
+        /* macro_process_line (macro.c) is what actually calls
+         * split_line() and appends to g_lines now -- a raw line here
+         * might expand into several real source lines (a macro
+         * invocation), or none at all (part of a macro definition), so
+         * the old direct "one fgets() line in, one g_lines entry out"
+         * loop body no longer holds. */
+        macro_process_line(buf, line_no);
     }
     fclose(f);
 }

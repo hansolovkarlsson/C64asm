@@ -9,6 +9,8 @@
 #ifndef C64ASM_STRUTILS_H
 #define C64ASM_STRUTILS_H
 
+#include "common.h"
+
 /*
  * Trims leading and trailing whitespace from a string, in place.
  * Whitespace is whatever isspace() considers it (space, tab, newline,
@@ -54,5 +56,28 @@ int is_ident_char(char c);
  *         since this is a straight one-byte-in-one-byte-out mapping).
  */
 void ascii_to_petscii(const char *s, unsigned char *out, int *outlen);
+
+/* Removes a ';' comment from `line`, in place, stopping at the first ';'
+ * that isn't inside a double-quoted string -- so a semicolon inside a
+ * .text "..." string doesn't get mistaken for the start of a comment.
+ * Used by both lineparser.c (parsing an ordinary source line) and
+ * macro.c (deciding what a raw line's meaningful content is, before
+ * checking whether it's a macro definition or invocation). */
+void strip_comment(char *line);
+
+/*
+ * Splits a comma-separated argument list (e.g. the operand of
+ * ".byte 1, 2, \"hi\", 3", or a macro invocation's argument list) into
+ * individual trimmed argument strings, respecting quotes and
+ * parentheses -- a comma inside a quoted string or inside parentheses
+ * doesn't count as a separator.
+ *
+ * operand:  the text to split, e.g. "1, 2, \"hi\", 3".
+ * args:     caller-provided output array.
+ * max_args: how many entries `args` has room for.
+ *
+ * Returns the number of arguments found (and written into `args`).
+ */
+int split_args(const char *operand, char args[][MAX_LINE_LEN], int max_args);
 
 #endif
