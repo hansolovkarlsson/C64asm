@@ -48,6 +48,7 @@ Directives:
     .word $1000,label     emit little-endian 16-bit words (alias: .dw)
     .text "HELLO"        emit ASCII->PETSCII-mapped text bytes (alias: .asc)
     .fill 10, $00        emit N bytes of the given value (alias: .ds, .res)
+    .align 64            pad with zero bytes up to the next multiple of N
     .basic               emit a standard BASIC "10 SYS <org>" stub
                           (must appear before the first .org/code)
 
@@ -134,7 +135,7 @@ MODE_SIZE = {'imp':1,'acc':1,'imm':2,'zp':2,'zpx':2,'zpy':2,'rel':2,
 BRANCHES = {'BCC','BCS','BEQ','BMI','BNE','BPL','BVC','BVS'}
 
 DIRECTIVES = {'.org', '*=', '.byte', '.db', '.word', '.dw', '.text', '.asc',
-              '.fill', '.ds', '.res', '.basic', '.equ'}
+              '.fill', '.ds', '.res', '.basic', '.equ', '.align'}
 
 MAX_MACRO_EXPANSION_DEPTH = 16   # guards against runaway/infinite recursive macros
 
@@ -817,6 +818,44 @@ class Assembler:
                     if gap > 0:
                         output.extend(b'\x00' * gap)
                 pc = val
+                if label:
+                    self._define_symbol(label, pc, line_no, pass_no, raw=raw)
+                continue
+
+            if op == '.align':
+                # Advances pc to the next multiple of `n`, padding the
+                # skipped bytes with zero -- exactly .org's forward-gap
+                # logic above, just with the target computed by rounding
+                # up rather than given directly. pc can never move
+                # *backward* here (target is always >= pc by
+                # construction), so there's no equivalent of .org's
+                # "moving backward" error to check for.
+                n, undef = eval_expr(operand, self.symbols, pc, line_no)
+                if undef and pass_no == 2:
+                    raise AsmError(f"Undefined symbol in .align expression", line_no, raw)
+                if undef:
+                    # Forward-referenced alignment value, pass 1 only
+                    # (pass 2 would already have raised above). n is
+                    # just eval_expr's undefined-symbol placeholder (0)
+                    # here, not a real value -- validating its sign or
+                    # dividing by it would be meaningless (and, for 0
+                    # specifically, a division by zero), so pc simply
+                    # doesn't advance this pass. That never produces
+                    # incorrect output: pass 2 always catches the
+                    # undefined symbol and aborts before anything
+                    # computed from a wrong pass-1 address could ship.
+                    target = pc
+                else:
+                    if n <= 0:
+                        raise AsmError(
+                            f".align requires a positive alignment value (got {n})",
+                            line_no, raw)
+                    target = ((pc + n - 1) // n) * n
+                if pass_no == 2:
+                    gap = target - pc
+                    if gap > 0:
+                        output.extend(b'\x00' * gap)
+                pc = target
                 if label:
                     self._define_symbol(label, pc, line_no, pass_no, raw=raw)
                 continue

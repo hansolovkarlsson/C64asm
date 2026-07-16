@@ -201,12 +201,43 @@ uppercase regardless of the case used in the source.
 | `.word a, b, ...` | `.dw` | comma-separated 16-bit values | Emit each value as two bytes, little-endian. |
 | `.text "..."` | `.asc` | comma-separated `"strings"` (or bare text) | PETSCII-encode and emit text (§6). |
 | `.fill count, value` | `.ds`, `.res` | count, optional fill byte (default 0) | Emit `count` bytes of `value`. |
+| `.align n` | — | one expression | Pad with zero bytes, if necessary, until the program counter is a multiple of `n`. A no-op if it already is. `n` must evaluate to a positive value. A label on the same line (`sprite_data: .align 64`) is bound to the *aligned* address, matching how `.org`'s same-line label works. |
 | `.basic` | — | none | Emit a tokenized BASIC line `10 SYS <addr>` at `$0801`, where `<addr>` is automatically computed to point at the very next byte of assembled code — i.e. wherever the code following `.basic` ends up. Typing `LOAD"...",8,1` then `RUN` starts the machine code directly. Must appear before any code you want it to `SYS` into. |
 | `label = expr` | `.equ` | one expression | Bind `label` to the value of `expr` (not to the current PC). See §2. |
 
 `.byte`/`.word`/`.text`/`.fill` all accept comma-separated argument lists,
 so `.byte $01, $02, "AB", $00` mixes numeric bytes and quoted text on a
 single line.
+
+### `.align` example
+
+Sprite pointers, and several other things a real C64 program cares
+about, need to sit at an address that's a multiple of some fixed size —
+64 bytes for sprite data, 256 for a page boundary, and so on. Without
+`.align`, getting there means manually working out the next safe address
+by hand and hard-coding it (typically with `.org` or `*=`), then
+redoing that arithmetic by hand every time the code above it grows or
+shrinks enough to cross a boundary:
+
+```
+        * = $c000
+        lda #$00
+        sta $d015
+        jmp start
+
+        .align 64
+sprite0_data:
+        .byte $ff,$ff,$ff
+        .fill 61, $00
+
+start:
+        lda #<sprite0_data
+        sta $07f8
+        rts
+```
+
+`sprite0_data` always lands on the next 64-byte boundary, however much
+the code above it changes — no manual recomputation, ever.
 
 ### `.basic` example
 

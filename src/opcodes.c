@@ -181,7 +181,7 @@ void init_opcodes(void) {
 int is_directive(const char *tok) {
     static const char *dirs[] = {
         ".org", ".byte", ".db", ".word", ".dw", ".text", ".asc",
-        ".fill", ".ds", ".res", ".basic", ".equ", NULL
+        ".fill", ".ds", ".res", ".basic", ".equ", ".align", NULL
     };
     for (int i = 0; dirs[i]; i++)
         if (strcasecmp(dirs[i], tok) == 0) return 1;

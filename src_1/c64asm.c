@@ -24,7 +24,7 @@
  *                LDA $10,Y / LDA $1000,Y / LDA ($10,X) / LDA ($10),Y
  *                JMP ($1000) / ASL A / RTS / BNE loop
  *   Directives:  *=$0801 / .org $0801 / .byte / .db / .word / .dw
- *                .text / .asc / .fill / .ds / .res / .basic / .equ
+ *                .text / .asc / .fill / .ds / .res / .basic / .equ / .align
  *   Comments:    ; to end of line
  */
 
@@ -221,7 +221,7 @@ static void init_opcodes(void) {
 static int is_directive(const char *tok) {
     static const char *dirs[] = {
         ".org", ".byte", ".db", ".word", ".dw", ".text", ".asc",
-        ".fill", ".ds", ".res", ".basic", ".equ", NULL
+        ".fill", ".ds", ".res", ".basic", ".equ", ".align", NULL
     };
     for (int i = 0; dirs[i]; i++)
         if (strcasecmp(dirs[i], tok) == 0) return 1;
@@ -1359,6 +1359,46 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                 for (long i = 0; i < gap; i++) bb_push(output, 0x00);
             }
             pc = val;
+            if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw);
+            continue;
+        }
+
+        if (strcasecmp(L->op, ".align") == 0) {
+            /* Advances pc to the next multiple of `n`, padding the
+             * skipped bytes with zero -- exactly .org's forward-gap
+             * logic above, just with the target computed by rounding
+             * up rather than given directly. pc can never move
+             * *backward* here (target is always >= pc by construction),
+             * so there's no equivalent of .org's "moving backward"
+             * error to check for. */
+            int undef = 0;
+            long n = eval_expr(L->operand, pc, L->line_no, &undef);
+            if (undef && pass_no == 2)
+                asm_error(L->line_no, L->raw, "Undefined symbol in .align expression");
+            long target;
+            if (undef) {
+                /* Forward-referenced alignment value, pass 1 only (pass
+                 * 2 would already have raised above). n is just
+                 * eval_expr's undefined-symbol placeholder (0) here,
+                 * not a real value -- validating its sign or dividing
+                 * by it would be meaningless (and, for 0 specifically,
+                 * actual division-by-zero undefined behavior in C), so
+                 * pc simply doesn't advance this pass. That never
+                 * produces incorrect output: pass 2 always catches the
+                 * undefined symbol and aborts before anything computed
+                 * from a wrong pass-1 address could ship. */
+                target = pc;
+            } else {
+                if (n <= 0)
+                    asm_error(L->line_no, L->raw,
+                        ".align requires a positive alignment value (got %ld)", n);
+                target = ((pc + n - 1) / n) * n;
+            }
+            if (pass_no == 2) {
+                long gap = target - pc;
+                for (long i = 0; i < gap; i++) bb_push(output, 0x00);
+            }
+            pc = target;
             if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw);
             continue;
         }

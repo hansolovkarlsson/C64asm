@@ -1,6 +1,9 @@
 notes/
 archive/
-bin/c64asm
-organization.md
-src/*.o
+new/
+
 vice.log
+
+bin/c64asm
+src/*.o
+src_1/c64asm

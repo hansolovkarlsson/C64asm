@@ -41,7 +41,7 @@
  *                LDA $10,Y / LDA $1000,Y / LDA ($10,X) / LDA ($10),Y
  *                JMP ($1000) / ASL A / RTS / BNE loop
  *   Directives:  *=$0801 / .org $0801 / .byte / .db / .word / .dw
- *                .text / .asc / .fill / .ds / .res / .basic / .equ
+ *                .text / .asc / .fill / .ds / .res / .basic / .equ / .align
  *   Comments:    ; to end of line
  */
 

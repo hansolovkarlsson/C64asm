@@ -1,0 +1,30 @@
+; c64asm listing  (origin $0801, 76 bytes)
+
+080D  A2 00             ldx #$00
+080F  BD 40 08          lda message,x
+0812  F0 07             beq done_print
+0814  20 D2 FF          jsr CHROUT
+0817  E8                inx
+0818  4C 0F 08          jmp print_loop
+081B  A9 00             lda #BLACK
+081D  8D 20 D0          sta BORDER
+0820  EE 20 D0          inc BORDER
+0823  A2 00             ldx #$00
+0825  A0 00             ldy #$00
+0827  C8                iny
+0828  D0 FD             bne delay_inner
+082A  CA                dex
+082B  D0 F8             bne delay_outer
+082D  4C 20 08          jmp color_loop
+
+Symbol table:
+  BLACK                = $0000
+  BORDER               = $D020
+  CHROUT               = $FFD2
+  color_loop           = $0820
+  delay_inner          = $0827
+  delay_outer          = $0825
+  done_print           = $081B
+  message              = $0840
+  print_loop           = $080F
+  start                = $080D
