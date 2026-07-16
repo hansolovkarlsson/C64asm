@@ -512,12 +512,118 @@ different directories) is still correctly recognized as one file.
   error.
 - Once `.include` is used **anywhere** in a program, every subsequent
   error message — including ones from the top-level file itself — names
-  which file it came from (see §14). A program that never uses
+  which file it came from (see §15). A program that never uses
   `.include` sees no change in its error output at all.
 
 ---
 
-## 11. Instruction set
+## 11. Conditional assembly
+
+```
+.if expr
+        ; assembled only if expr is nonzero
+.elif expr2
+        ; assembled only if expr was zero and expr2 is nonzero
+.else
+        ; assembled only if every preceding condition was zero
+.endif
+```
+
+```
+.ifdef NAME
+        ; assembled only if NAME is a defined symbol
+.else
+        ; assembled only if it isn't
+.endif
+```
+
+```
+.ifndef NAME
+        ; the exact opposite of .ifdef
+.endif
+```
+
+`.elif` and `.else` are both optional, and either form can be nested
+inside the other. `.elif` is only valid after `.if` (not after `.ifdef`/
+`.ifndef` — see Rules below).
+
+### Example: PAL/NTSC timing
+
+```
+PAL = 1
+
+.if PAL
+        FRAME_CYCLES = 19656
+.else
+        FRAME_CYCLES = 17030
+.endif
+```
+
+Flipping the single `PAL` constant at the top of the file is enough to
+retarget every place `FRAME_CYCLES` is used, without maintaining two
+separate copies of the surrounding code.
+
+### What `.if` can and can't gate
+
+Unlike macros (§8) and `.include` (§10), conditional assembly is
+resolved **while assembling**, not beforehand — which is deliberate: it
+means a condition can see real constants and labels defined with `=`,
+not just things known before any actual parsing happens. The trade-off
+is the reverse of what you might expect from other assemblers' `#if`-
+style preprocessors: `.if` can gate whether **instructions and data
+directives** get assembled (including ones inside a macro's body,
+correctly, on every separate invocation), but it **cannot** gate which
+`.macro` gets *defined* or which file gets `.include`d, because macro
+definitions and includes are already fully resolved before `.if` is
+ever evaluated. Writing something like:
+
+```
+.if DEBUG
+.macro LOG msg
+        ; ...
+.endmacro
+.else
+.macro LOG msg
+        ; a different, no-op definition
+.endmacro
+.endif
+```
+
+does **not** work — both `.macro LOG` definitions get registered
+regardless of `DEBUG`'s value, and assembly fails with `macro 'LOG'
+already defined`. If you need genuinely different macro behavior,
+define one macro whose *body* contains the `.if`, the way the PAL/NTSC
+example above does with ordinary code.
+
+### Rules and limitations
+
+- **`.if`/`.elif` conditions must not reference a forward-declared
+  symbol.** Unlike almost every other expression in this assembler,
+  this is a hard error — checked identically on both assembly passes,
+  not deferred to the second one. This is a correctness requirement,
+  not an arbitrary restriction: a wrong guess about an ordinary
+  expression's value only affects a byte value, silently corrected once
+  the real value is known, but a wrong guess about a *condition* changes
+  which lines exist at all, which would desynchronize every address
+  computed afterward between the two passes. In practice this means a
+  condition should reference a constant defined with `=` earlier in the
+  file (as in the PAL/NTSC example above), not a label or constant that
+  appears later.
+- **`.ifdef`/`.ifndef` ask "was this defined *before this line*"**, not
+  "does it exist anywhere in the file" — so a symbol defined later still
+  reads as undefined at an earlier `.ifdef`, exactly as you'd expect.
+- **A hard limit of 16 levels of nested conditionals**, as a backstop
+  against runaway nesting.
+- **An unclosed `.if`/`.ifdef`/`.ifndef`** (missing its `.endif`) is a
+  fatal error at end of file, naming the line the unclosed block started
+  on.
+- A label can't share a line with `.if`/`.elif`/`.else`/`.endif`/
+  `.ifdef`/`.ifndef` — these directives don't advance the program
+  counter, so there's no meaningful address to bind such a label to.
+
+---
+
+## 12. Instruction set
 
 
 All 56 documented NMOS 6502/6510 mnemonics are supported. Each entry below
@@ -593,7 +699,7 @@ supported.
 
 ---
 
-## 12. Output format
+## 13. Output format
 
 The `.prg` file written is:
 
@@ -610,7 +716,7 @@ stub is the first thing written.
 
 ---
 
-## 13. Listing file format
+## 14. Listing file format
 
 When `--listing` is given, the assembler writes a text file with one line
 per assembled instruction or data-emitting directive:
@@ -641,7 +747,7 @@ only real 6502 instructions appear there.
 
 ---
 
-## 14. Error messages
+## 15. Error messages
 
 All errors are fatal (assembly stops immediately) and are printed in the
 form:
@@ -679,10 +785,15 @@ Common errors:
 | `circular .include detected: a.asm -> b.inc -> a.asm` | An `.include` chain loops back on itself; the message shows the full chain. |
 | `.include nested too deeply (max 16)` | More than 16 levels of nested `.include` — almost always a sign of an undetected circular include. |
 | `Bad character '...' in expression '...'` | A character the tokenizer doesn't recognize appeared in an expression. |
+| `Undefined symbol in .if/.elif expression` | A `.if`/`.elif` condition referenced a symbol not yet defined at that point in the file — forward references aren't allowed here (see §11). |
+| `'.elif'/'.else'/'.endif' with no matching '.if'` | One of these appeared without an open `.if`/`.ifdef`/`.ifndef` block. |
+| `'.elif' is not allowed after '.ifdef'/'.ifndef'` | `.elif` only works in an `.if` chain; use `.else` after `.ifdef`/`.ifndef` instead. |
+| `unclosed '.if'/'.ifdef'/'.ifndef' at end of file` | A conditional block's `.endif` is missing; the message names the line the block started on. |
+| `conditional nesting too deep (max 16)` | More than 16 levels of nested `.if`/`.ifdef`/`.ifndef`. |
 
 ---
 
-## 15. Known limitations
+## 16. Known limitations
 
 - **Zero-page sizing of forward-referenced labels.** The assembler picks
   zero-page vs. absolute addressing based on whether an operand's value is
@@ -697,10 +808,14 @@ Common errors:
   addresses under `$100`, e.g. pointers in `$FB`–`$FE`) are conventionally
   defined with `=` *before* they're used, which sidesteps the issue
   entirely, and is good practice regardless.
-- **Macros (§8), local labels (§9), and includes (§10) exist but are
-  intentionally simple:** macros must be defined before use, and there's
-  still no conditional assembly (so no manual include guards either,
-  though `.include` doesn't need them -- see §10).
+- **Macros (§8), local labels (§9), includes (§10), and conditional
+  assembly (§11) exist but are intentionally simple:** macros must be
+  defined before use; `.if`/`.elif` conditions can't reference a
+  forward-declared symbol (§11); and `.if` can gate instructions and
+  data but not which `.macro` gets defined or which file gets
+  `.include`d, since those are resolved before `.if` is evaluated
+  (§11). `.include` doesn't need manual include guards even without
+  conditional assembly backing them — see §10.
 - **No undocumented/illegal opcodes.**
 - **Single error at a time.** Assembly halts at the first error rather
   than collecting and reporting multiple problems.
@@ -708,7 +823,7 @@ Common errors:
 
 ---
 
-## 16. Complete example
+## 17. Complete example
 
 ```asm
 ; hello.asm - prints a message and cycles the border color

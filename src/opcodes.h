@@ -89,7 +89,8 @@ int is_branch_mnemonic(const char *name);
 
 /* True if tok (case-insensitively) is one of this assembler's
  * directives: .org, .byte, .db, .word, .dw, .text, .asc, .fill, .ds,
- * .res, .basic, .equ, .align. (The bare "*=" org form and "label = expr"
+ * .res, .basic, .equ, .align, .if, .elif, .else, .endif, .ifdef,
+ * .ifndef. (The bare "*=" org form and "label = expr"
  * aren't matched here -- lineparser.c recognizes those directly by their
  * punctuation before a directive name would even come into it.) */
 int is_directive(const char *tok);

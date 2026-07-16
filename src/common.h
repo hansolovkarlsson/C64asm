@@ -44,5 +44,6 @@
                                     includes.c */
 #define MAX_INCLUDE_DEPTH 16     /* guards against runaway/circular .include chains */
 #define MAX_INCLUDED_FILES 256   /* total distinct files includable in one run */
+#define MAX_COND_DEPTH 16        /* guards against runaway .if/.ifdef nesting */
 
 #endif

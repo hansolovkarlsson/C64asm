@@ -24,15 +24,23 @@ Symbol *find_symbol(const char *name) {
     return NULL;
 }
 
+Symbol *find_symbol_defined_before(const char *name, int li) {
+    Symbol *s = find_symbol(name);
+    if (s && s->first_li < li) return s;
+    return NULL;
+}
+
 void define_symbol(const char *name, long value, int line_no,
-                    int pass_no, int allow_redefine, const char *raw) {
+                    int pass_no, int allow_redefine, const char *raw, int li) {
     Symbol *s = find_symbol(name);
     if (s) {
         /* Only complain about a genuine redefinition during pass 1.
          * By pass 2, every label's final address is already known from
          * pass 1, so seeing "the same label again" during pass 2 just
          * means we're revisiting the same line of source we saw before
-         * -- it's expected to match, not a new conflict to check for. */
+         * -- it's expected to match, not a new conflict to check for.
+         * Note first_li is deliberately NOT touched here -- it should
+         * always reflect the symbol's very first definition. */
         if (pass_no == 1 && !allow_redefine && s->value != value)
             asm_error(line_no, raw, "Symbol '%s' already defined", name);
         s->value = value;
@@ -43,5 +51,6 @@ void define_symbol(const char *name, long value, int line_no,
     strncpy(symtab[symtab_count].name, name, MAX_IDENT - 1);
     symtab[symtab_count].name[MAX_IDENT - 1] = '\0';
     symtab[symtab_count].value = value;
+    symtab[symtab_count].first_li = li;
     symtab_count++;
 }

@@ -29,6 +29,48 @@
  * passes stay consistent with each other (in particular, why an
  * instruction must come out the *same size* in both passes, and what
  * that implies about this assembler's zero-page-vs-absolute heuristic).
+ *
+ * run_pass() also implements conditional assembly (.if/.elif/.else/
+ * .endif and .ifdef/.ifndef/.else/.endif) -- deliberately as part of
+ * this assembly-time pass, not as a preprocessing step the way macros
+ * (macro.c) and .include (includes.c) are, so a condition can see real
+ * constants and labels (like a PAL/NTSC flag defined with "="), not
+ * just things known before any real parsing happens. The trade-off:
+ * .if can gate whether instructions and data get assembled, but it
+ * can't gate which .macro gets *defined* or which file gets
+ * .include'd, since those are already fully resolved before .if is
+ * ever evaluated.
+ *
+ * Two correctness requirements come directly from this being a
+ * two-pass assembler, and are easy to get wrong:
+ *
+ *  1. ".if"/".elif" conditions must not reference a forward-declared
+ *     symbol -- this is an unconditional error, checked the same way
+ *     on both passes, *not* deferred to pass 2 the way other
+ *     expressions' undefined-symbol checks are (see .org/.align in
+ *     assembler.c). The reason: for an ordinary expression, pass 1
+ *     guessing wrong about an undefined symbol's value only affects a
+ *     byte *value*, silently corrected once pass 2 knows better. For
+ *     "if", a wrong guess changes which lines exist at all -- which
+ *     would desynchronize every address computed after it between the
+ *     two passes. Requiring the condition to be fully known equally on
+ *     both passes is what keeps that from ever happening.
+ *
+ *  2. ".ifdef"/".ifndef" must NOT simply check "is this symbol in the
+ *     symbol table right now" (find_symbol(), symtab.h). symtab is
+ *     never reset between pass 1 and pass 2 (pass 2 needs pass 1's
+ *     complete table to resolve forward references) -- which means by
+ *     the time pass 2 *starts*, the table already contains every
+ *     symbol defined anywhere in the file, including ones that don't
+ *     textually appear until later. A plain existence check would see
+ *     "not defined" during pass 1 (walking forward, symbol not
+ *     reached yet) but "defined" during pass 2, for the exact same
+ *     .ifdef line -- the two passes would disagree about whether that
+ *     line's block even exists. The fix: find_symbol_defined_before()
+ *     (symtab.h) asks "was it defined strictly before this line's
+ *     index" rather than "does it exist right now". Since both passes
+ *     walk g_lines in the same order, that question has the same
+ *     answer on both passes.
  */
 
 #ifndef C64ASM_ASSEMBLER_H

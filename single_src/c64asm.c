@@ -25,6 +25,7 @@
  *                JMP ($1000) / ASL A / RTS / BNE loop
  *   Directives:  *=$0801 / .org $0801 / .byte / .db / .word / .dw
  *                .text / .asc / .fill / .ds / .res / .basic / .equ / .align
+ *                .if / .elif / .else / .endif / .ifdef / .ifndef
  *   Comments:    ; to end of line
  */
 
@@ -266,7 +267,8 @@ static void init_opcodes(void) {
 static int is_directive(const char *tok) {
     static const char *dirs[] = {
         ".org", ".byte", ".db", ".word", ".dw", ".text", ".asc",
-        ".fill", ".ds", ".res", ".basic", ".equ", ".align", NULL
+        ".fill", ".ds", ".res", ".basic", ".equ", ".align",
+        ".if", ".elif", ".else", ".endif", ".ifdef", ".ifndef", NULL
     };
     for (int i = 0; dirs[i]; i++)
         if (strcasecmp(dirs[i], tok) == 0) return 1;
@@ -378,6 +380,11 @@ static void ascii_to_petscii(const char *s, unsigned char *out, int *outlen) {
 typedef struct {
     char name[MAX_IDENT];
     long value;
+    int first_li;   /* g_lines index of this symbol's FIRST definition;
+                        used by .ifdef/.ifndef to correctly answer "has
+                        this been defined YET" in a way that's consistent
+                        across both assembly passes -- see the note above
+                        the conditional-assembly handling in run_pass() */
 } Symbol;
 
 static Symbol symtab[MAX_SYMBOLS];
@@ -389,8 +396,18 @@ static Symbol *find_symbol(const char *name) {
     return NULL;
 }
 
+/* Like find_symbol(), but only counts as found if the symbol's FIRST
+ * definition was strictly before g_lines index `li` -- see the note
+ * above the conditional-assembly handling in run_pass() for why this,
+ * not a plain find_symbol() != NULL check, is what .ifdef/.ifndef need. */
+static Symbol *find_symbol_defined_before(const char *name, int li) {
+    Symbol *s = find_symbol(name);
+    if (s && s->first_li < li) return s;
+    return NULL;
+}
+
 static void define_symbol(const char *name, long value, int line_no,
-                           int pass_no, int allow_redefine, const char *raw) {
+                           int pass_no, int allow_redefine, const char *raw, int li) {
     Symbol *s = find_symbol(name);
     if (s) {
         if (pass_no == 1 && !allow_redefine && s->value != value)
@@ -403,6 +420,7 @@ static void define_symbol(const char *name, long value, int line_no,
     strncpy(symtab[symtab_count].name, name, MAX_IDENT - 1);
     symtab[symtab_count].name[MAX_IDENT - 1] = '\0';
     symtab[symtab_count].value = value;
+    symtab[symtab_count].first_li = li;
     symtab_count++;
 }
 
@@ -1026,6 +1044,7 @@ static void mangle_local_labels(const char *text, int scope_id, char *out, size_
  */
 
 #define MAX_INCLUDE_DEPTH 16
+#define MAX_COND_DEPTH 16      /* guards against runaway .if/.ifdef nesting */
 #define MAX_INCLUDED_FILES 256   /* total distinct files includable in one run */
 
 static char open_stack_canon[MAX_INCLUDE_DEPTH + 1][PATH_MAX];
@@ -1595,20 +1614,184 @@ static void listing_add(long addr, const char *raw, const unsigned char *bytes, 
 }
 
 /* --------------------------------------------------------------------- */
+/* Conditional assembly                                                   */
+/* --------------------------------------------------------------------- */
+/*
+ * .if expr / .elif expr / .else / .endif
+ * .ifdef NAME / .else / .endif
+ * .ifndef NAME / .else / .endif
+ *
+ * Unlike macros and .include, this is an *assembly-time* feature,
+ * handled directly in run_pass() below rather than as a preprocessing
+ * step -- deliberately, so a condition can see real constants and
+ * labels (like a PAL/NTSC flag defined with "="), not just things known
+ * before any real parsing happens. The trade-off: .if can gate whether
+ * instructions and data get assembled, but it can't gate which .macro
+ * gets *defined* or which file gets .include'd, since those are already
+ * fully resolved before .if is ever evaluated.
+ *
+ * Two correctness requirements come directly from this being a two-pass
+ * assembler, and are easy to get wrong:
+ *
+ *  1. ".if"/".elif" conditions must not reference a forward-declared
+ *     symbol -- this is an unconditional error, checked the same way on
+ *     both passes, *not* deferred to pass 2 the way other expressions'
+ *     undefined-symbol checks are (see .org/.align above). The reason:
+ *     for an ordinary expression, pass 1 guessing wrong about an
+ *     undefined symbol's value only affects a byte *value*, silently
+ *     corrected once pass 2 knows better. For "if", a wrong guess
+ *     changes which lines exist at all -- which would desynchronize
+ *     every address computed after it between the two passes. Requiring
+ *     the condition to be fully known equally on both passes is what
+ *     keeps that from ever happening.
+ *
+ *  2. ".ifdef"/".ifndef" must NOT simply check "is this symbol in the
+ *     symbol table right now". symtab is never reset between pass 1
+ *     and pass 2 (pass 2 needs pass 1's complete table to resolve
+ *     forward references) -- which means by the time pass 2 *starts*,
+ *     the table already contains every symbol defined anywhere in the
+ *     file, including ones that don't textually appear until later. A
+ *     plain find_symbol() != NULL check would see "not defined" during
+ *     pass 1 (walking forward, symbol not reached yet) but "defined"
+ *     during pass 2, for the exact same .ifdef line -- the two passes
+ *     would disagree about whether that line's block even exists. The
+ *     fix: find_symbol_defined_before() (above) asks "was it defined
+ *     strictly before this line's index" rather than "does it exist
+ *     right now". Since both passes walk g_lines in the same order,
+ *     that question has the same answer on both passes.
+ */
+
+typedef struct {
+    int is_ifdef_style;    /* true for .ifdef/.ifndef, which don't allow .elif */
+    int currently_active;  /* is the branch we're IN right now (if/elif/else)
+                               the active one? */
+    int condition_met;     /* has ANY branch in this block already been
+                               taken? (stops a later .elif/.else from also
+                               activating) */
+    int opened_line_no;    /* where this block's own .if/.ifdef/.ifndef line
+                               was, for a helpful "unclosed at end of file"
+                               error message */
+    char opened_raw[MAX_LINE_LEN];
+} CondFrame;
+
+/* --------------------------------------------------------------------- */
 /* Assembler pass                                                         */
 /* --------------------------------------------------------------------- */
+
+/* Returns whether the CondFrame at stack[idx] is active, treating an
+ * index before the start of the stack (idx < 0) as "active" -- that
+ * represents being outside of any .if block at all, i.e. the top
+ * level, which is always active. Centralizing this avoids repeating
+ * the same "is there even a frame there" check at every place that
+ * needs to ask "is my enclosing context active", and keeps that check
+ * from ever looking, to a reader or a static analyzer, like an
+ * unguarded out-of-bounds index. */
+static int cond_frame_active(CondFrame *stack, int idx) {
+    return idx < 0 || stack[idx].currently_active;
+}
 
 static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
     long pc = 0x0801;
     long origin = -1;
+    CondFrame cond_stack[MAX_COND_DEPTH + 1];
+    int cond_stack_top = 0;
 
     for (int li = 0; li < g_line_count; li++) {
         SourceLine *L = &g_lines[li];
         set_error_file(L->filename[0] ? L->filename : NULL);
         long entry_pc = pc;
 
+        int parent_active = cond_frame_active(cond_stack, cond_stack_top - 1);
+
+        if (strcasecmp(L->op, ".if") == 0 || strcasecmp(L->op, ".ifdef") == 0 ||
+            strcasecmp(L->op, ".ifndef") == 0) {
+            if (cond_stack_top >= MAX_COND_DEPTH)
+                asm_error(L->line_no, L->raw, "conditional nesting too deep (max %d)", MAX_COND_DEPTH);
+            CondFrame *f = &cond_stack[cond_stack_top++];
+            f->is_ifdef_style = (strcasecmp(L->op, ".if") != 0);
+            f->opened_line_no = L->line_no;
+            strncpy(f->opened_raw, L->raw, sizeof(f->opened_raw) - 1);
+            f->opened_raw[sizeof(f->opened_raw) - 1] = '\0';
+            if (!parent_active) {
+                /* An enclosing branch is already false, so this whole
+                 * block is dead regardless of its own condition --
+                 * don't even evaluate it (it may reference symbols that
+                 * don't exist, which would otherwise be a spurious
+                 * error for code that was never going to run anyway),
+                 * and make sure none of ITS .elif/.else branches can
+                 * activate either. */
+                f->currently_active = 0;
+                f->condition_met = 1;
+            } else if (strcasecmp(L->op, ".if") == 0) {
+                int undef = 0;
+                long v = eval_expr(L->operand, pc, L->line_no, &undef);
+                if (undef)
+                    asm_error(L->line_no, L->raw,
+                        "Undefined symbol in .if/.elif expression -- forward references "
+                        "are not allowed in conditional-assembly expressions");
+                f->currently_active = (v != 0);
+                f->condition_met = f->currently_active;
+            } else {
+                char name[MAX_LINE_LEN];
+                strncpy(name, L->operand, sizeof(name) - 1); name[sizeof(name)-1] = '\0';
+                trim(name);
+                int is_defined = (find_symbol_defined_before(name, li) != NULL);
+                int cond = (strcasecmp(L->op, ".ifdef") == 0) ? is_defined : !is_defined;
+                f->currently_active = cond;
+                f->condition_met = cond;
+            }
+            continue;
+        }
+
+        if (strcasecmp(L->op, ".elif") == 0) {
+            if (cond_stack_top == 0) {
+                asm_error(L->line_no, L->raw, "'.elif' with no matching '.if'");
+            } else {
+                CondFrame *f = &cond_stack[cond_stack_top-1];
+                if (f->is_ifdef_style)
+                    asm_error(L->line_no, L->raw,
+                        "'.elif' is not allowed after '.ifdef'/'.ifndef' (only after '.if')");
+                int outer_ok = cond_frame_active(cond_stack, cond_stack_top - 2);
+                if (!outer_ok || f->condition_met) {
+                    f->currently_active = 0;
+                } else {
+                    int undef = 0;
+                    long v = eval_expr(L->operand, pc, L->line_no, &undef);
+                    if (undef)
+                        asm_error(L->line_no, L->raw,
+                            "Undefined symbol in .if/.elif expression -- forward references "
+                            "are not allowed in conditional-assembly expressions");
+                    f->currently_active = (v != 0);
+                    if (f->currently_active) f->condition_met = 1;
+                }
+            }
+            continue;
+        }
+
+        if (strcasecmp(L->op, ".else") == 0) {
+            if (cond_stack_top == 0) {
+                asm_error(L->line_no, L->raw, "'.else' with no matching '.if'");
+            } else {
+                CondFrame *f = &cond_stack[cond_stack_top-1];
+                int outer_ok = cond_frame_active(cond_stack, cond_stack_top - 2);
+                f->currently_active = outer_ok && !f->condition_met;
+                f->condition_met = 1;
+            }
+            continue;
+        }
+
+        if (strcasecmp(L->op, ".endif") == 0) {
+            if (cond_stack_top == 0)
+                asm_error(L->line_no, L->raw, "'.endif' with no matching '.if'/'.ifdef'/'.ifndef'");
+            cond_stack_top--;
+            continue;
+        }
+
+        if (cond_stack_top > 0 && !cond_stack[cond_stack_top-1].currently_active)
+            continue;
+
         if (!L->has_op) {
-            if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw);
+            if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw, li);
             continue;
         }
 
@@ -1619,7 +1802,7 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
             if (pass_no == 2) bb_push_n(output, stub, slen);
             origin = 0x0801;
             pc = code_start;
-            if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw);
+            if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw, li);
             continue;
         }
 
@@ -1641,7 +1824,7 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                 for (long i = 0; i < gap; i++) bb_push(output, 0x00);
             }
             pc = val;
-            if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw);
+            if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw, li);
             continue;
         }
 
@@ -1681,18 +1864,18 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                 for (long i = 0; i < gap; i++) bb_push(output, 0x00);
             }
             pc = target;
-            if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw);
+            if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw, li);
             continue;
         }
 
         if (strcmp(L->op, "=") == 0) {
             int undef = 0;
             long val = eval_expr(L->operand, pc, L->line_no, &undef);
-            define_symbol(L->label, val, L->line_no, pass_no, 1, L->raw);
+            define_symbol(L->label, val, L->line_no, pass_no, 1, L->raw, li);
             continue;
         }
 
-        if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw);
+        if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw, li);
 
         if (strcasecmp(L->op, ".byte") == 0 || strcasecmp(L->op, ".db") == 0) {
             char args[MAX_ARGS][MAX_LINE_LEN];
@@ -1810,6 +1993,11 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
             pc += size;
         }
     }
+
+    if (cond_stack_top > 0)
+        asm_error(cond_stack[cond_stack_top-1].opened_line_no,
+                  cond_stack[cond_stack_top-1].opened_raw,
+                  "unclosed '.if'/'.ifdef'/'.ifndef' at end of file (missing '.endif')");
 
     if (origin < 0) origin = 0x0801;
     *origin_out = origin;

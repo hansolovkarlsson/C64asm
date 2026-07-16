@@ -136,10 +136,12 @@ MODE_SIZE = {'imp':1,'acc':1,'imm':2,'zp':2,'zpx':2,'zpy':2,'rel':2,
 BRANCHES = {'BCC','BCS','BEQ','BMI','BNE','BPL','BVC','BVS'}
 
 DIRECTIVES = {'.org', '*=', '.byte', '.db', '.word', '.dw', '.text', '.asc',
-              '.fill', '.ds', '.res', '.basic', '.equ', '.align'}
+              '.fill', '.ds', '.res', '.basic', '.equ', '.align',
+              '.if', '.elif', '.else', '.endif', '.ifdef', '.ifndef'}
 
 MAX_MACRO_EXPANSION_DEPTH = 16   # guards against runaway/infinite recursive macros
 MAX_INCLUDE_DEPTH = 16           # guards against runaway/circular .include chains
+MAX_COND_DEPTH = 16               # guards against runaway .if/.ifdef nesting
 
 
 # Filename-aware error messages, for .include support -- see the
@@ -909,9 +911,81 @@ class MacroProcessor:
 # Assembler core (two-pass)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Conditional assembly
+# ---------------------------------------------------------------------------
+#
+# .if expr / .elif expr / .else / .endif
+# .ifdef NAME / .else / .endif
+# .ifndef NAME / .else / .endif
+#
+# Unlike macros and .include, this is an *assembly-time* feature, handled
+# directly in Assembler._pass() rather than as a preprocessing step --
+# deliberately, so a condition can see real constants and labels (like a
+# PAL/NTSC flag defined with "="), not just things known before any real
+# parsing happens. The trade-off: .if can gate whether instructions and
+# data get assembled, but it can't gate which .macro gets *defined* or
+# which file gets .include'd, since those are already fully resolved
+# before .if is ever evaluated.
+#
+# Two correctness requirements come directly from this being a two-pass
+# assembler, and are easy to get wrong:
+#
+#  1. ".if"/".elif" conditions must not reference a forward-declared
+#     symbol -- this is an unconditional error, checked the same way on
+#     both passes, *not* deferred to pass 2 the way other expressions'
+#     undefined-symbol checks are (see .org/.align above). The reason:
+#     for an ordinary expression, pass 1 guessing wrong about an
+#     undefined symbol's value only affects a byte *value*, silently
+#     corrected once pass 2 knows better. For "if", a wrong guess
+#     changes which lines exist at all -- which would desynchronize
+#     every address computed after it between the two passes. Requiring
+#     the condition to be fully known equally on both passes is what
+#     keeps that from ever happening.
+#
+#  2. ".ifdef"/".ifndef" must NOT simply check "is this symbol in the
+#     symbol table right now". self.symbols is never reset between pass
+#     1 and pass 2 (pass 2 needs pass 1's complete table to resolve
+#     forward references) -- which means by the time pass 2 *starts*,
+#     the table already contains every symbol defined anywhere in the
+#     file, including ones that don't textually appear until later. A
+#     plain existence check would see "not defined" during pass 1
+#     (walking forward, symbol not reached yet) but "defined" during
+#     pass 2, for the exact same .ifdef line -- the two passes would
+#     disagree about whether that line's block even exists. The fix:
+#     self.symbol_first_li tracks the line *index* each symbol was
+#     first defined at, and .ifdef asks "was it defined strictly before
+#     this line's index" rather than "does it exist right now". Since
+#     both passes walk self.lines in the same order, that question has
+#     the same answer on both passes.
+
+class CondFrame:
+    """One entry per currently-open .if/.ifdef/.ifndef block."""
+    def __init__(self, is_ifdef_style, opened_line_no, opened_raw):
+        self.is_ifdef_style = is_ifdef_style   # True for .ifdef/.ifndef,
+                                                 # which don't allow .elif
+        self.currently_active = False   # is the branch we're IN right now
+                                          # (if/elif/else) the active one?
+        self.condition_met = False      # has ANY branch in this block
+                                          # already been taken? (stops a
+                                          # later .elif/.else from also
+                                          # activating)
+        self.opened_line_no = opened_line_no   # where this block's own
+        self.opened_raw = opened_raw            # .if/.ifdef/.ifndef line
+                                                  # was, for a helpful
+                                                  # "unclosed at end of
+                                                  # file" error message
+
+
 class Assembler:
     def __init__(self):
         self.symbols = {}
+        self.symbol_first_li = {}   # name -> index into self.lines where it
+                                      # was FIRST defined (never updated on a
+                                      # constant's redefinition) -- used only
+                                      # by .ifdef/.ifndef; see the note in
+                                      # _pass() for why plain "is this symbol
+                                      # in self.symbols" isn't safe there
         self.lines = []       # (line_no, raw_text, label, op, operand, filename)
         self.listing = []
 
@@ -930,14 +1004,105 @@ class Assembler:
         result = self._pass(pass_no=2)
         return result
 
+    def _eval_if_condition(self, operand, pc, line_no, raw):
+        """Evaluates a .if/.elif expression. Returns (truthy, truthy) --
+        the pair is just for call-site symmetry with the .ifdef/.ifndef
+        branch in _pass(), which also produces (currently_active,
+        condition_met) and happens to have them be equal in the simple
+        .if case too (there's no "already taken" concept from a single
+        evaluation the way an .elif *chain* has across calls).
+
+        Unlike every other expression in this assembler, an undefined
+        symbol here is a hard error on *both* passes, not just pass 2 --
+        see the design note above CondFrame for why that's required for
+        two-pass correctness, not just a style choice."""
+        val, undef = eval_expr(operand, self.symbols, pc, line_no)
+        if undef:
+            raise AsmError(
+                "Undefined symbol in .if/.elif expression -- forward references "
+                "are not allowed in conditional-assembly expressions",
+                line_no, raw)
+        cond = (val != 0)
+        return cond, cond
+
     def _pass(self, pass_no):
         pc = 0x0801
         origin = None
         output = bytearray()
+        cond_stack = []   # see the ".if"/".ifdef" handling below
 
-        for (line_no, raw, label, op, operand, filename) in self.lines:
+        def parent_active():
+            return not cond_stack or cond_stack[-1].currently_active
+
+        def currently_skipping():
+            return bool(cond_stack) and not cond_stack[-1].currently_active
+
+        for li, (line_no, raw, label, op, operand, filename) in enumerate(self.lines):
             _set_error_file(filename)
             entry_pc = pc
+
+            if op == '.if' or op == '.ifdef' or op == '.ifndef':
+                if len(cond_stack) >= MAX_COND_DEPTH:
+                    raise AsmError(f"conditional nesting too deep (max {MAX_COND_DEPTH})",
+                                    line_no, raw)
+                frame = CondFrame(is_ifdef_style=(op != '.if'), opened_line_no=line_no, opened_raw=raw)
+                if not parent_active():
+                    # An enclosing branch is already false, so this whole
+                    # block is dead regardless of its own condition --
+                    # don't even evaluate it (it may reference symbols
+                    # that don't exist, which would otherwise be a
+                    # spurious error for code that was never going to run
+                    # anyway), and make sure none of ITS .elif/.else
+                    # branches can activate either.
+                    frame.currently_active = False
+                    frame.condition_met = True
+                elif op == '.if':
+                    frame.currently_active, frame.condition_met = \
+                        self._eval_if_condition(operand, pc, line_no, raw)
+                else:
+                    is_defined = (operand in self.symbol_first_li and
+                                  self.symbol_first_li[operand] < li)
+                    cond = is_defined if op == '.ifdef' else not is_defined
+                    frame.currently_active = cond
+                    frame.condition_met = cond
+                cond_stack.append(frame)
+                continue
+
+            if op == '.elif':
+                if not cond_stack:
+                    raise AsmError("'.elif' with no matching '.if'", line_no, raw)
+                frame = cond_stack[-1]
+                if frame.is_ifdef_style:
+                    raise AsmError("'.elif' is not allowed after '.ifdef'/'.ifndef' "
+                                    "(only after '.if')", line_no, raw)
+                outer_ok = len(cond_stack) == 1 or cond_stack[-2].currently_active
+                if not outer_ok or frame.condition_met:
+                    frame.currently_active = False
+                else:
+                    frame.currently_active, cond = \
+                        self._eval_if_condition(operand, pc, line_no, raw)
+                    if cond:
+                        frame.condition_met = True
+                continue
+
+            if op == '.else':
+                if not cond_stack:
+                    raise AsmError("'.else' with no matching '.if'", line_no, raw)
+                frame = cond_stack[-1]
+                outer_ok = len(cond_stack) == 1 or cond_stack[-2].currently_active
+                frame.currently_active = outer_ok and not frame.condition_met
+                frame.condition_met = True
+                continue
+
+            if op == '.endif':
+                if not cond_stack:
+                    raise AsmError("'.endif' with no matching '.if'/'.ifdef'/'.ifndef'",
+                                    line_no, raw)
+                cond_stack.pop()
+                continue
+
+            if currently_skipping():
+                continue
 
             if op == '.basic':
                 stub, code_start = self._basic_stub_fixed_point()
@@ -946,7 +1111,7 @@ class Assembler:
                 origin = 0x0801
                 pc = code_start
                 if label:
-                    self._define_symbol(label, pc, line_no, pass_no, raw=raw)
+                    self._define_symbol(label, pc, line_no, pass_no, li, raw=raw)
                 continue
 
             if op == '.org':
@@ -968,7 +1133,7 @@ class Assembler:
                         output.extend(b'\x00' * gap)
                 pc = val
                 if label:
-                    self._define_symbol(label, pc, line_no, pass_no, raw=raw)
+                    self._define_symbol(label, pc, line_no, pass_no, li, raw=raw)
                 continue
 
             if op == '.align':
@@ -1006,16 +1171,16 @@ class Assembler:
                         output.extend(b'\x00' * gap)
                 pc = target
                 if label:
-                    self._define_symbol(label, pc, line_no, pass_no, raw=raw)
+                    self._define_symbol(label, pc, line_no, pass_no, li, raw=raw)
                 continue
 
             if op == '=':
                 val, undef = eval_expr(operand, self.symbols, pc, line_no)
-                self._define_symbol(label, val, line_no, pass_no, allow_redefine=True, raw=raw)
+                self._define_symbol(label, val, line_no, pass_no, li, allow_redefine=True, raw=raw)
                 continue
 
             if label and op not in ('.org', '='):
-                self._define_symbol(label, pc, line_no, pass_no, raw=raw)
+                self._define_symbol(label, pc, line_no, pass_no, li, raw=raw)
 
             if op is None:
                 continue
@@ -1104,6 +1269,10 @@ class Assembler:
 
             pc += size
 
+        if cond_stack:
+            raise AsmError(
+                "unclosed '.if'/'.ifdef'/'.ifndef' at end of file (missing '.endif')",
+                cond_stack[-1].opened_line_no, cond_stack[-1].opened_raw)
         if origin is None:
             origin = 0x0801
         return origin, bytes(output)
@@ -1140,7 +1309,9 @@ class Assembler:
             target = new_target
         return stub, new_target
 
-    def _define_symbol(self, name, value, line_no, pass_no, allow_redefine=False, raw=None):
+    def _define_symbol(self, name, value, line_no, pass_no, li, allow_redefine=False, raw=None):
+        if name not in self.symbols:
+            self.symbol_first_li[name] = li
         if pass_no == 1:
             if name in self.symbols and not allow_redefine and self.symbols[name] != value:
                 raise AsmError(f"Symbol '{name}' already defined", line_no, raw)

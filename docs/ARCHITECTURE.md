@@ -47,7 +47,24 @@ implementation instead of a clean error message (the C implementations
 already handled this correctly), and macro body lines were being
 stored with their original indentation stripped in the C
 implementations but preserved in Python, which showed up as a listing-
-file formatting difference for any macro invocation. Both are fixed. It
+file formatting difference for any macro invocation. Both are fixed.
+Conditional assembly (`.if`/`.elif`/`.else`/`.endif`,
+`.ifdef`/`.ifndef`, added to `assembler.c`/`symtab.c` after `.include`)
+was cross-checked the same way, against tests covering the motivating
+PAL/NTSC-style use case, `.elif` chains, nested conditionals, `.ifdef`/
+`.ifndef`, a conditional wrapping instructions inside a macro body
+invoked more than once, and every documented error case (a forward
+reference in `.if` — a hard error on both passes, not deferred the way
+other expressions' undefined-symbol checks are — mismatched `.elif`/
+`.else`/`.endif`, `.elif` after `.ifdef`, and an unclosed `.if` at end
+of file). One test specifically exercises the reason this needed real
+design work rather than a direct port of `.ifdef` from macros: a symbol
+referenced by `.ifdef` before its own definition line, which a naive
+"is this symbol in the table right now" check would answer
+inconsistently between pass 1 and pass 2 (the symbol table persists
+across both passes), corrupting every address computed afterward.
+`find_symbol_defined_before()` (`symtab.c`) is what makes the two
+passes agree, and the test confirms they do. It
 also runs clean under AddressSanitizer and UndefinedBehaviorSanitizer.
 
 ## Building
@@ -152,7 +169,11 @@ data flows through the program) is:
 9. **`symtab.h`/`.c`** — the symbol table: every label and named
    constant, and what it's bound to. Small and simple by design (see
    the comments in `symtab.c` on why a linear scan, not a hash table,
-   is the right call at this codebase's scale).
+   is the right call at this codebase's scale). Also home to
+   `find_symbol_defined_before()`, added for conditional assembly
+   (`assembler.c`) -- a second, more careful way to ask "is this symbol
+   defined" that accounts for the symbol table persisting across both
+   assembly passes.
 
 10. **`assembler.h`/`.c`** — the heart of the program: the two-pass loop
    that ties everything above together into actual machine code.
@@ -160,7 +181,15 @@ data flows through the program) is:
    *why* an assembler needs two passes at all (in one sentence: so a
    label can be used before it's defined), which is the single most
    important idea in the whole codebase once you're past the syntax
-   details.
+   details. The same comment block also covers conditional assembly
+   (`.if`/`.elif`/`.else`/`.endif`, `.ifdef`/`.ifndef`) -- worth reading
+   closely once you're comfortable with the two-pass idea itself, since
+   it's a genuinely subtle case of that same idea: `.ifdef` can't just
+   check "is this symbol defined right now", because the symbol table
+   persists across both passes and would give a different answer on
+   each one for the exact same line. `symtab.c`'s
+   `find_symbol_defined_before()` is the fix, and is worth reading
+   alongside this.
 
 11. **`bytebuf.h`/`.c`**, **`basicstub.h`/`.c`**, **`listing.h`/`.c`** —
    three small, self-contained utilities `assembler.c` and `main.c`
