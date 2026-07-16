@@ -436,7 +436,88 @@ collisions. `@`-labels make that unnecessary.
 
 ---
 
-## 10. Instruction set
+## 10. Includes
+
+```
+.include "path"
+```
+
+Splices another file's lines into the source stream at that point, as
+if they'd been pasted in directly. `path` is resolved **relative to the
+directory of the file containing the `.include` line** — not the
+current working directory — which is what lets one library file
+`.include` another file sitting next to it, regardless of where the
+assembler itself was invoked from. An absolute path (starting with `/`)
+is used as-is.
+
+### Example: a small shared-constants library file
+
+`constants.inc`:
+```
+BORDER_COLOR = $06
+BACKGROUND_COLOR = $00
+```
+
+`main.asm`:
+```
+        * = $c000
+        .include "constants.inc"
+        lda #BORDER_COLOR
+        sta $d020
+        lda #BACKGROUND_COLOR
+        sta $d021
+        rts
+```
+
+This assembles to exactly the same bytes as pasting `constants.inc`'s
+two lines directly into `main.asm` in place of the `.include` line.
+
+### Nested includes
+
+A file that was itself reached via `.include` can `.include` further
+files of its own, resolved relative to *its own* directory (not the
+top-level file's) — so a `lib/graphics.inc` that includes `sprites.inc`
+finds `lib/sprites.inc`, not a same-named file next to `main.asm`.
+
+### Including the same file more than once
+
+Unlike C's `#include`, `.include` does **not** require manual include
+guards to be used safely more than once. If two different files both
+`.include` the same shared library file (a common "diamond dependency"
+— e.g. `main.asm` includes both `graphics.inc` and `sound.inc`, and
+both of *those* `.include` a shared `zeropage.inc` defining pointer
+constants), the shared file is only actually processed the first time;
+later `.include`s of the exact same file are silently skipped, the same
+way `#pragma once` works in C. This assembler has no conditional
+assembly, so it has no way to write a manual include guard even if it
+wanted to — and a shared file being pulled in from more than one place
+is the normal, expected shape of a real multi-file project, not a
+mistake to flag with a "Symbol already defined" error.
+
+This same-file detection compares each `.include`'s fully resolved,
+canonical path (symlinks and `..` resolved) — not the literal text
+after `.include` — so the same physical file reached via two
+syntactically different relative paths (e.g. from two files in
+different directories) is still correctly recognized as one file.
+
+### Rules and limitations
+
+- **Circular includes are detected and rejected**, with the full chain
+  shown (`a.asm -> b.inc -> a.asm`), rather than hanging or failing with
+  a generic error.
+- **A hard limit of 16 levels of nested includes**, as a backstop in
+  case an include cycle somehow isn't caught by the check above.
+- **A missing included file** produces a clear error naming the file
+  and where it was `.include`d from, rather than a generic filesystem
+  error.
+- Once `.include` is used **anywhere** in a program, every subsequent
+  error message — including ones from the top-level file itself — names
+  which file it came from (see §14). A program that never uses
+  `.include` sees no change in its error output at all.
+
+---
+
+## 11. Instruction set
 
 
 All 56 documented NMOS 6502/6510 mnemonics are supported. Each entry below
@@ -512,7 +593,7 @@ supported.
 
 ---
 
-## 11. Output format
+## 12. Output format
 
 The `.prg` file written is:
 
@@ -529,7 +610,7 @@ stub is the first thing written.
 
 ---
 
-## 12. Listing file format
+## 13. Listing file format
 
 When `--listing` is given, the assembler writes a text file with one line
 per assembled instruction or data-emitting directive:
@@ -560,7 +641,7 @@ only real 6502 instructions appear there.
 
 ---
 
-## 13. Error messages
+## 14. Error messages
 
 All errors are fatal (assembly stops immediately) and are printed in the
 form:
@@ -568,6 +649,19 @@ form:
 ```
 Assembly error: <message> (line <N>: <source text>)
 ```
+
+If `.include` (§10) has been used anywhere in the program, every error
+message additionally names the specific file `<N>` refers to — including
+errors in the top-level file itself, once *any* `.include` has been
+used anywhere:
+
+```
+Assembly error: <message> (<filename>, line <N>: <source text>)
+```
+
+A program that never uses `.include` sees no change here at all: its
+error messages are identical to what they'd have been before `.include`
+existed.
 
 Common errors:
 
@@ -581,11 +675,14 @@ Common errors:
 | `<MNEMONIC> does not support that addressing mode` | The operand's syntax implies a mode the instruction doesn't have (e.g. immediate mode on `STA`). |
 | `Branch target out of range (+N)` | A branch instruction's target is more than 127 bytes forward or 128 bytes backward from the instruction following it. Reorganize the code, or replace the branch with an unconditional `JMP` reached via an inverted branch. |
 | `Missing ')' in expression '...'` | Unbalanced parentheses in an expression. |
+| `Cannot open included file '...'` | A `.include`'d path doesn't resolve to a readable, regular file. |
+| `circular .include detected: a.asm -> b.inc -> a.asm` | An `.include` chain loops back on itself; the message shows the full chain. |
+| `.include nested too deeply (max 16)` | More than 16 levels of nested `.include` — almost always a sign of an undetected circular include. |
 | `Bad character '...' in expression '...'` | A character the tokenizer doesn't recognize appeared in an expression. |
 
 ---
 
-## 14. Known limitations
+## 15. Known limitations
 
 - **Zero-page sizing of forward-referenced labels.** The assembler picks
   zero-page vs. absolute addressing based on whether an operand's value is
@@ -600,9 +697,10 @@ Common errors:
   addresses under `$100`, e.g. pointers in `$FB`–`$FE`) are conventionally
   defined with `=` *before* they're used, which sidesteps the issue
   entirely, and is good practice regardless.
-- **Macros (§8) and local labels (§9) exist but are intentionally
-  simple:** defined-before-use only, no conditional assembly, and still
-  **no `.include`** — everything must live in a single source file.
+- **Macros (§8), local labels (§9), and includes (§10) exist but are
+  intentionally simple:** macros must be defined before use, and there's
+  still no conditional assembly (so no manual include guards either,
+  though `.include` doesn't need them -- see §10).
 - **No undocumented/illegal opcodes.**
 - **Single error at a time.** Assembly halts at the first error rather
   than collecting and reporting multiple problems.
@@ -610,7 +708,7 @@ Common errors:
 
 ---
 
-## 15. Complete example
+## 16. Complete example
 
 ```asm
 ; hello.asm - prints a message and cycles the border color

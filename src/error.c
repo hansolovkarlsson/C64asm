@@ -9,6 +9,22 @@
 #include "error.h"
 #include "common.h"
 
+static char g_current_error_file[MAX_FILENAME_LEN] = "";
+static int g_multi_file_mode = 0;
+
+void asm_error_set_file(const char *filename) {
+    if (filename && filename[0]) {
+        strncpy(g_current_error_file, filename, sizeof(g_current_error_file) - 1);
+        g_current_error_file[sizeof(g_current_error_file) - 1] = '\0';
+    } else {
+        g_current_error_file[0] = '\0';
+    }
+}
+
+void asm_error_note_include_used(void) {
+    g_multi_file_mode = 1;
+}
+
 void asm_error(int line_no, const char *raw, const char *fmt, ...) {
     /* Render the caller's printf-style message into a fixed buffer
      * first, so the "(line N: ...)" suffix can be appended afterward
@@ -22,7 +38,10 @@ void asm_error(int line_no, const char *raw, const char *fmt, ...) {
     va_end(ap);
 
     if (line_no > 0) {
-        fprintf(stderr, "Assembly error: %s (line %d", msg, line_no);
+        if (g_multi_file_mode && g_current_error_file[0])
+            fprintf(stderr, "Assembly error: %s (%s, line %d", msg, g_current_error_file, line_no);
+        else
+            fprintf(stderr, "Assembly error: %s (line %d", msg, line_no);
         if (raw && raw[0]) {
             /* Show the offending line, trimmed of the trailing newline
              * fgets() leaves on it and any surrounding whitespace, so

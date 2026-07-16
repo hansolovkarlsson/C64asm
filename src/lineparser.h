@@ -23,6 +23,9 @@ typedef struct {
                                       directive, or the literal string "="
                                       for a constant assignment */
     char operand[MAX_LINE_LEN];
+    char filename[MAX_FILENAME_LEN]; /* which file this line came from, for
+                                         error messages once .include is used;
+                                         empty for a program that never uses it */
 } SourceLine;
 
 /* The whole source file, one entry per line, populated by load_source()

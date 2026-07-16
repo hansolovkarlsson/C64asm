@@ -28,12 +28,49 @@
  *   Comments:    ; to end of line
  */
 
+/* Requests POSIX.1-2008 and BSD-heritage declarations (realpath(), and,
+ * made explicit here for the first time even though it was already
+ * relied on before this comment existed, strcasecmp()) from the C
+ * library, since -std=c99 alone hides them on some systems -- observed
+ * here as an inconsistent "implicit declaration of function 'realpath'"
+ * warning that appeared under some compiler flag combinations but not
+ * others, and empirically needed *both* macros below to go away
+ * reliably on this glibc version (_POSIX_C_SOURCE alone wasn't
+ * sufficient). An implicit declaration isn't just a style complaint:
+ * the compiler then assumes a default (int-returning) signature, which
+ * doesn't match realpath()'s real (pointer-returning) one -- undefined
+ * behavior, and a real bug source on any platform where int and
+ * pointer sizes actually differ. Must come before any #include. */
+#define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE
+
+/* Must come before any #include: realpath() (used by .include support,
+ * further down) is POSIX.1-2008, not standard C99, and without this
+ * some libcs (in strict -std=c99 mode) won't declare it from
+ * <stdlib.h> at all -- which, left unnoticed, is worse than a missing
+ * function: an implicitly-declared function is assumed by the compiler
+ * to return int, and on a 64-bit platform where pointers and int are
+ * different sizes, that silently corrupts the real (pointer-returning)
+ * result rather than just failing to compile. _XOPEN_SOURCE 700
+ * (rather than _POSIX_C_SOURCE, which on its own turned out not to be
+ * sufficient on glibc) is the portable choice that's recognized
+ * consistently by both glibc and macOS's libc. */
+#define _XOPEN_SOURCE 700
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <strings.h>   /* strcasecmp - POSIX, available on macOS & Linux */
+#include <limits.h>    /* PATH_MAX */
+#include <sys/stat.h>  /* stat - used to confirm a resolved include path is a
+                           regular file before opening it */
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096   /* POSIX systems normally define this; this fallback
+                            only matters on the rare system that doesn't */
+#endif
 
 /* --------------------------------------------------------------------- */
 /* Constants and limits                                                  */
@@ -46,6 +83,14 @@
 #define MAX_TOKENS     128
 #define MAX_ARGS       64
 #define MAX_IDENT      128
+#define MAX_FILENAME_LEN 256   /* longest display filename this assembler will
+                                   track per line -- deliberately much smaller
+                                   than PATH_MAX, since it's multiplied by
+                                   MAX_LINES in SourceLine below; a canonical
+                                   path used only for cycle/dedup comparisons
+                                   (never stored per-line) gets a full
+                                   PATH_MAX-sized buffer instead, see the
+                                   Includes section further down */
 
 typedef enum {
     M_IMP = 0, M_ACC, M_IMM, M_ZP, M_ZPX, M_ZPY, M_REL,
@@ -232,6 +277,38 @@ static int is_directive(const char *tok) {
 /* Error handling                                                         */
 /* --------------------------------------------------------------------- */
 
+/*
+ * Filename-aware error messages, for .include support (see the Includes
+ * section further down for the full design). This is deliberately
+ * global, mutable state rather than a filename parameter threaded
+ * through eval_expr(), parse_operand(), define_symbol(), and everything
+ * else that can call asm_error(): doing that properly would mean
+ * touching a large fraction of this file's functions to plumb a value
+ * through that, for the overwhelming majority of programs (anything not
+ * using .include), is never even read. Reading a small piece of global
+ * state at the exact moment an error is actually raised gets the same
+ * result with a far smaller footprint -- and it's safe here specifically
+ * because assembly is strictly sequential and single-threaded: there is
+ * only ever one "currently relevant" file for error-reporting purposes
+ * at any given moment, whether during preprocessing or during either
+ * assembly pass.
+ */
+static char g_current_error_file[MAX_FILENAME_LEN] = "";
+static int g_multi_file_mode = 0;   /* only becomes true once .include is
+                                        actually used; until then, error
+                                        messages are byte-for-byte identical
+                                        to how they always were, with no
+                                        filename shown at all */
+
+static void set_error_file(const char *filename) {
+    if (filename) {
+        strncpy(g_current_error_file, filename, sizeof(g_current_error_file) - 1);
+        g_current_error_file[sizeof(g_current_error_file) - 1] = '\0';
+    } else {
+        g_current_error_file[0] = '\0';
+    }
+}
+
 static void asm_error(int line_no, const char *raw, const char *fmt, ...) {
     char msg[1024];
     va_list ap;
@@ -239,7 +316,10 @@ static void asm_error(int line_no, const char *raw, const char *fmt, ...) {
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
     if (line_no > 0) {
-        fprintf(stderr, "Assembly error: %s (line %d", msg, line_no);
+        if (g_multi_file_mode && g_current_error_file[0])
+            fprintf(stderr, "Assembly error: %s (%s, line %d", msg, g_current_error_file, line_no);
+        else
+            fprintf(stderr, "Assembly error: %s (line %d", msg, line_no);
         if (raw && raw[0]) {
             char trimmed[MAX_LINE_LEN];
             strncpy(trimmed, raw, sizeof(trimmed) - 1);
@@ -528,6 +608,9 @@ typedef struct {
     int has_op;
     char op[MAX_IDENT];      /* uppercase mnemonic, lowercase directive, or "=" */
     char operand[MAX_LINE_LEN];
+    char filename[MAX_FILENAME_LEN];  /* which file this line came from, for
+                                          error messages once .include is used;
+                                          empty for a program that never uses it */
 } SourceLine;
 
 static SourceLine *g_lines;
@@ -900,13 +983,186 @@ static void mangle_local_labels(const char *text, int scope_id, char *out, size_
     out[oi] = '\0';
 }
 
+/* --------------------------------------------------------------------- */
+/* Includes                                                                */
+/* --------------------------------------------------------------------- */
+/*
+ * .include "path" splices another file's lines into the source stream
+ * at that point, as if they'd been pasted in directly -- resolved
+ * relative to the directory of the file *containing* the .include line
+ * (not the current working directory), which is what lets a library
+ * file .include another library file sitting next to it, regardless of
+ * where the assembler itself was invoked from.
+ *
+ * Handles three things a naive "just open and read the file" version
+ * wouldn't:
+ *   - Circular includes (A includes B includes A, directly or through a
+ *     longer chain) are detected and reported with the full chain, not
+ *     left to hang or to fail with a generic "too deep" message.
+ *   - A hard depth limit as a backstop, in case some gap in the above
+ *     were ever missed.
+ *   - Automatic include-once semantics: a file that's already been
+ *     fully processed earlier in this run is silently skipped on a
+ *     later .include, the same way #pragma once works in C. This
+ *     assembler has no conditional assembly, so it has no way to write
+ *     a manual include guard -- and a shared library file (constants,
+ *     common macros) being .include'd from more than one other file is
+ *     the normal, expected case for "library files", not a mistake to
+ *     flag.
+ *
+ * Both cycle detection and include-once comparison are done against
+ * each file's canonical, symlink-and-".."-resolved path (via
+ * realpath()), not the literal text after ".include" -- so the same
+ * physical file reached via two syntactically different relative paths
+ * (e.g. from two files in different directories) is still correctly
+ * recognized as the same file. Display names shown in error messages
+ * and stored per-line use the resolved-but-not-canonicalized form
+ * instead (e.g. "lib/util.inc"), matching how the source actually
+ * refers to it, since the fully-canonicalized form is usually a long,
+ * less readable absolute path -- and is also why canonical paths get
+ * their own, separate, full PATH_MAX-sized buffers (small, fixed-size
+ * arrays here, not multiplied by MAX_LINES) rather than reusing
+ * MAX_FILENAME_LEN.
+ */
+
+#define MAX_INCLUDE_DEPTH 16
+#define MAX_INCLUDED_FILES 256   /* total distinct files includable in one run */
+
+static char open_stack_canon[MAX_INCLUDE_DEPTH + 1][PATH_MAX];
+static char open_stack_display[MAX_INCLUDE_DEPTH + 1][MAX_FILENAME_LEN];
+static int open_stack_top = 0;
+
+static char already_included[MAX_INCLUDED_FILES][PATH_MAX];
+static int already_included_count = 0;
+
+/* Forward declaration: process_include_file() (below) needs to feed
+ * each line it reads back through macro_process_line(), while
+ * macro_process_line() (further below) needs to call
+ * process_include_file() when it recognizes a ".include" line -- a
+ * genuine mutual recursion between the two. */
+static void macro_process_line(const char *raw_line, const char *filename, int line_no);
+
+/* Copies the directory portion of `path` (including the trailing '/')
+ * into `out`, or an empty string if `path` has no directory component
+ * (a bare filename, implicitly relative to the current directory). */
+static void dirname_of(const char *path, char *out, size_t outsz) {
+    const char *slash = strrchr(path, '/');
+    if (!slash) { out[0] = '\0'; return; }
+    size_t len = (size_t)(slash - path + 1);
+    if (len >= outsz) len = outsz - 1;
+    memcpy(out, path, len);
+    out[len] = '\0';
+}
+
+static void join_path(const char *dir, const char *name, char *out, size_t outsz) {
+    if (dir[0] == '\0') {
+        strncpy(out, name, outsz - 1); out[outsz - 1] = '\0';
+    } else {
+        snprintf(out, outsz, "%s%s", dir, name);
+    }
+}
+
+static int is_already_included(const char *canon) {
+    for (int i = 0; i < already_included_count; i++)
+        if (strcmp(already_included[i], canon) == 0) return 1;
+    return 0;
+}
+
+static int is_currently_open(const char *canon) {
+    for (int i = 0; i < open_stack_top; i++)
+        if (strcmp(open_stack_canon[i], canon) == 0) return 1;
+    return 0;
+}
+
+/*
+ * Resolves, opens, and processes one source file -- the main file
+ * (including_file == NULL) or a .include'd one. Every line read is fed
+ * to macro_process_line() with `filename` set to this file's resolved
+ * display name and `line_no` counted 1-based within it.
+ */
+static void process_include_file(const char *requested_path, const char *including_file,
+                                  int including_line_no, const char *including_raw) {
+    char resolved_display[MAX_FILENAME_LEN];
+    if (including_file && requested_path[0] != '/') {
+        char dir[MAX_FILENAME_LEN];
+        dirname_of(including_file, dir, sizeof(dir));
+        join_path(dir, requested_path, resolved_display, sizeof(resolved_display));
+    } else {
+        strncpy(resolved_display, requested_path, sizeof(resolved_display) - 1);
+        resolved_display[sizeof(resolved_display) - 1] = '\0';
+    }
+
+    char canon[PATH_MAX];
+    struct stat st;
+    if (!realpath(resolved_display, canon) || stat(canon, &st) != 0 || !S_ISREG(st.st_mode)) {
+        if (including_file)
+            asm_error(including_line_no, including_raw,
+                      "Cannot open included file '%s'", resolved_display);
+        else {
+            fprintf(stderr, "Cannot open input file '%s'\n", resolved_display);
+            exit(1);
+        }
+        return; /* unreachable */
+    }
+
+    if (is_already_included(canon))
+        return; /* include-once: silently skip a file already fully processed */
+
+    if (is_currently_open(canon)) {
+        char chain[MAX_LINE_LEN];
+        chain[0] = '\0';
+        for (int i = 0; i < open_stack_top; i++) {
+            strncat(chain, open_stack_display[i], sizeof(chain) - strlen(chain) - 1);
+            strncat(chain, " -> ", sizeof(chain) - strlen(chain) - 1);
+        }
+        strncat(chain, resolved_display, sizeof(chain) - strlen(chain) - 1);
+        asm_error(including_line_no, including_raw, "circular .include detected: %s", chain);
+    }
+
+    if (open_stack_top >= MAX_INCLUDE_DEPTH)
+        asm_error(including_line_no, including_raw,
+                  ".include nested too deeply (max %d) -- possible circular include?",
+                  MAX_INCLUDE_DEPTH);
+
+    strncpy(open_stack_canon[open_stack_top], canon, PATH_MAX - 1);
+    open_stack_canon[open_stack_top][PATH_MAX - 1] = '\0';
+    strncpy(open_stack_display[open_stack_top], resolved_display, MAX_FILENAME_LEN - 1);
+    open_stack_display[open_stack_top][MAX_FILENAME_LEN - 1] = '\0';
+    open_stack_top++;
+    set_error_file(resolved_display);
+
+    FILE *f = fopen(resolved_display, "r");
+    if (!f) /* realpath()+stat() already confirmed this file exists and is
+             * regular, so this would only fail on something like a
+             * permissions change between then and now -- defensive, not
+             * expected to actually trigger in practice */
+        asm_error(including_line_no, including_raw,
+                  "Cannot open included file '%s'", resolved_display);
+
+    char buf[MAX_LINE_LEN];
+    int line_no = 0;
+    while (fgets(buf, sizeof(buf), f)) {
+        line_no++;
+        macro_process_line(buf, resolved_display, line_no);
+    }
+    fclose(f);
+
+    open_stack_top--;
+    set_error_file(open_stack_top > 0 ? open_stack_display[open_stack_top - 1] : NULL);
+    if (already_included_count < MAX_INCLUDED_FILES) {
+        strncpy(already_included[already_included_count], canon, PATH_MAX - 1);
+        already_included[already_included_count][PATH_MAX - 1] = '\0';
+        already_included_count++;
+    }
+}
+
 /* Appends one fully-resolved (non-macro) line to g_lines, the same way
  * load_source()'s loop used to do inline before macro support existed.
  * This is the single choke point every genuinely final line passes
  * through, whether it came from ordinary source text or from expanding
  * a macro body -- so it's also where the local-label scope is advanced
  * (on an ordinary global-label line) and where @name mangling happens. */
-static void emit_source_line(const char *raw_line, int line_no) {
+static void emit_source_line(const char *raw_line, const char *filename, int line_no) {
     if (g_line_count >= MAX_LINES)
         asm_error(line_no, raw_line, "Too many source lines (max %d)", MAX_LINES);
 
@@ -925,18 +1181,29 @@ static void emit_source_line(const char *raw_line, int line_no) {
     mangle_local_labels(raw_line, current_scope, mangled, sizeof(mangled));
 
     split_line(mangled, line_no, &g_lines[g_line_count]);
+    strncpy(g_lines[g_line_count].filename, filename ? filename : "", MAX_FILENAME_LEN - 1);
+    g_lines[g_line_count].filename[MAX_FILENAME_LEN - 1] = '\0';
     g_line_count++;
 }
 
 /*
  * Feeds one raw source line through macro processing: absorbs lines
  * that are part of an in-progress ".macro"/".endmacro" definition,
- * expands macro invocations (recursively, via calling itself again on
- * each substituted body line -- which is how nested macro calls and nested
- * ".macro" body content both "just work"), and passes every other line
- * straight through to emit_source_line().
+ * splices in another file's content on ".include" (recursively --
+ * see process_include_file() above), expands macro invocations
+ * (recursively, via calling itself again on each substituted body
+ * line -- which is how nested macro calls and nested ".macro" body
+ * content both "just work"), and passes every other line straight
+ * through to emit_source_line().
+ *
+ * filename is threaded alongside line_no everywhere line_no already
+ * flows through this function, including through macro expansion --
+ * which means an error inside an expanded macro body is attributed to
+ * the file *and* line of the invocation, not wherever the macro itself
+ * happened to be defined, consistent with how line numbers already
+ * worked before .include existed.
  */
-static void macro_process_line(const char *raw_line, int line_no) {
+static void macro_process_line(const char *raw_line, const char *filename, int line_no) {
     char line[MAX_LINE_LEN];
     strncpy(line, raw_line, sizeof(line) - 1); line[sizeof(line)-1] = '\0';
     strip_comment(line);
@@ -961,14 +1228,14 @@ static void macro_process_line(const char *raw_line, int line_no) {
         if (capturing_macro->body_line_count >= MAX_MACRO_BODY_LINES)
             asm_error(line_no, raw_line, "Macro '%s' body too long (max %d lines)",
                       capturing_macro->name, MAX_MACRO_BODY_LINES);
-        strncpy(capturing_macro->body[capturing_macro->body_line_count], trimmed, MAX_LINE_LEN - 1);
+        strncpy(capturing_macro->body[capturing_macro->body_line_count], line, MAX_LINE_LEN - 1);
         capturing_macro->body[capturing_macro->body_line_count][MAX_LINE_LEN-1] = '\0';
         capturing_macro->body_line_count++;
         return;
     }
 
     if (trimmed[0] == '\0') {
-        emit_source_line(raw_line, line_no);
+        emit_source_line(raw_line, filename, line_no);
         return;
     }
 
@@ -1019,6 +1286,20 @@ static void macro_process_line(const char *raw_line, int line_no) {
     if (strcasecmp(first, ".endmacro") == 0 || strcasecmp(first, ".endm") == 0)
         asm_error(line_no, raw_line, "'.endmacro' with no matching '.macro'");
 
+    if (strcasecmp(first, ".include") == 0) {
+        char rest[MAX_LINE_LEN];
+        strncpy(rest, trimmed + strlen(first), sizeof(rest)-1); rest[sizeof(rest)-1]='\0';
+        trim(rest);
+        size_t rlen = strlen(rest);
+        if (rlen < 2 || rest[0] != '"' || rest[rlen-1] != '"')
+            asm_error(line_no, raw_line, ".include requires a quoted path, e.g. .include \"lib.inc\"");
+        rest[rlen-1] = '\0';
+        char *path = rest + 1;
+        g_multi_file_mode = 1;
+        process_include_file(path, filename, line_no, raw_line);
+        return;
+    }
+
     MacroDef *m = find_macro(first);
     if (m != NULL) {
         char argtext[MAX_LINE_LEN];
@@ -1047,7 +1328,7 @@ static void macro_process_line(const char *raw_line, int line_no) {
         for (int i = 0; i < m->body_line_count; i++) {
             char substituted[MAX_LINE_LEN];
             macro_substitute(m->body[i], m, args, substituted, sizeof(substituted), line_no);
-            macro_process_line(substituted, line_no);
+            macro_process_line(substituted, filename, line_no);
         }
 
         current_scope = scope_stack[--scope_stack_top];
@@ -1055,7 +1336,7 @@ static void macro_process_line(const char *raw_line, int line_no) {
         return;
     }
 
-    emit_source_line(raw_line, line_no);
+    emit_source_line(raw_line, filename, line_no);
 }
 
 /* --------------------------------------------------------------------- */
@@ -1323,6 +1604,7 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
 
     for (int li = 0; li < g_line_count; li++) {
         SourceLine *L = &g_lines[li];
+        set_error_file(L->filename[0] ? L->filename : NULL);
         long entry_pc = pc;
 
         if (!L->has_op) {
@@ -1539,19 +1821,10 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
 /* --------------------------------------------------------------------- */
 
 static void load_source(const char *path) {
-    FILE *f = fopen(path, "r");
-    if (!f) { fprintf(stderr, "Cannot open input file '%s'\n", path); exit(1); }
-
     g_lines = malloc(sizeof(SourceLine) * MAX_LINES);
     if (!g_lines) { fprintf(stderr, "Out of memory\n"); exit(1); }
 
-    char buf[MAX_LINE_LEN];
-    int line_no = 0;
-    while (fgets(buf, sizeof(buf), f)) {
-        line_no++;
-        macro_process_line(buf, line_no);
-    }
-    fclose(f);
+    process_include_file(path, NULL, 0, NULL);
 }
 
 /* --------------------------------------------------------------------- */

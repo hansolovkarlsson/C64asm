@@ -29,6 +29,7 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
 
     for (int li = 0; li < g_line_count; li++) {
         SourceLine *L = &g_lines[li];
+        asm_error_set_file(L->filename[0] ? L->filename : NULL);
         long entry_pc = pc;   /* this line's own address, before anything
                                   on it changes pc -- needed for relative
                                   branch offsets and listing entries */

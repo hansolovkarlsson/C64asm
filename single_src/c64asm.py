@@ -62,6 +62,7 @@ USAGE
 """
 
 import sys
+import os
 import re
 import argparse
 
@@ -138,6 +139,38 @@ DIRECTIVES = {'.org', '*=', '.byte', '.db', '.word', '.dw', '.text', '.asc',
               '.fill', '.ds', '.res', '.basic', '.equ', '.align'}
 
 MAX_MACRO_EXPANSION_DEPTH = 16   # guards against runaway/infinite recursive macros
+MAX_INCLUDE_DEPTH = 16           # guards against runaway/circular .include chains
+
+
+# Filename-aware error messages, for .include support -- see the
+# "Includes" section further down for the full design. This is
+# deliberately global, mutable, single-threaded state rather than a
+# filename parameter threaded through eval_expr() and every other
+# function that can raise an AsmError: doing that properly would mean
+# touching a large fraction of this file's functions to plumb a value
+# through that, for the overwhelming majority of programs (anything not
+# using .include), is never even read. Reading a small piece of global
+# state at the exact moment an error is actually raised gets the same
+# result with a far smaller footprint -- and it's safe here specifically
+# because assembly is strictly sequential and single-threaded: there is
+# only ever one "currently relevant" file for error-reporting purposes
+# at any given moment, whether during preprocessing or during either
+# assembly pass.
+_current_error_file = None
+_multi_file_mode = False   # only becomes true once .include is actually
+                            # used; until then, error messages are
+                            # byte-for-byte identical to how they always
+                            # were, with no filename shown at all
+
+
+def _set_error_file(filename):
+    global _current_error_file
+    _current_error_file = filename
+
+
+def _note_include_used():
+    global _multi_file_mode
+    _multi_file_mode = True
 
 
 class AsmError(Exception):
@@ -145,11 +178,15 @@ class AsmError(Exception):
         self.message = message
         self.line_no = line_no
         self.text = text
+        self.filename = _current_error_file if _multi_file_mode else None
         super().__init__(str(self))
 
     def __str__(self):
         if self.line_no is not None:
-            loc = f"line {self.line_no}"
+            if self.filename:
+                loc = f"{self.filename}, line {self.line_no}"
+            else:
+                loc = f"line {self.line_no}"
             if self.text is not None:
                 loc += f": {self.text.strip()}"
             return f"{self.message} ({loc})"
@@ -622,11 +659,107 @@ class MacroDef:
         self.body = []            # list of raw (comment-stripped) text lines
 
 
+# ---------------------------------------------------------------------------
+# Includes
+# ---------------------------------------------------------------------------
+#
+# .include "path" splices another file's lines into the source stream at
+# that point, as if they'd been pasted in directly -- resolved relative
+# to the directory of the file *containing* the .include line (not the
+# current working directory), which is what lets a library file .include
+# another library file sitting next to it, regardless of where the
+# assembler itself was invoked from.
+#
+# Handles three things a naive "just open and read the file" version
+# wouldn't:
+#   - Circular includes (A includes B includes A, directly or through a
+#     longer chain) are detected and reported with the full chain, not
+#     left to hang or to fail with a generic "too deep" message.
+#   - A hard depth limit as a backstop, in case some gap in the above
+#     were ever missed.
+#   - Automatic include-once semantics: a file that's already been fully
+#     processed earlier in this run is silently skipped on a later
+#     .include, the same way #pragma once works in C. This assembler
+#     has no conditional assembly, so it has no way to write a manual
+#     include guard -- and a shared library file (constants, common
+#     macros) being .include'd from more than one other file is the
+#     normal, expected case for "library files", not a mistake to flag.
+#
+# Both cycle detection and include-once comparison are done against each
+# file's canonical, symlink-and-`..`-resolved path (via os.path.realpath),
+# not the literal text after ".include" -- so the same physical file
+# reached via two syntactically different relative paths (e.g. from two
+# files in different directories) is still correctly recognized as the
+# same file. Display names shown in error messages use the resolved-but-
+# not-canonicalized form instead (e.g. "lib/util.inc"), matching how the
+# source actually refers to it, since the fully-canonicalized form is
+# usually a long, less readable absolute path.
+
+class IncludeProcessor:
+    def __init__(self, on_line):
+        self.on_line = on_line              # callback(raw_line, filename, line_no)
+        self.open_stack_canon = []          # canonical paths, for cycle detection
+        self.open_stack_display = []        # matching display names, for error messages
+        self.already_included = set()       # canonical paths fully processed already
+
+    def process_file(self, requested_path, including_file, including_line_no, including_raw):
+        if including_file and not os.path.isabs(requested_path):
+            resolved_display = os.path.join(os.path.dirname(including_file), requested_path)
+        else:
+            resolved_display = requested_path
+
+        try:
+            canon = os.path.realpath(resolved_display)
+            if not os.path.isfile(canon):
+                raise OSError()
+        except OSError:
+            if including_file:
+                raise AsmError(f"Cannot open included file '{resolved_display}'",
+                                including_line_no, including_raw)
+            else:
+                sys.exit(f"Cannot open input file '{resolved_display}'")
+
+        if canon in self.already_included:
+            return  # include-once: silently skip a file already fully processed
+
+        if canon in self.open_stack_canon:
+            chain = ' -> '.join(self.open_stack_display + [resolved_display])
+            raise AsmError(f"circular .include detected: {chain}",
+                            including_line_no, including_raw)
+
+        if len(self.open_stack_canon) >= MAX_INCLUDE_DEPTH:
+            raise AsmError(
+                f".include nested too deeply (max {MAX_INCLUDE_DEPTH}) "
+                f"-- possible circular include?",
+                including_line_no, including_raw)
+
+        self.open_stack_canon.append(canon)
+        self.open_stack_display.append(resolved_display)
+        _set_error_file(resolved_display)
+
+        with open(resolved_display, 'r') as f:
+            for line_no, raw in enumerate(f, start=1):
+                self.on_line(raw, resolved_display, line_no)
+
+        self.open_stack_canon.pop()
+        self.open_stack_display.pop()
+        self.already_included.add(canon)
+        _set_error_file(self.open_stack_display[-1] if self.open_stack_display else None)
+
+
 class MacroProcessor:
     """Feeds raw source lines through macro expansion. Lines that are part
-    of a macro definition, or that are themselves a macro invocation
-    (expanded, recursively), never reach `emit`; every other line does,
-    via `emit(raw_line, line_no)`."""
+    of a macro definition, that are themselves a macro invocation
+    (expanded, recursively), or that are an .include directive (spliced
+    in via include_processor, also recursively), never reach `emit`;
+    every other line does, via `emit(raw_line, filename, line_no)`.
+
+    filename is threaded alongside line_no everywhere line_no already
+    flows through this class, including through macro expansion --
+    which means an error inside an expanded macro body is attributed to
+    the file *and* line of the invocation, not wherever the macro
+    itself happened to be defined, consistent with how line numbers
+    already worked before .include existed."""
 
     def __init__(self, emit):
         self.macros = {}          # NAME.upper() -> MacroDef
@@ -641,8 +774,11 @@ class MacroProcessor:
         self.scope_stack = []     # saved current_scope values, for
                                    # restoring the enclosing scope after
                                    # a (possibly nested) macro expansion
+        self.include_processor = None   # set by Assembler.load(), after
+                                          # construction (the two objects
+                                          # need a reference to each other)
 
-    def process_line(self, raw_line, line_no):
+    def process_line(self, raw_line, filename, line_no):
         stripped = strip_comment(raw_line).rstrip('\n')
         trimmed = stripped.strip()
 
@@ -660,7 +796,7 @@ class MacroProcessor:
             return
 
         if not trimmed:
-            self._emit_final(raw_line, line_no)
+            self._emit_final(raw_line, filename, line_no)
             return
 
         first_tok = trimmed.split(None, 1)[0]
@@ -686,6 +822,16 @@ class MacroProcessor:
         if first_tok.upper() in ('.ENDMACRO', '.ENDM'):
             raise AsmError("'.endmacro' with no matching '.macro'", line_no, raw_line)
 
+        if first_tok.upper() == '.INCLUDE':
+            rest = trimmed[len(first_tok):].strip()
+            if len(rest) < 2 or rest[0] != '"' or rest[-1] != '"':
+                raise AsmError('.include requires a quoted path, e.g. .include "lib.inc"',
+                                line_no, raw_line)
+            path = rest[1:-1]
+            _note_include_used()
+            self.include_processor.process_file(path, filename, line_no, raw_line)
+            return
+
         m = self.macros.get(first_tok.upper())
         if m is not None:
             arg_text = trimmed[len(first_tok):].strip()
@@ -709,27 +855,28 @@ class MacroProcessor:
 
             for body_line in m.body:
                 substituted = self._substitute(body_line, m.params, args, line_no)
-                self.process_line(substituted, line_no)
+                self.process_line(substituted, filename, line_no)
 
             self.current_scope = self.scope_stack.pop()
             self.expansion_depth -= 1
             return
 
-        self._emit_final(raw_line, line_no)
+        self._emit_final(raw_line, filename, line_no)
 
-    def _emit_final(self, raw_line, line_no):
+    def _emit_final(self, raw_line, filename, line_no):
         """The single choke point every genuinely final (non-macro,
-        non-definition) line passes through, whether it came from
-        ordinary source text or from expanding a macro body. Advances
-        the local-label scope on an ordinary global-label line, then
-        mangles any @name references using whatever scope is current."""
+        non-definition, non-include) line passes through, whether it
+        came from ordinary source text or from expanding a macro body.
+        Advances the local-label scope on an ordinary global-label line,
+        then mangles any @name references using whatever scope is
+        current."""
         stripped = strip_comment(raw_line).rstrip('\n')
         trimmed = stripped.strip()
         if line_defines_global_label(trimmed):
             self.current_scope = self.next_scope
             self.next_scope += 1
         mangled = mangle_local_labels(raw_line, self.current_scope)
-        self.emit(mangled, line_no)
+        self.emit(mangled, filename, line_no)
 
     def _substitute(self, text, params, args, line_no):
         """Replaces every \\paramname in `text` with its argument. A
@@ -765,17 +912,18 @@ class MacroProcessor:
 class Assembler:
     def __init__(self):
         self.symbols = {}
-        self.lines = []       # (line_no, raw_text, label, op, operand)
+        self.lines = []       # (line_no, raw_text, label, op, operand, filename)
         self.listing = []
 
-    def load(self, source_text):
-        def emit(raw, line_no):
+    def load(self, main_path):
+        def emit(raw, filename, line_no):
             label, op, operand = split_line(raw, line_no)
-            self.lines.append((line_no, raw, label, op, operand))
+            self.lines.append((line_no, raw, label, op, operand, filename))
 
         macros = MacroProcessor(emit)
-        for i, raw in enumerate(source_text.splitlines(), start=1):
-            macros.process_line(raw, i)
+        includes = IncludeProcessor(macros.process_line)
+        macros.include_processor = includes   # see MacroProcessor.__init__
+        includes.process_file(main_path, None, 0, None)
 
     def assemble(self):
         self._pass(pass_no=1)
@@ -787,7 +935,8 @@ class Assembler:
         origin = None
         output = bytearray()
 
-        for (line_no, raw, label, op, operand) in self.lines:
+        for (line_no, raw, label, op, operand, filename) in self.lines:
+            _set_error_file(filename)
             entry_pc = pc
 
             if op == '.basic':
@@ -1000,9 +1149,9 @@ class Assembler:
             self.symbols[name] = value
 
 
-def assemble_source(source_text):
+def assemble_source(main_path):
     asm = Assembler()
-    asm.load(source_text)
+    asm.load(main_path)
     origin, code = asm.assemble()
     return origin, code, asm.listing, asm.symbols
 
@@ -1014,11 +1163,13 @@ def main():
     parser.add_argument('--listing', help="Optional assembly listing output file")
     args = parser.parse_args()
 
-    with open(args.input, 'r') as f:
-        source = f.read()
-
+    # File reading (of the main file, and of anything it .include's) now
+    # happens inside Assembler.load() -> IncludeProcessor, which already
+    # has a clean "Cannot open input file" message for exactly this case
+    # -- so there's no separate open() here to fail with a raw traceback
+    # if args.input doesn't exist.
     try:
-        origin, code, listing, symbols = assemble_source(source)
+        origin, code, listing, symbols = assemble_source(args.input)
     except AsmError as e:
         print(f"Assembly error: {e}", file=sys.stderr)
         sys.exit(1)

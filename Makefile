@@ -18,6 +18,10 @@ SOURCES := $(wildcard $(SRC_DIR)/*.c)
 OBJECTS := $(SOURCES:.c=.o)
 TARGET  := $(BIN_DIR)/c64asm
 
+SINGLE_DIR := single_src
+SINGLE_TARGET := $(SINGLE_DIR)/c64asm
+SINGLE_SOURCE := $(SINGLE_DIR)/c64asm.c
+
 
 TST_DIR := tests
 TST_SRC := $(wildcard $(TST_DIR)/*.asm)
@@ -43,6 +47,8 @@ all: $(TARGET)
 # Compile C
 $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $(OBJECTS)
+
+single:$(SINGLE_TARGET)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

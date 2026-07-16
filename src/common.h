@@ -34,4 +34,15 @@
 #define MAX_MACRO_BODY_LINES    200  /* longest macro body, in lines */
 #define MAX_MACRO_EXPANSION_DEPTH 16 /* guards against runaway/infinite recursive macros */
 
+#define MAX_FILENAME_LEN 256    /* longest display filename this assembler will
+                                    track per line -- deliberately much smaller
+                                    than PATH_MAX, since it's multiplied by
+                                    MAX_LINES in SourceLine (lineparser.h); a
+                                    canonical path used only for cycle/dedup
+                                    comparisons (never stored per-line) gets a
+                                    full PATH_MAX-sized buffer instead, see
+                                    includes.c */
+#define MAX_INCLUDE_DEPTH 16     /* guards against runaway/circular .include chains */
+#define MAX_INCLUDED_FILES 256   /* total distinct files includable in one run */
+
 #endif

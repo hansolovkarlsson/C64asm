@@ -1,19 +1,23 @@
 /*
- * fileio.h - reads the source file into g_lines (see lineparser.h),
- * one SourceLine per line of input.
+ * fileio.h - loads the main source file into g_lines (see
+ * lineparser.h), delegating the actual file-reading and per-line
+ * dispatch to includes.c (the same machinery ".include" uses).
  */
 
 #ifndef C64ASM_FILEIO_H
 #define C64ASM_FILEIO_H
 
 /*
- * Opens `path`, reads it line by line, and calls split_line() on each
- * line to populate g_lines/g_line_count. This is the only place
- * g_lines itself gets allocated.
+ * Allocates g_lines (the only place that happens) and processes `path`
+ * as the top-level source file -- see includes_process_file()
+ * (includes.h) for what "processes" actually involves: resolving,
+ * opening, reading it line by line, and feeding each line to
+ * macro_process_line() (macro.h), which populates g_lines/g_line_count.
  *
- * Exits the program (via a direct fprintf+exit, not asm_error(), since
- * there's no specific source line to blame yet) if the file can't be
- * opened, if it exceeds MAX_LINES, or if the initial allocation fails.
+ * Exits the program with a plain "Cannot open input file" message (not
+ * routed through asm_error(), since there's no specific source line to
+ * blame yet) if `path` can't be opened, or if the initial g_lines
+ * allocation fails.
  */
 void load_source(const char *path);
 

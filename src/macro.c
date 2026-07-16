@@ -12,6 +12,7 @@
 #include "opcodes.h"
 #include "lineparser.h"
 #include "locallabels.h"
+#include "includes.h"
 
 typedef struct {
     char name[MAX_IDENT];
@@ -84,7 +85,7 @@ static void macro_substitute(const char *text, MacroDef *m, char args[][MAX_LINE
  * ordinary global label, then mangle any @name references using
  * whatever scope is now current. Not exposed via macro.h; only
  * macro_process_line() below needs it. */
-static void emit_source_line(const char *raw_line, int line_no) {
+static void emit_source_line(const char *raw_line, const char *filename, int line_no) {
     if (g_line_count >= MAX_LINES)
         asm_error(line_no, raw_line, "Too many source lines (max %d)", MAX_LINES);
 
@@ -100,10 +101,12 @@ static void emit_source_line(const char *raw_line, int line_no) {
     locallabels_mangle(raw_line, mangled, sizeof(mangled));
 
     split_line(mangled, line_no, &g_lines[g_line_count]);
+    strncpy(g_lines[g_line_count].filename, filename ? filename : "", MAX_FILENAME_LEN - 1);
+    g_lines[g_line_count].filename[MAX_FILENAME_LEN - 1] = '\0';
     g_line_count++;
 }
 
-void macro_process_line(const char *raw_line, int line_no) {
+void macro_process_line(const char *raw_line, const char *filename, int line_no) {
     char line[MAX_LINE_LEN];
     strncpy(line, raw_line, sizeof(line) - 1); line[sizeof(line)-1] = '\0';
     strip_comment(line);
@@ -128,14 +131,14 @@ void macro_process_line(const char *raw_line, int line_no) {
         if (capturing_macro->body_line_count >= MAX_MACRO_BODY_LINES)
             asm_error(line_no, raw_line, "Macro '%s' body too long (max %d lines)",
                       capturing_macro->name, MAX_MACRO_BODY_LINES);
-        strncpy(capturing_macro->body[capturing_macro->body_line_count], trimmed, MAX_LINE_LEN - 1);
+        strncpy(capturing_macro->body[capturing_macro->body_line_count], line, MAX_LINE_LEN - 1);
         capturing_macro->body[capturing_macro->body_line_count][MAX_LINE_LEN-1] = '\0';
         capturing_macro->body_line_count++;
         return;
     }
 
     if (trimmed[0] == '\0') {
-        emit_source_line(raw_line, line_no);
+        emit_source_line(raw_line, filename, line_no);
         return;
     }
 
@@ -186,6 +189,20 @@ void macro_process_line(const char *raw_line, int line_no) {
     if (strcasecmp(first, ".endmacro") == 0 || strcasecmp(first, ".endm") == 0)
         asm_error(line_no, raw_line, "'.endmacro' with no matching '.macro'");
 
+    if (strcasecmp(first, ".include") == 0) {
+        char rest[MAX_LINE_LEN];
+        strncpy(rest, trimmed + strlen(first), sizeof(rest)-1); rest[sizeof(rest)-1]='\0';
+        trim(rest);
+        size_t rlen = strlen(rest);
+        if (rlen < 2 || rest[0] != '"' || rest[rlen-1] != '"')
+            asm_error(line_no, raw_line, ".include requires a quoted path, e.g. .include \"lib.inc\"");
+        rest[rlen-1] = '\0';
+        char *path = rest + 1;
+        asm_error_note_include_used();
+        includes_process_file(path, filename, line_no, raw_line, macro_process_line);
+        return;
+    }
+
     MacroDef *m = find_macro(first);
     if (m != NULL) {
         char argtext[MAX_LINE_LEN];
@@ -207,7 +224,7 @@ void macro_process_line(const char *raw_line, int line_no) {
         for (int i = 0; i < m->body_line_count; i++) {
             char substituted[MAX_LINE_LEN];
             macro_substitute(m->body[i], m, args, substituted, sizeof(substituted), line_no);
-            macro_process_line(substituted, line_no);
+            macro_process_line(substituted, filename, line_no);
         }
 
         locallabels_pop_scope();
@@ -215,5 +232,5 @@ void macro_process_line(const char *raw_line, int line_no) {
         return;
     }
 
-    emit_source_line(raw_line, line_no);
+    emit_source_line(raw_line, filename, line_no);
 }

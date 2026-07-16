@@ -8,11 +8,9 @@
 #include "common.h"
 #include "lineparser.h"
 #include "macro.h"
+#include "includes.h"
 
 void load_source(const char *path) {
-    FILE *f = fopen(path, "r");
-    if (!f) { fprintf(stderr, "Cannot open input file '%s'\n", path); exit(1); }
-
     /* g_lines is sized for the largest source file this assembler
      * supports (MAX_LINES) up front, rather than grown dynamically as
      * bytebuf.c's ByteBuf does -- a reasonable choice here since a
@@ -23,17 +21,15 @@ void load_source(const char *path) {
     g_lines = malloc(sizeof(SourceLine) * MAX_LINES);
     if (!g_lines) { fprintf(stderr, "Out of memory\n"); exit(1); }
 
-    char buf[MAX_LINE_LEN];
-    int line_no = 0;
-    while (fgets(buf, sizeof(buf), f)) {
-        line_no++;
-        /* macro_process_line (macro.c) is what actually calls
-         * split_line() and appends to g_lines now -- a raw line here
-         * might expand into several real source lines (a macro
-         * invocation), or none at all (part of a macro definition), so
-         * the old direct "one fgets() line in, one g_lines entry out"
-         * loop body no longer holds. */
-        macro_process_line(buf, line_no);
-    }
-    fclose(f);
+    /* The actual file-opening, reading, and per-line dispatch (through
+     * macro_process_line(), which is what calls split_line() and
+     * appends to g_lines -- see macro.c) is identical whether this is
+     * the top-level file or one reached via .include, so it all lives
+     * in includes_process_file() (includes.h) now. Passing NULL as the
+     * "including file" here is what tells that function this is the
+     * top-level call -- among other things, it's what selects the
+     * plain "Cannot open input file" message (matching this function's
+     * behavior from before .include existed) over the file-and-line-
+     * attributed "Cannot open included file" used for a real .include. */
+    includes_process_file(path, NULL, 0, NULL, macro_process_line);
 }
