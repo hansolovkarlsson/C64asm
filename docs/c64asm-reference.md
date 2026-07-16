@@ -263,36 +263,33 @@ substituted in respectively.
 
 ### Labels inside a macro body
 
-A macro is expanded as plain text substitution — a label defined inside
-a macro's body is a completely ordinary label once expanded, which
-means invoking that macro a second time defines the *same* label name
-again and fails with "Symbol already defined". The fix is to give the
-macro a parameter dedicated to making its labels unique per call, and
-use it in the label name:
+A macro is expanded as plain text substitution — an ordinary label
+defined inside a macro's body is a completely ordinary label once
+expanded, which means invoking that macro a second time defines the
+*same* label name again and fails with "Symbol already defined". Use an
+`@`-prefixed **local label** (§9) instead of an ordinary one, and it
+just works, with nothing extra to write:
 
 ```
-.macro DELAY suffix
+.macro DELAY
         ldx #$00
-delay_loop\suffix:
+@loop:
         dex
-        bne delay_loop\suffix
+        bne @loop
 .endmacro
 
-        DELAY 1
-        DELAY 2
+        DELAY
+        DELAY
 ```
 
-Each invocation gets its own `delay_loop1:`/`delay_loop2:`, so both
-expand cleanly in the same file.
+Each invocation automatically gets its own distinct `@loop`, with no
+suffix parameter or other bookkeeping needed — see §9 for exactly why.
 
 ### Rules and limitations
 
 - **Macros must be defined before they're used** — there's no
   whole-file pre-scan for definitions, so a macro invocation earlier in
   the file than its `.macro` block won't be recognized as one.
-- **No automatic local-label mangling** (see above) — this is a
-  deliberate simplicity trade-off, not a bug; use the suffix-parameter
-  pattern for any macro whose body defines a label.
 - **A macro invocation can't share a line with a label.** Put the label
   on the line above instead:
   ```
@@ -327,7 +324,89 @@ expand cleanly in the same file.
 
 ---
 
-## 9. Instruction set
+## 9. Local labels
+
+```
+@name
+```
+
+A label name starting with `@` is **local**: it's automatically
+distinct within its own scope, so the same `@name` can be reused
+elsewhere in the file — in a different subroutine, or in a different
+invocation of the same macro — without colliding.
+
+A new scope begins:
+
+- each time an ordinary (non-`@`) label is defined with the colon form,
+  `label:`, and
+- each time a macro invocation (§8) begins expanding, with the previous
+  scope restored once that invocation is done.
+
+### Example: two subroutines reusing the same local names
+
+```
+sub_a:
+@loop:
+        dex
+        bne @loop
+        rts
+
+sub_b:
+@loop:
+        dey
+        bne @loop
+        rts
+```
+
+Both `@loop`s are distinct — `sub_a`'s `bne @loop` can only ever branch
+to `sub_a`'s own `@loop:`, never `sub_b`'s.
+
+### Example: a macro with an internal label, invoked repeatedly
+
+```
+.macro DELAY
+        ldx #$00
+@loop:
+        dex
+        bne @loop
+.endmacro
+
+        DELAY
+        DELAY
+```
+
+Each `DELAY` invocation gets its own `@loop`, automatically — this is
+the main reason local labels exist: before this feature, a macro
+containing a label needed a dedicated suffix parameter (e.g.
+`delay_loop\suffix:`) threaded through by every caller just to avoid
+collisions. `@`-labels make that unnecessary.
+
+### Rules and limitations
+
+- **A new scope is only recognized from the explicit colon form**,
+  `label:`. A bare label with no colon does not start a new scope. This
+  matches how every label in this project's own example programs is
+  actually written, so it isn't a practical restriction, but it is a
+  real one worth knowing about.
+- **Referencing an `@name` from outside the scope it was defined in**
+  doesn't raise a dedicated "out of scope" error — it produces an
+  ordinary **"Undefined symbol"** error instead, since the reference and
+  the (different-scope) definition end up as two different internal
+  names. This is a natural consequence of how local labels are
+  implemented (see below), not a special case the assembler checks for.
+- **`@` inside a double-quoted string is left alone.**
+  `.text "user@example.com"` assembles the `@` as a literal character,
+  exactly as you'd expect, not as a local-label reference.
+- Implementation note, if the exact internal naming ever matters (e.g.
+  reading a `--listing` file): `@name` is rewritten internally to
+  `__local<N>_name` for some scope number `N`, before the rest of the
+  assembler ever sees it. Don't manually define a label matching that
+  pattern yourself.
+
+---
+
+## 10. Instruction set
+
 
 All 56 documented NMOS 6502/6510 mnemonics are supported. Each entry below
 lists the addressing modes the instruction accepts and the opcode byte for
@@ -402,7 +481,7 @@ supported.
 
 ---
 
-## 10. Output format
+## 11. Output format
 
 The `.prg` file written is:
 
@@ -419,7 +498,7 @@ stub is the first thing written.
 
 ---
 
-## 11. Listing file format
+## 12. Listing file format
 
 When `--listing` is given, the assembler writes a text file with one line
 per assembled instruction or data-emitting directive:
@@ -450,7 +529,7 @@ only real 6502 instructions appear there.
 
 ---
 
-## 12. Error messages
+## 13. Error messages
 
 All errors are fatal (assembly stops immediately) and are printed in the
 form:
@@ -475,7 +554,7 @@ Common errors:
 
 ---
 
-## 13. Known limitations
+## 14. Known limitations
 
 - **Zero-page sizing of forward-referenced labels.** The assembler picks
   zero-page vs. absolute addressing based on whether an operand's value is
@@ -490,9 +569,9 @@ Common errors:
   addresses under `$100`, e.g. pointers in `$FB`–`$FE`) are conventionally
   defined with `=` *before* they're used, which sidesteps the issue
   entirely, and is good practice regardless.
-- **Macros exist but are intentionally simple** (see §8): defined-before-use
-  only, no automatic local-label mangling, no conditional assembly, and
-  still **no `.include`** — everything must live in a single source file.
+- **Macros (§8) and local labels (§9) exist but are intentionally
+  simple:** defined-before-use only, no conditional assembly, and still
+  **no `.include`** — everything must live in a single source file.
 - **No undocumented/illegal opcodes.**
 - **Single error at a time.** Assembly halts at the first error rather
   than collecting and reporting multiple problems.
@@ -500,7 +579,7 @@ Common errors:
 
 ---
 
-## 14. Complete example
+## 15. Complete example
 
 ```asm
 ; hello.asm - prints a message and cycles the border color

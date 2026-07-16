@@ -523,7 +523,7 @@ def _looks_forced_absolute(expr_text):
 
 
 # ---------------------------------------------------------------------------
-# Macros
+# Macros and local (@) labels
 # ---------------------------------------------------------------------------
 #
 # Macro expansion is a preprocessing step over raw source *text*, run
@@ -540,18 +540,79 @@ def _looks_forced_absolute(expr_text):
 # invoked like a pseudo-instruction:
 #     NAME arg1, arg2
 #
+# Local labels use this same preprocessing layer. A label name starting
+# with '@' (e.g. "@loop") is textually rewritten to a scope-specific
+# global name (e.g. "__local5_loop") before split_line() ever sees it --
+# so as far as the rest of the assembler (symbol table, expression
+# evaluator, everything) is concerned, it's just an ordinary label; all
+# the "local" behavior lives entirely in this rewriting step. A new
+# scope begins each time an ordinary ("identifier:") global label is
+# defined, *and* each time a macro invocation begins expanding (with the
+# previous scope restored once that invocation's body is fully
+# processed) -- which is what makes a macro's own @-labels distinct on
+# every separate invocation, automatically, with no suffix parameter or
+# other caller-side bookkeeping required. A reference to an @-label from
+# outside the scope it was defined in mangles to a name that was never
+# actually defined, and so becomes an ordinary "undefined symbol" error
+# at assembly time -- scope violations are caught by the existing
+# machinery for free, without any dedicated scope-checking code.
+#
 # Deliberate limitations (documented, not oversights):
 #   - Macros must be defined before they're used -- there's no separate
 #     pre-scan of the whole file for macro definitions first, so this
 #     stays a simple single-pass expansion.
-#   - No automatic local-label mangling: a label defined inside a macro
-#     body will collide with "Symbol already defined" if that macro is
-#     invoked more than once. The recommended pattern is to pass a
-#     unique suffix in as a parameter and use it in the label name
-#     (e.g. "loop\suffix:" / "bne loop\suffix"), so each expansion's
-#     labels are distinct by construction.
 #   - A macro invocation can't share a line with a label ("foo: SOME_MACRO
 #     x" doesn't work) -- put the label on its own line above instead.
+#   - A new local-label scope is only recognized from the explicit
+#     "identifier:" form -- a bare label with no colon doesn't start a
+#     new scope. Every label in this project's own example programs uses
+#     the colon form, so this is not a practical restriction, but it is
+#     a real one worth knowing about.
+#   - '@' inside a double-quoted string (e.g. .text "user@example.com")
+#     is left alone, not mangled.
+
+LOCAL_LABEL_PREFIX = '__local'
+
+
+def line_defines_global_label(trimmed):
+    """True if `trimmed` starts with an identifier (not starting with
+    '@') immediately followed by ':' -- the one thing that advances the
+    local-label scope for ordinary, non-macro code. See the module
+    comment above for why only this specific form is recognized."""
+    if not trimmed or trimmed[0] == '@' or not (trimmed[0].isalpha() or trimmed[0] == '_'):
+        return False
+    i = 0
+    n = len(trimmed)
+    while i < n and (trimmed[i].isalnum() or trimmed[i] == '_'):
+        i += 1
+    return i < n and trimmed[i] == ':'
+
+
+def mangle_local_labels(text, scope_id):
+    """Replaces every @name in `text` with a scope-specific global name,
+    skipping anything inside a double-quoted string."""
+    out = []
+    i = 0
+    n = len(text)
+    in_str = False
+    while i < n:
+        c = text[i]
+        if c == '"':
+            in_str = not in_str
+            out.append(c)
+            i += 1
+        elif c == '@' and not in_str and i + 1 < n and (text[i+1].isalpha() or text[i+1] == '_'):
+            j = i + 1
+            while j < n and (text[j].isalnum() or text[j] == '_'):
+                j += 1
+            name = text[i+1:j]
+            out.append(f"{LOCAL_LABEL_PREFIX}{scope_id}_{name}")
+            i = j
+        else:
+            out.append(c)
+            i += 1
+    return ''.join(out)
+
 
 class MacroDef:
     def __init__(self, name, params):
@@ -571,6 +632,14 @@ class MacroProcessor:
         self.capturing = None     # MacroDef currently being defined, or None
         self.expansion_depth = 0
         self.emit = emit
+        self.current_scope = 0    # scope 0: everything before the first
+                                   # global label or macro expansion
+        self.next_scope = 1       # ever-increasing; a fresh value is
+                                   # handed out for every new scope, so
+                                   # no two scopes ever share an id
+        self.scope_stack = []     # saved current_scope values, for
+                                   # restoring the enclosing scope after
+                                   # a (possibly nested) macro expansion
 
     def process_line(self, raw_line, line_no):
         stripped = strip_comment(raw_line).rstrip('\n')
@@ -590,7 +659,7 @@ class MacroProcessor:
             return
 
         if not trimmed:
-            self.emit(raw_line, line_no)
+            self._emit_final(raw_line, line_no)
             return
 
         first_tok = trimmed.split(None, 1)[0]
@@ -629,13 +698,37 @@ class MacroProcessor:
                 raise AsmError(
                     f"macro expansion nested too deep (recursive macro '{m.name}'?)",
                     line_no, raw_line)
+
+            # A fresh, globally-unique scope for this invocation -- every
+            # invocation, even of the same macro, even nested calls, gets
+            # one it will never share with any other invocation.
+            self.scope_stack.append(self.current_scope)
+            self.current_scope = self.next_scope
+            self.next_scope += 1
+
             for body_line in m.body:
                 substituted = self._substitute(body_line, m.params, args, line_no)
                 self.process_line(substituted, line_no)
+
+            self.current_scope = self.scope_stack.pop()
             self.expansion_depth -= 1
             return
 
-        self.emit(raw_line, line_no)
+        self._emit_final(raw_line, line_no)
+
+    def _emit_final(self, raw_line, line_no):
+        """The single choke point every genuinely final (non-macro,
+        non-definition) line passes through, whether it came from
+        ordinary source text or from expanding a macro body. Advances
+        the local-label scope on an ordinary global-label line, then
+        mangles any @name references using whatever scope is current."""
+        stripped = strip_comment(raw_line).rstrip('\n')
+        trimmed = stripped.strip()
+        if line_defines_global_label(trimmed):
+            self.current_scope = self.next_scope
+            self.next_scope += 1
+        mangled = mangle_local_labels(raw_line, self.current_scope)
+        self.emit(mangled, line_no)
 
     def _substitute(self, text, params, args, line_no):
         """Replaces every \\paramname in `text` with its argument. A

@@ -20,8 +20,14 @@ cross-checked the same three-way way, against its own set of test
 programs covering parameterized macros, zero-parameter macros, nested
 macro invocations, and every documented error case (wrong argument
 count, an unknown `\param` reference, a macro name colliding with a real
-mnemonic, and runaway recursive expansion). It also runs clean under
-AddressSanitizer and UndefinedBehaviorSanitizer.
+mnemonic, and runaway recursive expansion). Local labels (`locallabels.h`/`.c`,
+added right after macros) were cross-checked the same way, against tests
+covering same-macro-body labels invoked repeatedly with no collision,
+ordinary (non-macro) code reusing local names across separate scopes, a
+deliberate out-of-scope reference correctly becoming an "undefined
+symbol" error, `@` inside a quoted string being left untouched, and
+nested macro invocations each getting their own scope. It also runs
+clean under AddressSanitizer and UndefinedBehaviorSanitizer.
 
 ## Building
 
@@ -64,13 +70,27 @@ data flows through the program) is:
    on this line" style of thinking, just one layer earlier and working
    on raw text instead of an already-recognized mnemonic.
 
-4. **`lineparser.h`/`.c`** — the interesting one to start with if
+4. **`locallabels.h`/`.c`** — `@`-prefixed local labels. Called from
+   `macro.c`, this rewrites an `@name` to a scope-specific global name
+   (e.g. `@loop` becomes `__local5_loop`) before `lineparser.c` ever
+   sees it -- which is why nothing *else* in this codebase, not even
+   `symtab.c`, knows local labels exist at all; the whole feature lives
+   in this one small module's text rewriting. The interesting design
+   idea here: a new scope begins both on an ordinary global label *and*
+   on each macro expansion, which is what finally lets a macro's
+   internal labels stay distinct across repeated invocations without
+   the caller doing anything special -- read this right after
+   `macro.c`, since the two are tightly coupled (macro.c calls
+   `locallabels_push_scope()`/`locallabels_pop_scope()` around a body
+   expansion).
+
+5. **`lineparser.h`/`.c`** — the interesting one to start with if
    you've never looked at how an assembler's *line* grammar works.
    Splits one raw line of text into an optional label, an optional
    mnemonic-or-directive, and an operand string. This is where
    `"loop: lda #$00 ; comment"` becomes three separate, clean pieces.
 
-5. **`expr.h`/`.c`** — a small hand-written recursive-descent parser
+6. **`expr.h`/`.c`** — a small hand-written recursive-descent parser
    for expressions like `SCREEN + 40*ROW`. If you've never written or
    read a recursive-descent parser before, this is a good one to learn
    from precisely *because* it's small: the whole grammar is four
@@ -82,18 +102,18 @@ data flows through the program) is:
    for a long time before anyone noticed — a real bug, and a good
    illustration of a subtle parsing mistake.
 
-6. **`operand.h`/`.c`** — given an instruction's operand text, works
+7. **`operand.h`/`.c`** — given an instruction's operand text, works
    out which of the 6502's 13 addressing modes it's using, purely from
    its punctuation (`#`, parentheses, a trailing `,X`). This is the
    piece that lets `LDA $10` and `LDA $1000` pick different encodings
    automatically.
 
-7. **`symtab.h`/`.c`** — the symbol table: every label and named
+8. **`symtab.h`/`.c`** — the symbol table: every label and named
    constant, and what it's bound to. Small and simple by design (see
    the comments in `symtab.c` on why a linear scan, not a hash table,
    is the right call at this codebase's scale).
 
-8. **`assembler.h`/`.c`** — the heart of the program: the two-pass loop
+9. **`assembler.h`/`.c`** — the heart of the program: the two-pass loop
    that ties everything above together into actual machine code.
    **Read the big comment block in `assembler.h` first** — it explains
    *why* an assembler needs two passes at all (in one sentence: so a
@@ -101,14 +121,14 @@ data flows through the program) is:
    important idea in the whole codebase once you're past the syntax
    details.
 
-9. **`bytebuf.h`/`.c`**, **`basicstub.h`/`.c`**, **`listing.h`/`.c`** —
+10. **`bytebuf.h`/`.c`**, **`basicstub.h`/`.c`**, **`listing.h`/`.c`** —
    three small, self-contained utilities `assembler.c` and `main.c`
    lean on: a growable output buffer, the tiny "10 SYS xxxx" BASIC
    loader the `.basic` directive emits, and the optional listing file.
    Each is short enough to read in a couple of minutes and has its
    design rationale explained in its header comment.
 
-10. **`error.h`/`.c`** and **`strutils.h`/`.c`** — small utilities used
+11. **`error.h`/`.c`** and **`strutils.h`/`.c`** — small utilities used
     everywhere else. Worth a quick look, not worth dwelling on.
 
 ## Module map
@@ -120,6 +140,7 @@ data flows through the program) is:
 | `strutils.h` / `.c` | generic string helpers (trim, identifier-character tests, ASCII→PETSCII, comment stripping, comma-list splitting) |
 | `opcodes.h` / `.c` | what are the 6502's addressing modes, and what does each (mnemonic, mode) pair assemble to? |
 | `macro.h` / `.c` | how does `.macro`/`.endmacro` expand into real source lines before parsing ever sees them? |
+| `locallabels.h` / `.c` | how does `@loop` become a scope-specific label, and why doesn't it collide across macro invocations? |
 | `symtab.h` / `.c` | where are labels and constants stored, and looked up? |
 | `expr.h` / `.c` | how does `"SCREEN + 40*ROW"` become a number? |
 | `lineparser.h` / `.c` | how does one line of source text become (label, op, operand)? |

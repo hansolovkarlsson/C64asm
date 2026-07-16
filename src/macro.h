@@ -17,17 +17,16 @@
  * invoked like a pseudo-instruction:
  *     NAME arg1, arg2
  *
+ * A label defined inside a macro's body should use an @-prefixed local
+ * label (see locallabels.h) rather than an ordinary global one -- that
+ * makes it automatically distinct on every separate invocation, with no
+ * extra parameter or other bookkeeping needed on the caller's part.
+ *
  * Deliberate limitations (documented in c64asm-reference.md, not
  * oversights):
  *   - Macros must be defined before they're used -- there's no separate
  *     pre-scan of the whole file for macro definitions first, so this
  *     stays a simple single-pass expansion.
- *   - No automatic local-label mangling: a label defined inside a macro
- *     body will collide with "Symbol already defined" if that macro is
- *     invoked more than once. The recommended pattern is to pass a
- *     unique suffix in as a parameter and use it in the label name
- *     (e.g. "loop\suffix:" / "bne loop\suffix"), so each expansion's
- *     labels are distinct by construction.
  *   - A macro invocation can't share a line with a label ("foo: SOME_MACRO
  *     x" doesn't work) -- put the label on its own line above instead.
  *   - Macro arguments are split the same comma/paren/quote-aware way

@@ -11,6 +11,7 @@
 #include "strutils.h"
 #include "opcodes.h"
 #include "lineparser.h"
+#include "locallabels.h"
 
 typedef struct {
     char name[MAX_IDENT];
@@ -76,12 +77,29 @@ static void macro_substitute(const char *text, MacroDef *m, char args[][MAX_LINE
 
 /* Appends one fully-resolved (non-macro) line to g_lines, the same way
  * fileio.c's load_source() loop used to do inline before macro support
- * existed. Not exposed via macro.h; only macro_process_line() below
- * needs it. */
+ * existed. This is the single choke point every genuinely final line
+ * passes through, whether it came from ordinary source text or from
+ * expanding a macro body -- so it's also where local-label scoping
+ * (locallabels.h) is applied: advance the scope if this line defines an
+ * ordinary global label, then mangle any @name references using
+ * whatever scope is now current. Not exposed via macro.h; only
+ * macro_process_line() below needs it. */
 static void emit_source_line(const char *raw_line, int line_no) {
     if (g_line_count >= MAX_LINES)
         asm_error(line_no, raw_line, "Too many source lines (max %d)", MAX_LINES);
-    split_line(raw_line, line_no, &g_lines[g_line_count]);
+
+    char line[MAX_LINE_LEN];
+    strncpy(line, raw_line, sizeof(line) - 1); line[sizeof(line)-1] = '\0';
+    strip_comment(line);
+    size_t ln = strlen(line);
+    while (ln > 0 && (line[ln-1]=='\n' || line[ln-1]=='\r')) line[--ln]='\0';
+    trim(line);
+    locallabels_maybe_new_scope(line);
+
+    char mangled[MAX_LINE_LEN];
+    locallabels_mangle(raw_line, mangled, sizeof(mangled));
+
+    split_line(mangled, line_no, &g_lines[g_line_count]);
     g_line_count++;
 }
 
@@ -184,11 +202,15 @@ void macro_process_line(const char *raw_line, int line_no) {
             asm_error(line_no, raw_line,
                       "macro expansion nested too deep (recursive macro '%s'?)", m->name);
 
+        locallabels_push_scope();
+
         for (int i = 0; i < m->body_line_count; i++) {
             char substituted[MAX_LINE_LEN];
             macro_substitute(m->body[i], m, args, substituted, sizeof(substituted), line_no);
             macro_process_line(substituted, line_no);
         }
+
+        locallabels_pop_scope();
         macro_expansion_depth--;
         return;
     }

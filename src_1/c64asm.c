@@ -748,15 +748,26 @@ static int split_args(const char *operand, char args[][MAX_LINE_LEN], int max_ar
  * invoked like a pseudo-instruction:
  *     NAME arg1, arg2
  *
+ * Local labels use this same preprocessing layer. A label name starting
+ * with '@' (e.g. "@loop") is textually rewritten to a scope-specific
+ * global name (e.g. "__local5_loop") before split_line() ever sees it --
+ * so as far as the rest of the assembler (symbol table, expression
+ * evaluator, everything) is concerned, it's just an ordinary label; all
+ * the "local" behavior lives entirely in this rewriting step. A new
+ * scope begins each time an ordinary ("identifier:") global label is
+ * defined, *and* each time a macro invocation begins expanding (with
+ * the previous scope restored once that invocation's body is fully
+ * processed) -- which is what makes a macro's own @-labels distinct on
+ * every separate invocation, automatically, with no suffix parameter or
+ * other caller-side bookkeeping required. A reference to an @-label
+ * from outside the scope it was defined in mangles to a name that was
+ * never actually defined, and so becomes an ordinary "undefined symbol"
+ * error at assembly time -- scope violations are caught by the existing
+ * machinery for free, without any dedicated scope-checking code.
+ *
  * Deliberate limitations (documented in c64asm-reference.md, not
  * oversights):
  *   - Macros must be defined before they're used.
- *   - No automatic local-label mangling: a label defined inside a macro
- *     body will collide with "Symbol already defined" if that macro is
- *     invoked more than once. Pass a unique suffix in as a parameter and
- *     use it in the label name instead (e.g. "loop\suffix:" /
- *     "bne loop\suffix"), so each expansion's labels are distinct by
- *     construction.
  *   - A macro invocation can't share a line with a label.
  *   - Macro arguments are split the same comma/paren/quote-aware way
  *     directive argument lists are (see split_args() above) -- which
@@ -764,12 +775,19 @@ static int split_args(const char *operand, char args[][MAX_LINE_LEN], int max_ar
  *     single argument, since its comma sits outside any parentheses.
  *     Parameterize the base address and bake the ",Y" into the macro
  *     body instead.
+ *   - A new local-label scope is only recognized from the explicit
+ *     "identifier:" form -- a bare label with no colon doesn't start a
+ *     new scope.
+ *   - '@' inside a double-quoted string (e.g. .text "user@example.com")
+ *     is left alone, not mangled.
  */
 
 #define MAX_MACROS 128
 #define MAX_MACRO_PARAMS 8
 #define MAX_MACRO_BODY_LINES 200
 #define MAX_MACRO_EXPANSION_DEPTH 16
+
+#define LOCAL_LABEL_PREFIX "__local"
 
 typedef struct {
     char name[MAX_IDENT];
@@ -783,6 +801,18 @@ static MacroDef macros[MAX_MACROS];
 static int macro_count = 0;
 static MacroDef *capturing_macro = NULL;
 static int macro_expansion_depth = 0;
+
+/* current_scope: the scope id used to mangle @names right now.
+ * next_scope: an ever-increasing counter; a fresh value is handed out
+ *             for every new scope, so no two scopes ever share an id.
+ * scope_stack: saved current_scope values, for restoring the enclosing
+ *              scope after a (possibly nested) macro expansion. Sized
+ *              for MAX_MACRO_EXPANSION_DEPTH nested invocations, which
+ *              is also the hard limit macro_process_line enforces. */
+static int current_scope = 0;
+static int next_scope = 1;
+static int scope_stack[MAX_MACRO_EXPANSION_DEPTH + 1];
+static int scope_stack_top = 0;
 
 static MacroDef *find_macro(const char *name) {
     for (int i = 0; i < macro_count; i++)
@@ -831,12 +861,70 @@ static void macro_substitute(const char *text, MacroDef *m, char args[][MAX_LINE
     out[oi] = '\0';
 }
 
+/* True if `trimmed` starts with an identifier (not starting with '@')
+ * immediately followed by ':' -- the one thing that advances the
+ * local-label scope for ordinary, non-macro code. See the file header
+ * comment above for why only this specific form is recognized. */
+static int line_defines_global_label(const char *trimmed) {
+    if (trimmed[0] == '\0' || trimmed[0] == '@' || !is_ident_start(trimmed[0]))
+        return 0;
+    size_t i = 0;
+    while (trimmed[i] && is_ident_char(trimmed[i])) i++;
+    return trimmed[i] == ':';
+}
+
+/* Replaces every @name in `text` with a scope-specific global name,
+ * skipping anything inside a double-quoted string. */
+static void mangle_local_labels(const char *text, int scope_id, char *out, size_t outsz) {
+    size_t oi = 0;
+    size_t n = strlen(text);
+    int in_str = 0;
+    for (size_t i = 0; i < n && oi + 1 < outsz; ) {
+        char c = text[i];
+        if (c == '"') {
+            in_str = !in_str;
+            out[oi++] = c; i++;
+        } else if (c == '@' && !in_str && i + 1 < n &&
+                   (isalpha((unsigned char)text[i+1]) || text[i+1] == '_')) {
+            size_t j = i + 1;
+            while (j < n && (isalnum((unsigned char)text[j]) || text[j] == '_')) j++;
+            int written = snprintf(out + oi, outsz - oi, "%s%d_%.*s",
+                                    LOCAL_LABEL_PREFIX, scope_id, (int)(j - (i+1)), text + i + 1);
+            oi += (written > 0) ? (size_t)written : 0;
+            if (oi > outsz - 1) oi = outsz - 1;
+            i = j;
+        } else {
+            out[oi++] = c; i++;
+        }
+    }
+    out[oi] = '\0';
+}
+
 /* Appends one fully-resolved (non-macro) line to g_lines, the same way
- * load_source()'s loop used to do inline before macro support existed. */
+ * load_source()'s loop used to do inline before macro support existed.
+ * This is the single choke point every genuinely final line passes
+ * through, whether it came from ordinary source text or from expanding
+ * a macro body -- so it's also where the local-label scope is advanced
+ * (on an ordinary global-label line) and where @name mangling happens. */
 static void emit_source_line(const char *raw_line, int line_no) {
     if (g_line_count >= MAX_LINES)
         asm_error(line_no, raw_line, "Too many source lines (max %d)", MAX_LINES);
-    split_line(raw_line, line_no, &g_lines[g_line_count]);
+
+    char line[MAX_LINE_LEN];
+    strncpy(line, raw_line, sizeof(line) - 1); line[sizeof(line)-1] = '\0';
+    strip_comment(line);
+    size_t ln = strlen(line);
+    while (ln > 0 && (line[ln-1]=='\n' || line[ln-1]=='\r')) line[--ln]='\0';
+    trim(line);
+    if (line_defines_global_label(line)) {
+        current_scope = next_scope;
+        next_scope++;
+    }
+
+    char mangled[MAX_LINE_LEN];
+    mangle_local_labels(raw_line, current_scope, mangled, sizeof(mangled));
+
+    split_line(mangled, line_no, &g_lines[g_line_count]);
     g_line_count++;
 }
 
@@ -947,11 +1035,22 @@ static void macro_process_line(const char *raw_line, int line_no) {
             asm_error(line_no, raw_line,
                       "macro expansion nested too deep (recursive macro '%s'?)", m->name);
 
+        /* A fresh, globally-unique scope for this invocation -- every
+         * invocation, even of the same macro, even nested calls, gets
+         * one it will never share with any other invocation. The stack
+         * is sized for MAX_MACRO_EXPANSION_DEPTH entries, matching the
+         * depth check just above, so this can never overflow it. */
+        scope_stack[scope_stack_top++] = current_scope;
+        current_scope = next_scope;
+        next_scope++;
+
         for (int i = 0; i < m->body_line_count; i++) {
             char substituted[MAX_LINE_LEN];
             macro_substitute(m->body[i], m, args, substituted, sizeof(substituted), line_no);
             macro_process_line(substituted, line_no);
         }
+
+        current_scope = scope_stack[--scope_stack_top];
         macro_expansion_depth--;
         return;
     }
