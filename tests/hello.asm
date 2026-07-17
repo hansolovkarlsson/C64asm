@@ -27,4 +27,5 @@ done:
 
 message:
     ; Text string in PETSCII screen codes, terminated with a 0
-    .text "HELLO FROM ASSEMBLER!", 13, 0 
+    .text "HELLO FROM ASSEMBLER!"
+    .byte 13, 0 

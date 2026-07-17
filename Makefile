@@ -59,6 +59,11 @@ clean:
 	rm -f $(TST_PRG) $(TST_DIR)/*.lst $(TST_DIR)/vice.log
 	rm -f $(EXA_PRG) $(EXA_DIR)/*.lst $(EXA_DIR)/vice.log 
 
+cleanprg:
+	rm -f $(TST_PRG) $(TST_DIR)/*.lst $(TST_DIR)/vice.log
+	rm -f $(EXA_PRG) $(EXA_DIR)/*.lst $(EXA_DIR)/vice.log 
+	
+
 # Assembly files to PRG
 
 tests: $(TARGET) $(TST_PRG)

@@ -1,0 +1,262 @@
+; c64asm listing  (origin $0801, 574 bytes)
+
+080D  4C DE 08          jmp start   ; .basic's SYS stub runs whatever comes immediately
+0810  85 FB             sta str_ptr
+0812  84 FC             sty str_ptr+1
+0814  A0 00             ldy #$00
+0816  B1 FB             lda (str_ptr),y
+0818  F0 06             beq __local1_done
+081A  20 D2 FF          jsr CHROUT
+081D  C8                iny
+081E  D0 F6             bne __local1_loop
+0820  60                rts
+0821  85 04             sta kw_ptr
+0823  84 05             sty kw_ptr+1
+0825  A0 00             ldy #$00
+0827  B1 02             lda (cmp_ptr),y
+0829  D1 04             cmp (kw_ptr),y
+082B  D0 07             bne __local2_no
+082D  C9 00             cmp #$00
+082F  F0 06             beq __local2_yes
+0831  C8                iny
+0832  D0 F3             bne __local2_loop
+0834  A9 00             lda #$00
+0836  60                rts
+0837  A9 01             lda #$01
+0839  60                rts
+083A  A9 00             lda #%00000000
+083C  8D 02 DC          sta CIA1_DDRA
+083F  AD 00 DC          lda CIA1_PRA
+0842  49 FF             eor #$ff
+0844  60                rts
+086D  A2 00             ldx #$00
+086F  20 CF FF          jsr CHRIN
+0872  C9 0D             cmp #$0d
+0874  F0 08             beq __local5_done
+0876  9D 45 08          sta input_buf,x
+0879  E8                inx
+087A  E0 27             cpx #MAX_INPUT_LEN-1
+087C  D0 F1             bne __local5_loop
+087E  A9 00             lda #$00
+0880  9D 45 08          sta input_buf,x
+0883  60                rts
+0884  85 FB             sta word_dest_ptr
+0886  84 FC             sty word_dest_ptr+1
+0888  BD 45 08          lda input_buf,x
+088B  C9 20             cmp #$20
+088D  D0 04             bne __local6_start
+088F  E8                inx
+0890  4C 88 08          jmp __local6_skip_spaces
+0893  A0 00             ldy #$00
+0895  BD 45 08          lda input_buf,x
+0898  F0 0F             beq __local6_end
+089A  C9 20             cmp #$20
+089C  F0 0A             beq __local6_space
+089E  91 FB             sta (word_dest_ptr),y
+08A0  E8                inx
+08A1  C8                iny
+08A2  C0 0E             cpy #MAX_WORD_LEN-1
+08A4  D0 EF             bne __local6_loop
+08A6  F0 01             beq __local6_terminate
+08A8  E8                inx
+08A9  A9 00             lda #$00
+08AB  91 FB             sta (word_dest_ptr),y
+08AD  60                rts
+08AE  A5 09             lda engine_playing
+08B0  D0 1D             bne __local7_already_on
+08B2  A9 00             lda #$00
+08B4  8D 00 D4          sta VOICE1_FREQ_LO
+08B7  A9 08             lda #$08
+08B9  8D 01 D4          sta VOICE1_FREQ_HI
+08BC  A9 00             lda #$00
+08BE  8D 05 D4          sta VOICE1_AD
+08C1  A9 F8             lda #$f8
+08C3  8D 06 D4          sta VOICE1_SR
+08C6  A9 81             lda #%10000001          ; noise waveform, gate on
+08C8  8D 04 D4          sta VOICE1_CTRL
+08CB  A9 01             lda #1
+08CD  85 09             sta engine_playing
+08CF  60                rts
+08D0  A5 09             lda engine_playing
+08D2  F0 09             beq __local8_already_off
+08D4  A9 80             lda #%10000000          ; noise waveform, gate off
+08D6  8D 04 D4          sta VOICE1_CTRL
+08D9  A9 00             lda #0
+08DB  85 09             sta engine_playing
+08DD  60                rts
+08DE  A9 0F             lda #$0f
+08E0  8D 18 D4          sta SID_VOLUME
+08E3  A9 00             lda #$00
+08E5  8D 04 D4          sta VOICE1_CTRL
+08E8  A9 00             lda #%00000000
+08EA  8D 03 DC          sta CIA1_DDRB
+08ED  A9 93             lda #$93
+08EF  20 D2 FF          jsr CHROUT
+08F2  A9 CD             lda #<welcome_msg
+08F4  A0 09             ldy #>welcome_msg
+08F6  20 10 08          jsr print_msg
+08F9  AD 11 D0          lda VIC_CTRL1
+08FC  09 20             ora #%00100000
+08FE  8D 11 D0          sta VIC_CTRL1
+0901  AD 18 D0          lda VIC_MEMPTRS
+0904  29 F0             and #%11110000
+0906  09 08             ora #((BITMAP) / 1024)
+0908  8D 18 D0          sta VIC_MEMPTRS
+090B  A9 00             lda #<(BITMAP)
+090D  85 FD             sta gfx_ptr
+090F  A9 20             lda #>(BITMAP)
+0911  85 FE             sta gfx_ptr+1
+0913  A2 20             ldx #32
+0915  A9 00             lda #$00
+0917  A0 00             ldy #$00
+0919  91 FD             sta (gfx_ptr),y
+091B  C8                iny
+091C  D0 FB             bne __local15_clear_byte
+091E  E6 FE             inc gfx_ptr+1
+0920  CA                dex
+0921  D0 F4             bne __local15_clear_loop
+0923  A9 00             lda #<SCREEN
+0925  85 FD             sta gfx_ptr
+0927  A9 04             lda #>SCREEN
+0929  85 FE             sta gfx_ptr+1
+092B  A2 04             ldx #4
+092D  A9 10             lda #%00010000
+092F  A0 00             ldy #$00
+0931  91 FD             sta (gfx_ptr),y
+0933  C8                iny
+0934  D0 FB             bne __local16_fill_byte
+0936  E6 FE             inc gfx_ptr+1
+0938  CA                dex
+0939  D0 F4             bne __local16_fill_loop
+093B  A9 28             lda #((sprite_data) / 64)
+093D  8D F8 07          sta SPRITE_PTR0
+0940  A9 01             lda #1
+0942  8D 27 D0          sta SPRITE0_COLOR
+0945  A9 64             lda #100
+0947  8D 00 D0          sta SPRITE0_X
+094A  A9 64             lda #100
+094C  8D 01 D0          sta SPRITE0_Y
+094F  A9 01             lda #%00000001
+0951  8D 15 D0          sta SPRITE_ENABLE
+0954  20 3A 08          jsr read_joy2
+0957  8D CC 09          sta joy_state
+095A  29 10             and #%00010000          ; fire button
+095C  F0 1E             beq no_fire
+095E  A9 00             lda #$00
+0960  8D 04 D4          sta VOICE1_CTRL
+0963  A9 00             lda #$00
+0965  8D 00 D4          sta VOICE1_FREQ_LO
+0968  A9 30             lda #$30
+096A  8D 01 D4          sta VOICE1_FREQ_HI
+096D  A9 08             lda #$08
+096F  8D 05 D4          sta VOICE1_AD
+0972  A9 00             lda #$00
+0974  8D 06 D4          sta VOICE1_SR
+0977  A9 81             lda #%10000001
+0979  8D 04 D4          sta VOICE1_CTRL
+097C  78                sei
+097D  A9 FF             lda #%11111111
+097F  8D 02 DC          sta CIA1_DDRA
+0982  A9 FD             lda #%11111101
+0984  8D 00 DC          sta CIA1_PRA
+0987  AD 01 DC          lda CIA1_PRB
+098A  58                cli
+098B  49 FF             eor #$ff
+098D  29 02             and #%00000010
+098F  D0 06             bne w_held
+0991  20 D0 08          jsr engine_sound_off
+0994  4C 9A 09          jmp check_restart
+0997  20 AE 08          jsr engine_sound_on
+099A  78                sei
+099B  A9 FF             lda #%11111111
+099D  8D 02 DC          sta CIA1_DDRA
+09A0  A9 FB             lda #%11111011
+09A2  8D 00 DC          sta CIA1_PRA
+09A5  AD 01 DC          lda CIA1_PRB
+09A8  58                cli
+09A9  49 FF             eor #$ff
+09AB  29 01             and #%00000001
+09AD  D0 03             bne do_restart
+09AF  4C 54 09          jmp main_loop
+09B2  AD 11 D0          lda VIC_CTRL1
+09B5  29 DF             and #%11011111
+09B7  8D 11 D0          sta VIC_CTRL1
+09BA  A9 14             lda #$14
+09BC  8D 18 D0          sta VIC_MEMPTRS
+09BF  A9 93             lda #$93
+09C1  20 D2 FF          jsr CHROUT
+09C4  A9 E2             lda #<bye_msg
+09C6  A0 09             ldy #>bye_msg
+09C8  20 10 08          jsr print_msg
+09CB  60                rts
+
+Symbol table:
+  BITMAP               = $2000
+  CHRIN                = $FFCF
+  CHROUT               = $FFD2
+  CIA1_DDRA            = $DC02
+  CIA1_DDRB            = $DC03
+  CIA1_PRA             = $DC00
+  CIA1_PRB             = $DC01
+  MAX_INPUT_LEN        = $0028
+  MAX_WORD_LEN         = $000F
+  SCREEN               = $0400
+  SID_VOLUME           = $D418
+  SPRITE0_COLOR        = $D027
+  SPRITE0_X            = $D000
+  SPRITE0_Y            = $D001
+  SPRITE_ENABLE        = $D015
+  SPRITE_PTR0          = $07F8
+  VIC_BG0              = $D021
+  VIC_BORDER           = $D020
+  VIC_CTRL1            = $D011
+  VIC_CTRL2            = $D016
+  VIC_MEMPTRS          = $D018
+  VOICE1_AD            = $D405
+  VOICE1_CTRL          = $D404
+  VOICE1_FREQ_HI       = $D401
+  VOICE1_FREQ_LO       = $D400
+  VOICE1_SR            = $D406
+  __local15_clear_byte = $0919
+  __local15_clear_loop = $0917
+  __local16_fill_byte  = $0931
+  __local16_fill_loop  = $092F
+  __local1_done        = $0820
+  __local1_loop        = $0816
+  __local2_loop        = $0827
+  __local2_no          = $0834
+  __local2_yes         = $0837
+  __local5_done        = $087E
+  __local5_loop        = $086F
+  __local6_end         = $08A9
+  __local6_loop        = $0895
+  __local6_skip_spaces = $0888
+  __local6_space       = $08A8
+  __local6_start       = $0893
+  __local6_terminate   = $08A9
+  __local7_already_on  = $08CF
+  __local8_already_off = $08DD
+  bye_msg              = $09E2
+  check_restart        = $099A
+  cmp_ptr              = $0002
+  do_restart           = $09B2
+  engine_playing       = $0009
+  engine_sound_off     = $08D0
+  engine_sound_on      = $08AE
+  extract_word         = $0884
+  gfx_ptr              = $00FD
+  input_buf            = $0845
+  joy_state            = $09CC
+  kw_ptr               = $0004
+  main_loop            = $0954
+  no_fire              = $097C
+  print_msg            = $0810
+  read_joy2            = $083A
+  read_line            = $086D
+  sprite_data          = $0A00
+  start                = $08DE
+  str_equal            = $0821
+  str_ptr              = $00FB
+  w_held               = $0997
+  welcome_msg          = $09CD
+  word_dest_ptr        = $00FB

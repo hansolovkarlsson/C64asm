@@ -1,4 +1,4 @@
-; c64asm listing  (origin $1000, 39 bytes)
+; c64asm listing  (origin $1000, 38 bytes)
 
 1000  A2 00         ldx #$00     ; Clear X register (used as our string index pointer)
 1002  BD 0F 10      lda message,x ; Load character from message + X offset

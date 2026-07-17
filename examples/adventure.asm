@@ -12,9 +12,23 @@
 ; entrance -> door -> dark cave -> treasure) was walked start to finish,
 ; and failure cases (wrong room, missing key, already-open chest, taking
 ; something not present) were all checked to produce sensible messages.
+;
+; Uses lib/text.inc (print_msg/PRINT, str_equal) and lib/input.inc
+; (read_line, extract_word) rather than defining its own copies of
+; these -- they were originally written here, then generalized into
+; the library (see lib-reference.md's "worked examples" for the
+; smaller, focused demos this project now builds alongside the
+; original kitchen-sink demo.asm). Everything specific to *this*
+; particular adventure -- the room/item state machine, the verb table,
+; the two-word "verb noun" grammar built from extract_word, and every
+; printed message -- stays here, since none of that is reusable across
+; other programs the way the underlying string/input primitives are.
 
-CHROUT = $ffd2
-CHRIN  = $ffcf
+        .basic
+        jmp start   ; see lib-reference.md's note on why this is needed
+                      ; whenever a library that emits real code (as
+                      ; text.inc/input.inc both do) is .include'd
+                      ; between .basic and the real entry point
 
 ; Zero-page pointers. Each pair is shared by two routines that are never
 ; active at the same time (e.g. str_ptr is only needed once tokenizing,
@@ -23,16 +37,22 @@ CHRIN  = $ffcf
 ; safe for machine code that isn't returning to BASIC -- see
 ; c64-memory-reference.md's zero-page notes, extended here since this
 ; program needs a few more pointer pairs than the earlier demos did.
+;
+; str_ptr, cmp_ptr, and kw_ptr are required by lib/text.inc
+; (print_msg and str_equal respectively); word_dest_ptr is required by
+; lib/input.inc (extract_word). See both files' header comments for
+; why sharing addresses between them, as done here, is safe.
 str_ptr       = $fb   ; print_msg's string pointer
 word_dest_ptr = $fb   ; extract_word's destination pointer (tokenizing
                         ; finishes completely before anything is printed)
-cmp_ptr       = $fd   ; the "left" side of a string comparison
+cmp_ptr       = $fd   ; str_equal's "left" side of a comparison
 kw_ptr        = $02   ; str_equal's "right" side (the candidate keyword)
 handler_vec   = $02   ; indirect-call target (only set after str_equal
                         ; has already returned, so this never collides
                         ; with kw_ptr being in use)
 
-MAX_INPUT = 40
+        .include "lib/text.inc"
+        .include "lib/input.inc"
 
 ; Room numbers
 CLEARING      = 0
@@ -49,8 +69,6 @@ TREASURE = 2
 ; item_location sentinel values (rooms themselves are 0-4)
 LOC_NONE = 255   ; not present anywhere yet (the key, inside the unopened chest)
 LOC_INV  = 254   ; carried in the player's inventory
-
-        .basic
 
 start:
         lda #<msg_welcome1
@@ -72,117 +90,24 @@ main_loop:
 
 ; --- input ---
 
-; Reads one line from the keyboard into input_buf, null-terminated.
-; CHRIN, when reading from the keyboard, transparently invokes the
-; KERNAL's full screen-editor line input (cursor, typing, backspace,
-; echo) the first time it's called with an empty buffer, then dispenses
-; the typed line one character at a time -- including the terminating
-; RETURN -- on each subsequent call. This is the same mechanism BASIC's
-; own INPUT statement uses internally.
-read_line:
-        ldx #$00
-read_line_loop:
-        jsr CHRIN
-        cmp #$0d
-        beq read_line_done
-        sta input_buf,x
-        inx
-        cpx #MAX_INPUT-1
-        bne read_line_loop
-read_line_done:
-        lda #$00
-        sta input_buf,x
-        rts
-
-; Splits input_buf into up to two space-separated words: verb_buf and
-; noun_buf (either may end up empty if the input had fewer words).
+; Splits input_buf (filled by read_line, lib/input.inc) into up to two
+; space-separated words: verb_buf and noun_buf (either may end up
+; empty if the input had fewer words). The two-word "verb noun"
+; grammar is this adventure's own policy -- lib/input.inc's
+; extract_word just pulls one word at a time; how many words a
+; program wants, and what to call them, is up to the program.
 tokenize:
         ldx #$00
         lda #<verb_buf
-        sta word_dest_ptr
-        lda #>verb_buf
-        sta word_dest_ptr+1
+        ldy #>verb_buf
         jsr extract_word
         lda #<noun_buf
-        sta word_dest_ptr
-        lda #>noun_buf
-        sta word_dest_ptr+1
+        ldy #>noun_buf
         jsr extract_word
-        rts
-
-; Copies one space-delimited word from input_buf, starting at index X,
-; into the buffer word_dest_ptr points at (null-terminated). Advances X
-; past the word and its trailing delimiter. Skips any leading spaces
-; first, so multiple consecutive spaces between words don't produce a
-; spurious empty word.
-extract_word:
-extract_word_skip_spaces:
-        lda input_buf,x
-        cmp #$20
-        bne extract_word_start
-        inx
-        jmp extract_word_skip_spaces
-extract_word_start:
-        ldy #$00
-extract_word_loop:
-        lda input_buf,x
-        beq extract_word_end
-        cmp #$20
-        beq extract_word_space
-        sta (word_dest_ptr),y
-        inx
-        iny
-        cpy #15
-        bne extract_word_loop
-        beq extract_word_terminate
-extract_word_space:
-        inx
-extract_word_terminate:
-extract_word_end:
-        lda #$00
-        sta (word_dest_ptr),y
-        rts
-
-; --- output ---
-
-; Prints the null-terminated string whose address is passed in A (low
-; byte) / Y (high byte).
-print_msg:
-        sta str_ptr
-        sty str_ptr+1
-        ldy #$00
-print_msg_loop:
-        lda (str_ptr),y
-        beq print_msg_done
-        jsr CHROUT
-        iny
-        bne print_msg_loop
-print_msg_done:
         rts
 
 ; --- string comparison ---
-
-; Compares the null-terminated string at cmp_ptr (set by the caller
-; beforehand) against the string whose address is passed in A/Y. Returns
-; 1 in A if equal, 0 if not.
-str_equal:
-        sta kw_ptr
-        sty kw_ptr+1
-        ldy #$00
-str_equal_loop:
-        lda (cmp_ptr),y
-        cmp (kw_ptr),y
-        bne str_equal_no
-        cmp #$00
-        beq str_equal_yes
-        iny
-        bne str_equal_loop
-str_equal_no:
-        lda #$00
-        rts
-str_equal_yes:
-        lda #$01
-        rts
+; (str_equal itself now lives in lib/text.inc)
 
 ; --- command dispatch ---
 
@@ -621,7 +546,7 @@ exit_east:  .byte COTTAGE, CAVE_ENTRANCE, $ff, $ff,     $ff
 exit_west:  .byte $ff,    $ff,      CLEARING, FOREST,   $ff
 
 ; --- input buffers ---
-input_buf: .fill MAX_INPUT, 0
+; (input_buf itself now lives in lib/input.inc, filled by read_line)
 verb_buf:  .fill 16, 0
 noun_buf:  .fill 16, 0
 
