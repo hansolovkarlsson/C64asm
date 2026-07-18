@@ -1,6 +1,10 @@
 ; hardware.inc - C64 hardware register constants: VIC-II, SID, CIA, and
 ; the KERNAL entry points this library set relies on.
 ;
+; Requires: nothing. Unlike every other file in this library, this one
+; defines constants only -- no code, no zero-page pointers, no flag
+; bytes for the including program to reserve.
+;
 ; This file defines constants only -- no code, no side effects -- so
 ; it's always safe to .include from anywhere, in any order, alongside
 ; any other file in this library set. Every other .inc file here

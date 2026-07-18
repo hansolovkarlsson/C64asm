@@ -7,13 +7,27 @@
 ;   NEWLINE     macro: moves the cursor to the start of the next line
 ;   str_equal   subroutine: compares two null-terminated PETSCII strings
 ;
-; Requires THREE 2-byte zero-page scratch locations, defined by the
-; including program (this library doesn't claim any zero-page addresses
-; on its own, since which addresses are safe to use depends on what
-; else the program has already claimed -- see c64-memory-reference.md's
-; zero-page notes for the community-documented safe range this
-; project's own demos use, $02-$0F and $FB-$FE): str_ptr (used by
-; print_msg), and cmp_ptr/kw_ptr (used by str_equal).
+; Requires -- define ALL of these with `=` before this file's own
+; .include line, even if your program only ever calls some of the
+; routines above (see below for why):
+;   str_ptr   2-byte zero page -- print_msg's working pointer to
+;             whatever string is currently being printed
+;   cmp_ptr   2-byte zero page -- str_equal's pointer to the string on
+;             the "known" side of a comparison; set this yourself
+;             before calling str_equal
+;   kw_ptr    2-byte zero page -- str_equal's pointer to the string on
+;             the other side; str_equal sets this itself from the A/Y
+;             you pass it, so you never touch kw_ptr directly
+;
+; None of the three have to be permanently dedicated -- see below for
+; when it's safe to have them share addresses with each other or with
+; other libraries' own required pointers.
+;
+; This library doesn't claim any zero-page addresses on its own, since
+; which addresses are safe to use depends on what else the program has
+; already claimed -- see c64-memory-reference.md's zero-page notes for
+; the community-documented safe range this project's own demos use,
+; $02-$0F and $FB-$FE.
 ;
 ; All three are required as soon as you .include this file, EVEN IF
 ; your program never actually calls str_equal: .include splices in

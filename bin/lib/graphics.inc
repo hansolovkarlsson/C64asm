@@ -12,6 +12,30 @@
 ;   sprite0_bounce_step            subroutine
 ;   sprite0_explode                subroutine
 ;
+; Requires -- define ALL of these with `=` before this file's own
+; .include line, even if your program only uses some of the macros/
+; routines above (see below for why):
+;   gfx_ptr   2-byte zero page -- shared working pointer for
+;             CLEAR_BITMAP, SET_SCREEN_COLOR, and sprite0_explode
+;   xpos      2 bytes (xpos and xpos+1, the low/high byte of a 16-bit
+;             value), not necessarily zero page -- sprite0_bounce_step's
+;             current X position
+;   ypos      1 byte, not necessarily zero page -- sprite0_bounce_step's
+;             current Y position
+;   xdir      1 byte, not necessarily zero page -- sprite0_bounce_step's
+;             X direction flag (1 = increasing/right, 0 = decreasing/left)
+;   ydir      1 byte, not necessarily zero page -- sprite0_bounce_step's
+;             Y direction flag (1 = increasing/down, 0 = decreasing/up)
+;   XMIN, XMAX, YMIN, YMAX   compile-time constants (`=`) --
+;             sprite0_bounce_step's rectangular bounds to bounce within
+;
+; That's nine names for two genuinely independent things -- gfx_ptr for
+; the bitmap/screen macros and sprite0_explode, the other eight for
+; sprite0_bounce_step alone -- required together only because of how
+; .include works (see below), not because they're related to each
+; other. A program using just one of the two groups still has to
+; define all nine.
+;
 ; bitmap_addr must be one of the 8 addresses the VIC-II can use for
 ; bitmap data within its current 16K bank: a multiple of $2000 relative
 ; to the bank's own base (this library assumes the default bank at
@@ -23,19 +47,9 @@
 ; it does not clear anything. Immediately afterward, always call both
 ; CLEAR_BITMAP (zeroes the actual pixel data) and SET_SCREEN_COLOR (see
 ; below for why this one specifically is easy to forget and looks
-; broken in a very particular way if you do). CLEAR_BITMAP/
-; SET_SCREEN_COLOR need a 2-byte zero-page scratch location named
-; gfx_ptr, defined by the including program (this library doesn't claim
-; a zero-page address of its own -- see text.inc's header comment for
-; the same reasoning applied to str_ptr).
-;
-; sprite0_bounce_step needs eight more, unrelated to gfx_ptr: xpos
-; (TWO bytes -- xpos and xpos+1, the low/high byte of a 16-bit X
-; position, since the visible screen's right edge is itself past 255),
-; ypos, xdir, ydir (one byte each -- see sprite0_bounce_step's own
-; comment below for exactly what they're for and why, unlike gfx_ptr,
-; none of these have to be zero page at all), and XMIN, XMAX, YMIN,
-; YMAX (compile-time constants, the bounds to bounce within).
+; broken in a very particular way if you do). This library doesn't
+; claim gfx_ptr's zero-page address on its own -- see text.inc's header
+; comment for the same reasoning applied to its own required pointers.
 ;
 ; gfx_ptr and all eight of sprite0_bounce_step's symbols are required
 ; as soon as you .include this file, EVEN IF your program never calls

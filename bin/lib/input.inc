@@ -8,6 +8,18 @@
 ;   extract_word          subroutine: pulls one word out of that line
 ;   input_buf             the buffer read_line/extract_word share
 ;
+; Requires -- define this with `=` before this file's own .include
+; line, even if your program only ever calls read_joy2/READ_KEY (see
+; below for why):
+;   word_dest_ptr   2-byte zero page -- extract_word's pointer to
+;                   wherever it should copy the word it's extracting;
+;                   set this yourself (via A/Y) each time you call it
+;
+; This library doesn't claim a zero-page address of its own -- see
+; text.inc's header comment for the same reasoning applied to its own
+; required pointers, including when it's safe to have word_dest_ptr
+; share an address with one of those.
+;
 ; IMPORTANT: joystick port 2 and the keyboard column-select register
 ; are the exact same hardware address (CIA1_PRA, $DC00), and this is
 ; more than a naming coincidence to be careful about -- it constrains
@@ -43,12 +55,7 @@
 ; code above -- they read typed input via the KERNAL's CHRIN, the same
 ; safe, well-tested line-editing mechanism BASIC's own INPUT statement
 ; uses (see this project's own adventure.asm, which is where these two
-; were extracted from). extract_word needs a 2-byte zero-page scratch
-; location named word_dest_ptr, defined by the including program (see
-; text.inc's header comment for the same reasoning applied to str_ptr
-; -- and note word_dest_ptr is safe to alias with str_ptr if you're
-; using both libraries together, since tokenizing a line only happens
-; after it's been fully read, never while printing).
+; were extracted from).
 ;
 ; word_dest_ptr is required as soon as you .include this file, EVEN IF
 ; your program never calls extract_word: .include splices in its code

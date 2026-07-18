@@ -57,10 +57,16 @@ start:
         CLS
         PRINT welcome_msg
 
+wait_key:
+        READ_KEY %11111101, %00000010    ; W
+        beq wait_key
+
         BITMAP_MODE_ON BITMAP
+
         CLEAR_BITMAP BITMAP           ; without this, whatever garbage was
                                          ; already in RAM at BITMAP shows as
                                          ; scrambled pixels
+
         SET_SCREEN_COLOR %00010000     ; without this, the "WELCOME TO THE
                                          ; DEMO" text and CLS's fill just
                                          ; printed get reinterpreted as
@@ -70,12 +76,12 @@ start:
         SPRITE_INIT sprite_data, 1, 100, 100
 
 main_loop:
-        jsr read_joy2
-        sta joy_state
+;        jsr read_joy2
+;        sta joy_state
 
-        and #%00010000          ; fire button
-        beq no_fire
-        PLAY_SOUND $30, $08, $00, %10000001
+;        and #%00010000          ; fire button
+;        beq no_fire
+;        PLAY_SOUND $30, $08, $00, %10000001
 no_fire:
 
         READ_KEY %11111101, %00000010    ; W
@@ -99,7 +105,7 @@ joy_state:
         .byte 0
 
 welcome_msg:
-        .text "WELCOME TO THE DEMO"
+        .text "WELCOME TO THE DEMO. PRESS 'W' TO MAKE SOUND"
         .byte 13, 0
 bye_msg:
         .text "GOODBYE"
@@ -107,7 +113,31 @@ bye_msg:
 
         .align 64
 sprite_data:            ; real, .align-placed sprite data -- SPRITE_INIT
-        .fill 63, $00    ; above forward-references this label, which is
+        ; .fill 63, $00    ; above forward-references this label, which is
                            ; fine: it's an ordinary expression, not a .if
                            ; condition, so normal two-pass forward-
                            ; reference resolution applies
+        ; a simple 24x21 filled circle ("ball")
+        .byte %00111100,%00000000,%00000000
+        .byte %01111110,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %11111111,%00000000,%00000000
+        .byte %01111110,%00000000,%00000000
+        .byte %00111100,%00000000,%00000000
+        .byte %00000000,%00000000,%00000000
+        .byte $00                              ; pad to a 64-byte block
+

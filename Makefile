@@ -43,7 +43,7 @@ all: $(OBJS)
 
 .PHONY: all clean
 
-all: $(TARGET)
+all: $(TARGET) $(SINGLE_TARGET)
 
 # Compile C
 $(TARGET): $(OBJECTS)
@@ -56,7 +56,7 @@ single:$(SINGLE_TARGET)
 
 # Cleanup
 clean:
-	rm -f $(TARGET) $(SRC_DIR)/*.o src_1/c64asm
+	rm -f $(TARGET) $(SRC_DIR)/*.o $(SINGLE_TARGET)
 	rm -f $(TST_PRG) $(TST_DIR)/*.lst $(TST_DIR)/vice.log
 	rm -f $(EXA_PRG) $(EXA_DIR)/*.lst $(EXA_DIR)/vice.log 
 

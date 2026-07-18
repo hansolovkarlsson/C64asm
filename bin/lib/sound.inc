@@ -5,12 +5,20 @@
 ;   PLAY_SOUND freq_hi, ad, sr, waveform   macro: one-shot sound effect
 ;   engine_sound_on / engine_sound_off     subroutines: continuous tone
 ;
+; Requires -- define this with `=` before this file's own .include
+; line, even if your program only ever calls SID_INIT/PLAY_SOUND (see
+; below for why):
+;   engine_playing   1 byte, anywhere in RAM (doesn't need to be zero
+;                    page) -- engine_sound_on/off's flag for whether
+;                    the continuous tone is currently gated on; you
+;                    never set this yourself, just reserve the byte
+;
 ; PLAY_SOUND is for short, fire-and-forget effects (a hit, a bounce, an
 ; explosion) -- each call fully retriggers the envelope, so calling it
 ; again while a previous sound is still sounding cuts that one off and
-; starts the new one. pong.asm uses this for all three of its effects
-; (wall bounce, paddle hit, score); lander.asm's own sound effects
-; follow the identical pattern without (yet) using this library.
+; starts the new one. pong.asm and lander.asm both use this for their
+; own one-shot effects (wall bounce/paddle hit/score, and a crash boom,
+; respectively).
 ;
 ; engine_sound_on/off are for a continuous tone that starts and stops
 ; based on held input (a thruster, an engine) -- unlike PLAY_SOUND,
@@ -18,10 +26,17 @@
 ; touching the SID at all, so calling it every frame while a key is
 ; held doesn't repeatedly retrigger the envelope's attack phase (which
 ; would make it stutter instead of sounding like one continuous note).
-; This needs a persistent flag byte, named engine_playing, that the
-; including program must define (any writable RAM location; this
-; library doesn't claim a zero-page address of its own -- see
-; text.inc's header comment for the same reasoning applied to str_ptr).
+; This library doesn't claim engine_playing's address on its own -- see
+; text.inc's header comment for the same reasoning applied to its own
+; required pointers.
+;
+; engine_playing is required as soon as you .include this file, EVEN IF
+; your program never calls engine_sound_on/off: .include splices in
+; that code unconditionally like everything else here, and it
+; references engine_playing regardless of whether anything ever jsr's
+; to it. A program that only wants SID_INIT/PLAY_SOUND still needs to
+; define it, or assembly fails on an undefined symbol inside
+; engine_sound_on/off's own bodies.
 
 .include "hardware.inc"
 
