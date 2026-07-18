@@ -22,6 +22,7 @@ SINGLE_DIR := single_src
 SINGLE_TARGET := $(SINGLE_DIR)/c64asm
 SINGLE_SOURCE := $(SINGLE_DIR)/c64asm.c
 
+LIB_DIR := $(BIN_DIR)/lib
 
 TST_DIR := tests
 TST_SRC := $(wildcard $(TST_DIR)/*.asm)
@@ -73,6 +74,6 @@ examples: $(TARGET) $(EXA_PRG)
 
 %.prg: %.asm
 	echo $(TARGET) $< -o $@
-	$(TARGET) $< -o $@ --listing $(<:.asm=.lst)
+	$(TARGET) $< -o $@ --lib-dir $(LIB_DIR) --listing $(<:.asm=.lst)
 
 

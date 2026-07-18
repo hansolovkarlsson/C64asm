@@ -15,13 +15,26 @@ once, with no "already defined" collisions — see `demo.asm` for a
 program that does exactly this with all five files at once, and
 `c64asm-reference.md`'s "Includes" section for why that works.
 
+**Using this library from more than one project directory:** by
+default, `.include "lib/text.inc"` resolves relative to the file that
+contains the `.include` line, so each project needs its own copy of
+this `lib/` folder sitting next to its source. To keep a single shared
+copy instead and point every project at it, pass
+`--lib-dir <path to this lib/ folder itself>` on the command line —
+e.g. if you've unpacked this zip to `/opt/c64lib/lib`, use
+`--lib-dir /opt/c64lib/lib` (not `--lib-dir /opt/c64lib`). It's a pure
+fallback, only consulted when a project's own local `lib/` doesn't
+have the file, so it's safe to pass on every build without risk of it
+silently shadowing a project's own files. See `c64asm-reference.md` §1
+for the full behavior.
+
 ## Files
 
 | File | Provides |
 |---|---|
 | `lib/hardware.inc` | VIC-II, SID, CIA, and KERNAL register constants. No code — always safe to `.include`. |
-| `lib/text.inc` | `PRINT msg`, `CLS`, and the `print_msg` subroutine they're built on. |
-| `lib/input.inc` | `CIA_KEYBOARD_SETUP`, `read_joy2`, `READ_KEY column, mask`. |
+| `lib/text.inc` | `PRINT msg`, `CLS`, `NEWLINE`, the `print_msg` subroutine they're built on, and `str_equal` for comparing typed input against known keywords. |
+| `lib/input.inc` | `CIA_KEYBOARD_SETUP`, `read_joy2`, `READ_KEY column, mask` for joystick/keyboard-matrix input; `read_line` and `extract_word` for reading and tokenizing a typed line via `CHRIN`. |
 | `lib/graphics.inc` | `BITMAP_MODE_ON addr`, `BITMAP_MODE_OFF`, `CLEAR_BITMAP addr`, `SET_SCREEN_COLOR value`, `SPRITE_INIT data, color, x, y`. |
 | `lib/sound.inc` | `SID_INIT`, `PLAY_SOUND freq_hi, ad, sr, waveform`, `engine_sound_on`/`engine_sound_off`. |
 
@@ -116,6 +129,39 @@ see `c64asm-reference.md` §7 for the directive's full behavior. Both
 for any program that `.include`s library code before its entry point,
 and there's no real downside to using it even when you don't strictly
 need it yet (three bytes, one harmless jump).
+
+### An `input.inc` gotcha `text.inc`'s `NEWLINE` fixes
+
+Printing a response immediately after `read_line` returns, with
+nothing in between, was found (on real hardware and in VICE, not just
+in theory) to leave that response running onto the same screen line as
+whatever had just been typed — not a separate line below it, the way
+you'd expect after pressing RETURN to submit the input:
+
+```
+> go north
+
+```
+
+became, without the fix:
+
+```
+> go northYou are standing in a forest...
+```
+
+`adventure.asm` hit exactly this. The fix is to call `text.inc`'s
+`NEWLINE` right after `read_line`, before printing anything else:
+
+```
+        jsr read_line
+        NEWLINE
+        jsr tokenize
+        jsr dispatch
+```
+
+If your program reads typed input at all, call `NEWLINE` right after
+the read, before the first thing you print in response — the same
+place `adventure.asm` calls it.
 
 ### A `graphics.inc` gotcha this library will also expose
 

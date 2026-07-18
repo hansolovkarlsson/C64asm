@@ -698,11 +698,12 @@ class MacroDef:
 # usually a long, less readable absolute path.
 
 class IncludeProcessor:
-    def __init__(self, on_line):
+    def __init__(self, on_line, lib_dir=None):
         self.on_line = on_line              # callback(raw_line, filename, line_no)
         self.open_stack_canon = []          # canonical paths, for cycle detection
         self.open_stack_display = []        # matching display names, for error messages
         self.already_included = set()       # canonical paths fully processed already
+        self.lib_dir = lib_dir              # --lib-dir fallback search root, or None
 
     def process_file(self, requested_path, including_file, including_line_no, including_raw):
         if including_file and not os.path.isabs(requested_path):
@@ -710,12 +711,45 @@ class IncludeProcessor:
         else:
             resolved_display = requested_path
 
+        # --lib-dir is purely a fallback: the default resolution above
+        # (relative to the file containing the .include line) is always
+        # tried first and, if it finds the file, --lib-dir is never even
+        # consulted -- so a project with its own local lib/ next to it
+        # keeps working unchanged whether or not --lib-dir is given.
+        # Only when that default lookup comes up empty, and --lib-dir
+        # was given, and the requested path isn't absolute (an absolute
+        # path is never subject to search-path fallback, same as the
+        # default resolution above), do we also try requested_path
+        # relative to --lib-dir.
+        #
+        # --lib-dir names the lib/ directory itself (the one holding
+        # text.inc, input.inc, ...), not its parent -- so a leading
+        # "lib/" in the .include path (this project's own convention,
+        # `.include "lib/text.inc"`) is stripped before joining with
+        # --lib-dir, or `--lib-dir /shared/c64lib` would end up looking
+        # for /shared/c64lib/lib/text.inc, one "lib" too many. A
+        # requested path that doesn't start with "lib/" is joined as-is.
+        lib_dir_display = None
+        if (self.lib_dir and including_file and not os.path.isabs(requested_path)
+                and not os.path.isfile(resolved_display)):
+            lib_relative = requested_path
+            if lib_relative.startswith('lib/'):
+                lib_relative = lib_relative[len('lib/'):]
+            lib_dir_display = os.path.join(self.lib_dir, lib_relative)
+            if os.path.isfile(lib_dir_display):
+                resolved_display = lib_dir_display
+
         try:
             canon = os.path.realpath(resolved_display)
             if not os.path.isfile(canon):
                 raise OSError()
         except OSError:
             if including_file:
+                if lib_dir_display and lib_dir_display != resolved_display:
+                    raise AsmError(
+                        f"Cannot open included file '{resolved_display}' "
+                        f"(also tried '{lib_dir_display}' via --lib-dir)",
+                        including_line_no, including_raw)
                 raise AsmError(f"Cannot open included file '{resolved_display}'",
                                 including_line_no, including_raw)
             else:
@@ -989,13 +1023,13 @@ class Assembler:
         self.lines = []       # (line_no, raw_text, label, op, operand, filename)
         self.listing = []
 
-    def load(self, main_path):
+    def load(self, main_path, lib_dir=None):
         def emit(raw, filename, line_no):
             label, op, operand = split_line(raw, line_no)
             self.lines.append((line_no, raw, label, op, operand, filename))
 
         macros = MacroProcessor(emit)
-        includes = IncludeProcessor(macros.process_line)
+        includes = IncludeProcessor(macros.process_line, lib_dir=lib_dir)
         macros.include_processor = includes   # see MacroProcessor.__init__
         includes.process_file(main_path, None, 0, None)
 
@@ -1339,9 +1373,9 @@ class Assembler:
             self.symbols[name] = value
 
 
-def assemble_source(main_path):
+def assemble_source(main_path, lib_dir=None):
     asm = Assembler()
-    asm.load(main_path)
+    asm.load(main_path, lib_dir=lib_dir)
     origin, code = asm.assemble()
     return origin, code, asm.listing, asm.symbols
 
@@ -1351,6 +1385,13 @@ def main():
     parser.add_argument('input', help="Input assembly source file")
     parser.add_argument('-o', '--output', required=True, help="Output .prg file")
     parser.add_argument('--listing', help="Optional assembly listing output file")
+    parser.add_argument('--lib-dir', metavar='DIR',
+                         help="Fallback directory to also search when resolving "
+                              ".include paths that aren't found relative to the "
+                              "including file (the default, unaffected if this "
+                              "isn't given). Lets a common library directory be "
+                              "shared across separate project directories instead "
+                              "of each needing its own copy.")
     args = parser.parse_args()
 
     # File reading (of the main file, and of anything it .include's) now
@@ -1359,7 +1400,7 @@ def main():
     # -- so there's no separate open() here to fail with a raw traceback
     # if args.input doesn't exist.
     try:
-        origin, code, listing, symbols = assemble_source(args.input)
+        origin, code, listing, symbols = assemble_source(args.input, lib_dir=args.lib_dir)
     except AsmError as e:
         print(f"Assembly error: {e}", file=sys.stderr)
         sys.exit(1)

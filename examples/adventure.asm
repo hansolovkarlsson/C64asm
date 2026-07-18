@@ -83,6 +83,10 @@ main_loop:
         ldy #>prompt_str
         jsr print_msg
         jsr read_line
+        NEWLINE     ; without this, the response prints running onto
+                      ; the same screen line as whatever was just typed
+                      ; -- see lib/text.inc's NEWLINE for the general
+                      ; note on why this needs to be explicit
         jsr tokenize
         jsr dispatch
         jmp main_loop

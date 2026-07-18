@@ -111,7 +111,12 @@ data flows through the program) is:
    `.include` is automatically include-once (like C's `#pragma once`,
    not like a raw `#include` needing manual guards) via a canonical-
    path comparison, so two library files sharing a common dependency
-   don't collide with duplicate-definition errors.
+   don't collide with duplicate-definition errors. `main.c` also passes
+   this module the `--lib-dir` command-line option (via
+   `includes_set_lib_dir()`), a purely-fallback second search root
+   tried only when the default relative resolution above doesn't find
+   the file -- see `c64asm-reference.md` §1 for the user-facing
+   behavior.
 
 4. **`macro.h`/`.c`** — expands `.macro`/`.endmacro` definitions and
    invocations, and recognizes `.include` lines (delegating the actual

@@ -42,6 +42,15 @@ static int open_stack_top = 0;
 static char already_included[MAX_INCLUDED_FILES][PATH_MAX];
 static int already_included_count = 0;
 
+/* --lib-dir's value, or NULL if includes_set_lib_dir() was never
+ * called -- see includes_process_file() for how it's used as a
+ * fallback search root. */
+static const char *g_lib_dir = NULL;
+
+void includes_set_lib_dir(const char *dir) {
+    g_lib_dir = dir;
+}
+
 /* Copies the directory portion of `path` (including the trailing '/')
  * into `out`, or an empty string if `path` has no directory component
  * (a bare filename, implicitly relative to the current directory). */
@@ -87,12 +96,52 @@ void includes_process_file(const char *requested_path, const char *including_fil
         resolved_display[sizeof(resolved_display) - 1] = '\0';
     }
 
+    /* --lib-dir is purely a fallback: the default resolution above
+     * (relative to the file containing the .include line) is always
+     * tried first, and if it finds the file, --lib-dir is never even
+     * consulted -- so a project with its own local lib/ next to it
+     * keeps working unchanged whether or not --lib-dir is given. Only
+     * when that default lookup comes up empty, a lib_dir was set, and
+     * the requested path isn't absolute (an absolute path is never
+     * subject to search-path fallback, same as the default resolution
+     * above), do we also try requested_path relative to lib_dir.
+     *
+     * --lib-dir names the lib/ directory itself (the one holding
+     * text.inc, input.inc, ...), not its parent -- so a leading
+     * "lib/" in the .include path (this project's own convention,
+     * `.include "lib/text.inc"`) is stripped before joining with
+     * --lib-dir, or `--lib-dir /shared/c64lib` would end up looking
+     * for /shared/c64lib/lib/text.inc, one "lib" too many. A
+     * requested path that doesn't start with "lib/" is joined as-is. */
+    char lib_dir_display[MAX_FILENAME_LEN];
+    int tried_lib_dir = 0;
+    {
+        struct stat default_st;
+        int default_exists = (stat(resolved_display, &default_st) == 0 && S_ISREG(default_st.st_mode));
+        if (!default_exists && g_lib_dir && including_file && requested_path[0] != '/') {
+            const char *lib_relative = requested_path;
+            if (strncmp(lib_relative, "lib/", 4) == 0) lib_relative += 4;
+            snprintf(lib_dir_display, sizeof(lib_dir_display), "%s/%s", g_lib_dir, lib_relative);
+            struct stat lib_st;
+            tried_lib_dir = 1;
+            if (stat(lib_dir_display, &lib_st) == 0 && S_ISREG(lib_st.st_mode)) {
+                strncpy(resolved_display, lib_dir_display, sizeof(resolved_display) - 1);
+                resolved_display[sizeof(resolved_display) - 1] = '\0';
+            }
+        }
+    }
+
     char canon[PATH_MAX];
     struct stat st;
     if (!realpath(resolved_display, canon) || stat(canon, &st) != 0 || !S_ISREG(st.st_mode)) {
         if (including_file) {
-            asm_error(including_line_no, including_raw,
-                      "Cannot open included file '%s'", resolved_display);
+            if (tried_lib_dir && strcmp(resolved_display, lib_dir_display) != 0)
+                asm_error(including_line_no, including_raw,
+                          "Cannot open included file '%s' (also tried '%s' via --lib-dir)",
+                          resolved_display, lib_dir_display);
+            else
+                asm_error(including_line_no, including_raw,
+                          "Cannot open included file '%s'", resolved_display);
         } else {
             fprintf(stderr, "Cannot open input file '%s'\n", resolved_display);
             exit(1);

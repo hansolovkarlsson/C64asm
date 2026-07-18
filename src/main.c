@@ -29,7 +29,7 @@
  *
  * Usage:
  *     cc -O2 -o c64asm *.c
- *     ./c64asm input.asm -o output.prg [--listing out.lst]
+ *     ./c64asm input.asm -o output.prg [--listing out.lst] [--lib-dir dir]
  *
  * See c64asm-reference.md for the full syntax this assembler accepts:
  *
@@ -56,11 +56,18 @@
 #include "assembler.h"
 #include "lineparser.h"
 #include "listing.h"
+#include "includes.h"
 
 static void usage(const char *prog) {
     fprintf(stderr,
         "c64asm - a two-pass 6502/6510 assembler for the Commodore 64\n\n"
-        "Usage: %s <input.asm> -o <output.prg> [--listing <file.lst>]\n",
+        "Usage: %s <input.asm> -o <output.prg> [--listing <file.lst>] [--lib-dir <dir>]\n\n"
+        "  --lib-dir <dir>  Fallback directory to also search when resolving\n"
+        "                   .include paths that aren't found relative to the\n"
+        "                   including file (the default, unaffected if this\n"
+        "                   isn't given). Lets a common library directory be\n"
+        "                   shared across separate project directories instead\n"
+        "                   of each needing its own copy.\n",
         prog);
 }
 
@@ -68,6 +75,7 @@ int main(int argc, char **argv) {
     const char *input_path = NULL;
     const char *output_path = NULL;
     const char *listing_path = NULL;
+    const char *lib_dir = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
@@ -76,6 +84,9 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--listing") == 0) {
             if (i + 1 >= argc) { usage(argv[0]); return 1; }
             listing_path = argv[++i];
+        } else if (strcmp(argv[i], "--lib-dir") == 0) {
+            if (i + 1 >= argc) { usage(argv[0]); return 1; }
+            lib_dir = argv[++i];
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             usage(argv[0]);
             return 0;
@@ -93,6 +104,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    includes_set_lib_dir(lib_dir);  /* NULL is fine -- disables the fallback */
     init_opcodes();          /* build the opcode table (opcodes.c) */
     load_source(input_path); /* read the whole file into g_lines (fileio.c) */
 

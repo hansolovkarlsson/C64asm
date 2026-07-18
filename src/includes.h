@@ -48,6 +48,16 @@
 typedef void (*IncludeLineCallback)(const char *raw_line, const char *filename, int line_no);
 
 /*
+ * Sets the --lib-dir fallback search root (see includes_process_file()
+ * below for exactly how it's used). Call this at most once, before any
+ * call to includes_process_file() -- typically right after parsing
+ * command-line arguments in main(). Passing NULL (or never calling
+ * this at all) disables the fallback entirely, which is the default:
+ * every .include resolves exactly as it did before --lib-dir existed.
+ */
+void includes_set_lib_dir(const char *dir);
+
+/*
  * Resolves, opens, and processes one source file -- the main file
  * (including_file == NULL) or a .include'd one -- calling on_line for
  * every line read from it.
@@ -63,6 +73,20 @@ typedef void (*IncludeLineCallback)(const char *raw_line, const char *filename, 
  *                     too deep) to the right place. Both ignored when
  *                     including_file is NULL.
  * on_line:           called once per line read from the resolved file.
+ *
+ * requested_path, if not absolute, is resolved relative to
+ * including_file's own directory first -- this is the only resolution
+ * that happens when includes_set_lib_dir() hasn't been called, and it
+ * always takes priority even when it has. Only if that lookup fails,
+ * a lib_dir was set, and requested_path is relative, is requested_path
+ * *also* tried relative to lib_dir. lib_dir names the lib/ directory
+ * itself (the one holding text.inc, input.inc, ...), not its parent,
+ * so a leading "lib/" in requested_path is stripped first -- a lib_dir
+ * of "/shared/c64lib" with `.include "lib/text.inc"` also tries
+ * "/shared/c64lib/text.inc", not "/shared/c64lib/lib/text.inc". This
+ * lets one shared library directory be reused across separate project
+ * directories that don't each keep their own copy of lib/, without
+ * changing behavior at all for anyone who doesn't set it.
  *
  * If this exact file (by canonical path) has already been fully
  * processed earlier in this run, this silently does nothing (see the

@@ -16,6 +16,18 @@ this refactor, typed input is NOT in some separate $C1-$DA "shifted"
 range. Getting this wrong makes every keyword comparison in the game
 silently fail (see keyboard_petscii_matches_text_petscii below).
 
+Another one: adventure.asm calls lib/text.inc's NEWLINE right after
+read_line, before printing a response. Without it, the response was
+found to print running onto the same screen line as whatever had just
+been typed, on real hardware and in VICE -- a bug the mini6502-based
+tests here couldn't themselves have caught (mini6502's CHRIN just
+dequeues bytes; it doesn't simulate the keyboard's own real-time echo,
+so a captured transcript looks the same whether or not that echo
+would visually collide with the response). What this test *can* and
+does check is that a literal '\n' (CHROUT'd from adventure.asm's own
+NEWLINE call, not from anything CHRIN echoed) appears between the
+prompt and the response text in the captured output.
+
 Run from this directory with mini6502.py on the path, e.g.:
     PYTHONPATH=/path/to/mini6502 python3 test_adventure.py
 """
@@ -107,6 +119,11 @@ print("=== keyboard PETSCII matches .text PETSCII (the bug this test was built t
 text_1cmd = play(['LOOK'])
 check("a single recognized command is NOT met with 'I DON'T UNDERSTAND'",
       "I DON'T UNDERSTAND" not in text_1cmd,
+      f"text was {text_1cmd!r}")
+
+print("=== response starts on its own line, not glued to the prompt ===")
+check("a newline separates '> ' from the response text",
+      '> \n' in text_1cmd,
       f"text was {text_1cmd!r}")
 
 print("=== full solution playthrough reaches the win condition ===")

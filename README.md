@@ -95,7 +95,7 @@ a real C64 to run it.
 **Python** (no dependencies beyond the standard library):
 
 ```
-python3 c64asm.py <input.asm> -o <output.prg> [--listing <file.lst>]
+python3 c64asm.py <input.asm> -o <output.prg> [--listing <file.lst>] [--lib-dir <dir>]
 ```
 
 **C** (portable C99; builds with `clang` on macOS or `gcc`/`clang` on
@@ -103,7 +103,7 @@ Linux, using only the standard library):
 
 ```
 cc -O2 -o c64asm c64asm.c
-./c64asm <input.asm> -o <output.prg> [--listing <file.lst>]
+./c64asm <input.asm> -o <output.prg> [--listing <file.lst>] [--lib-dir <dir>]
 ```
 
 **Split-source C**, for reading how an assembler like this is actually
@@ -111,7 +111,7 @@ built (same syntax, same output — see `ARCHITECTURE.md`):
 
 ```
 unzip c64asm-split-src.zip && make
-./c64asm <input.asm> -o <output.prg> [--listing <file.lst>]
+./c64asm <input.asm> -o <output.prg> [--listing <file.lst>] [--lib-dir <dir>]
 ```
 
 ## Project structure
@@ -176,6 +176,15 @@ program built *on* the library rather than duplicating it — see
 zero-page setup per file, and worked examples, including the two
 smaller, focused demo programs (`demo.asm`, `adventure.asm`) built
 specifically to exercise the library in isolation.
+
+By default, each project needs its own copy of `lib/` sitting next to
+its `.asm` files (`.include` paths resolve relative to the including
+file). To share one `lib/` directory across several separate projects
+instead, pass `--lib-dir <path to the directory containing lib/>` on
+the command line — it's a fallback only, tried just when the default
+lookup doesn't find the file, so it's safe to pass unconditionally
+without it overriding a project's own local files. See
+`c64asm-reference.md` §1 for the full behavior and an example.
 
 ## mini6502: the test harness
 

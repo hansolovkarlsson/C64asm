@@ -1054,6 +1054,10 @@ static int open_stack_top = 0;
 static char already_included[MAX_INCLUDED_FILES][PATH_MAX];
 static int already_included_count = 0;
 
+/* --lib-dir's value, or NULL if not given -- see process_include_file()
+ * for how it's used as a fallback search root. */
+static const char *g_lib_dir = NULL;
+
 /* Forward declaration: process_include_file() (below) needs to feed
  * each line it reads back through macro_process_line(), while
  * macro_process_line() (further below) needs to call
@@ -1111,13 +1115,54 @@ static void process_include_file(const char *requested_path, const char *includi
         resolved_display[sizeof(resolved_display) - 1] = '\0';
     }
 
+    /* --lib-dir is purely a fallback: the default resolution above
+     * (relative to the file containing the .include line) is always
+     * tried first, and if it finds the file, --lib-dir is never even
+     * consulted -- so a project with its own local lib/ next to it
+     * keeps working unchanged whether or not --lib-dir is given. Only
+     * when that default lookup comes up empty, and --lib-dir was
+     * given, and the requested path isn't absolute (an absolute path
+     * is never subject to search-path fallback, same as the default
+     * resolution above), do we also try requested_path relative to
+     * --lib-dir.
+     *
+     * --lib-dir names the lib/ directory itself (the one holding
+     * text.inc, input.inc, ...), not its parent -- so a leading
+     * "lib/" in the .include path (this project's own convention,
+     * `.include "lib/text.inc"`) is stripped before joining with
+     * --lib-dir, or `--lib-dir /shared/c64lib` would end up looking
+     * for /shared/c64lib/lib/text.inc, one "lib" too many. A
+     * requested path that doesn't start with "lib/" is joined as-is. */
+    char lib_dir_display[MAX_FILENAME_LEN];
+    int tried_lib_dir = 0;
+    {
+        struct stat default_st;
+        int default_exists = (stat(resolved_display, &default_st) == 0 && S_ISREG(default_st.st_mode));
+        if (!default_exists && g_lib_dir && including_file && requested_path[0] != '/') {
+            const char *lib_relative = requested_path;
+            if (strncmp(lib_relative, "lib/", 4) == 0) lib_relative += 4;
+            snprintf(lib_dir_display, sizeof(lib_dir_display), "%s/%s", g_lib_dir, lib_relative);
+            struct stat lib_st;
+            tried_lib_dir = 1;
+            if (stat(lib_dir_display, &lib_st) == 0 && S_ISREG(lib_st.st_mode)) {
+                strncpy(resolved_display, lib_dir_display, sizeof(resolved_display) - 1);
+                resolved_display[sizeof(resolved_display) - 1] = '\0';
+            }
+        }
+    }
+
     char canon[PATH_MAX];
     struct stat st;
     if (!realpath(resolved_display, canon) || stat(canon, &st) != 0 || !S_ISREG(st.st_mode)) {
-        if (including_file)
-            asm_error(including_line_no, including_raw,
-                      "Cannot open included file '%s'", resolved_display);
-        else {
+        if (including_file) {
+            if (tried_lib_dir && strcmp(resolved_display, lib_dir_display) != 0)
+                asm_error(including_line_no, including_raw,
+                          "Cannot open included file '%s' (also tried '%s' via --lib-dir)",
+                          resolved_display, lib_dir_display);
+            else
+                asm_error(including_line_no, including_raw,
+                          "Cannot open included file '%s'", resolved_display);
+        } else {
             fprintf(stderr, "Cannot open input file '%s'\n", resolved_display);
             exit(1);
         }
@@ -2044,7 +2089,13 @@ static void load_source(const char *path) {
 static void usage(const char *prog) {
     fprintf(stderr,
         "c64asm - a two-pass 6502/6510 assembler for the Commodore 64\n\n"
-        "Usage: %s <input.asm> -o <output.prg> [--listing <file.lst>]\n",
+        "Usage: %s <input.asm> -o <output.prg> [--listing <file.lst>] [--lib-dir <dir>]\n\n"
+        "  --lib-dir <dir>  Fallback directory to also search when resolving\n"
+        "                   .include paths that aren't found relative to the\n"
+        "                   including file (the default, unaffected if this\n"
+        "                   isn't given). Lets a common library directory be\n"
+        "                   shared across separate project directories instead\n"
+        "                   of each needing its own copy.\n",
         prog);
 }
 
@@ -2060,6 +2111,9 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--listing") == 0) {
             if (i + 1 >= argc) { usage(argv[0]); return 1; }
             listing_path = argv[++i];
+        } else if (strcmp(argv[i], "--lib-dir") == 0) {
+            if (i + 1 >= argc) { usage(argv[0]); return 1; }
+            g_lib_dir = argv[++i];
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             usage(argv[0]);
             return 0;

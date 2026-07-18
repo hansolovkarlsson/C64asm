@@ -4,6 +4,7 @@
 ;   print_msg   subroutine: prints a null-terminated PETSCII string
 ;   PRINT msg   macro: convenience wrapper around print_msg
 ;   CLS         macro: clears the screen
+;   NEWLINE     macro: moves the cursor to the start of the next line
 ;   str_equal   subroutine: compares two null-terminated PETSCII strings
 ;
 ; Requires THREE 2-byte zero-page scratch locations, defined by the
@@ -69,6 +70,22 @@ print_msg:
 ; printing a visible character.
 .macro CLS
         lda #$93
+        jsr CHROUT
+.endmacro
+
+; NEWLINE -- moves the cursor to the start of the next screen line. $0d
+; is PETSCII carriage return; CHROUT interprets it as a screen-editor
+; command, the same way pressing RETURN at the keyboard does.
+;
+; Useful right after a read_line/CHRIN call (see input.inc): printing a
+; response immediately after reading a typed line, with nothing between
+; them, was found to leave the response running onto the same screen
+; line as what was just typed -- see adventure.asm's own comment at the
+; call site for the specific symptom this fixes and where it was found.
+; Calling NEWLINE first guarantees a fresh line for the response,
+; regardless of exactly where the cursor was left after the read.
+.macro NEWLINE
+        lda #$0d
         jsr CHROUT
 .endmacro
 

@@ -14,8 +14,8 @@ for the same source file. Use whichever suits your environment.
 ## 1. Command-line usage
 
 ```
-python3 c64asm.py <input.asm> -o <output.prg> [--listing <file.lst>]
-cc -O2 -o c64asm c64asm.c && ./c64asm <input.asm> -o <output.prg> [--listing <file.lst>]
+python3 c64asm.py <input.asm> -o <output.prg> [--listing <file.lst>] [--lib-dir <dir>]
+cc -O2 -o c64asm c64asm.c && ./c64asm <input.asm> -o <output.prg> [--listing <file.lst>] [--lib-dir <dir>]
 ```
 
 | Argument | Required | Description |
@@ -23,6 +23,7 @@ cc -O2 -o c64asm c64asm.c && ./c64asm <input.asm> -o <output.prg> [--listing <fi
 | `<input.asm>` | yes | Path to the assembly source file. |
 | `-o`, `--output <file>` | yes | Path to write the assembled `.prg` file. |
 | `--listing <file>` | no | Write a listing file: addresses, encoded bytes, source lines, and a final symbol table. |
+| `--lib-dir <dir>` | no | Fallback search directory for `.include` (§10). See below. |
 | `-h`, `--help` | no | Print a short usage message. |
 
 On success, the assembler prints the number of bytes assembled and the
@@ -39,6 +40,60 @@ error (there is no error-recovery / multi-error reporting).
 ```
 Assembly error: Undefined symbol in operand 'undefined_thing' (line 2: lda undefined_thing)
 ```
+
+### `--lib-dir`: a shared library directory across projects
+
+By default (§10), a non-absolute `.include "path"` resolves relative to
+the directory of the file containing that line — which is exactly why
+`.include "lib/text.inc"` works without needing to know where the
+assembler itself was invoked from, but also means every project
+directory needs its own copy of `lib/` sitting next to its source
+files.
+
+`--lib-dir <dir>` is a **fallback only** — it changes nothing about
+default resolution, which is always tried first. It's consulted only
+when that default lookup fails to find the file. `<dir>` names the
+`lib/` directory **itself** (the one directly containing `text.inc`,
+`input.inc`, and so on) — not its parent — so a leading `lib/` in the
+`.include` path is stripped before joining with `--lib-dir`:
+
+```
+project-a/
+  main.asm            ; .include "lib/text.inc"
+project-b/
+  main.asm            ; .include "lib/text.inc"
+shared-c64lib/
+  text.inc
+  input.inc
+  ...
+```
+
+```
+cd project-a && c64asm main.asm -o main.prg --lib-dir ../shared-c64lib
+```
+
+Here, `.include "lib/text.inc"` first looks for `project-a/lib/text.inc`
+(not present), then, because `--lib-dir ../shared-c64lib` was given,
+strips the leading `lib/` and tries `../shared-c64lib/text.inc`,
+finding it there. Neither `project-a/` nor `project-b/` needs its own
+copy of `lib/`. A project that *does* keep a local `lib/` of its own is
+unaffected either way — the local copy is found by the default lookup
+before `--lib-dir` is ever consulted, so it's safe to pass `--lib-dir`
+unconditionally (e.g. from a wrapper script or Makefile) without it
+silently overriding a project's own local files. A requested path that
+doesn't start with `lib/` is joined with `--lib-dir` as-is, unstripped.
+
+If neither location has the file, the error names both paths that were
+tried:
+
+```
+Assembly error: Cannot open included file 'lib/text.inc' (also tried '../shared-c64lib/text.inc' via --lib-dir) (main.asm, line 1: .include "lib/text.inc")
+```
+
+`--lib-dir` only applies to `.include` lines (an absolute `.include`
+path is never subject to it, same as it's never subject to the default
+relative resolution) — it has no effect on how `<input.asm>` itself is
+found.
 
 ---
 
@@ -489,7 +544,10 @@ directory of the file containing the `.include` line** — not the
 current working directory — which is what lets one library file
 `.include` another file sitting next to it, regardless of where the
 assembler itself was invoked from. An absolute path (starting with `/`)
-is used as-is.
+is used as-is. If that default resolution doesn't find the file, and
+the `--lib-dir` command-line option (§1) was given, `path` is also
+tried relative to it, as a fallback — see §1 for the full details and
+an example of sharing one library directory across separate projects.
 
 ### Example: a small shared-constants library file
 
@@ -822,7 +880,7 @@ Common errors:
 | `<MNEMONIC> does not support that addressing mode` | The operand's syntax implies a mode the instruction doesn't have (e.g. immediate mode on `STA`). |
 | `Branch target out of range (+N)` | A branch instruction's target is more than 127 bytes forward or 128 bytes backward from the instruction following it. Reorganize the code, or replace the branch with an unconditional `JMP` reached via an inverted branch. |
 | `Missing ')' in expression '...'` | Unbalanced parentheses in an expression. |
-| `Cannot open included file '...'` | A `.include`'d path doesn't resolve to a readable, regular file. |
+| `Cannot open included file '...'` | A `.include`'d path doesn't resolve to a readable, regular file. If `--lib-dir` (§1) was given, the message names both paths tried. |
 | `circular .include detected: a.asm -> b.inc -> a.asm` | An `.include` chain loops back on itself; the message shows the full chain. |
 | `.include nested too deeply (max 16)` | More than 16 levels of nested `.include` — almost always a sign of an undetected circular include. |
 | `Bad character '...' in expression '...'` | A character the tokenizer doesn't recognize appeared in an expression. |
