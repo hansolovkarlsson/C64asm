@@ -2,18 +2,27 @@
 End-to-end regression test for bounce.asm, using mini6502.py (see
 mini6502.zip). bounce.asm was refactored to use lib/graphics.inc
 (BITMAP_MODE_ON, CLEAR_BITMAP, SET_SCREEN_COLOR, SPRITE_INIT,
-wait_frame, sprite0_bounce_step) instead of its own local copies --
-wait_frame and the bounce-off-the-edges movement logic were originally
-written here (wait_frame independently duplicated again, byte-for-byte,
-in pong.asm and lander.asm), then generalized into the library.
+wait_frame, sprite0_bounce_step) and lib/sound.inc (SID_INIT,
+PLAY_SOUND) instead of its own local copies -- wait_frame and the
+bounce-off-the-edges movement logic were originally written here
+(wait_frame independently duplicated again, byte-for-byte, in pong.asm
+and lander.asm), then generalized into the library; the bounce sound
+itself reuses pong.asm's own already-proven play_wall_bounce envelope.
 
 This test checks the setup bounce.asm's start: code produces (bitmap
 mode correctly switched on and cleared, screen memory correctly
-colored, sprite correctly pointed/colored/positioned/enabled), then
-simulates many animation frames and checks the ball's position stays
-within its configured bounds and actually reverses direction at them
-(not just that it holds still or drifts unboundedly) -- confirming
-sprite0_bounce_step's extraction didn't change bounce.asm's behavior.
+colored, sprite correctly pointed/colored/positioned/enabled, SID
+volume set), then simulates many animation frames and checks the
+ball's position stays within its configured bounds, actually reverses
+direction at them (not just that it holds still or drifts
+unboundedly), and -- the main thing this test exists to catch -- that
+the bounce sound fires on every single frame a bound is hit and never
+fires on any frame it isn't, across the whole run. sprite0_bounce_step
+signals which axis (if either) bounced via the CPU's X/Y index
+registers rather than anything graphics.inc and sound.inc would need
+to share; see graphics.inc's own comment on the routine for the exact
+convention this test is also implicitly checking bounce.asm follows
+correctly.
 
 mini6502 doesn't simulate the VIC-II's raster line advancing on its
 own, so this test pokes $d012 to the value wait_frame polls for every
@@ -82,6 +91,7 @@ with open('/tmp/bounce_regress.lst') as f:
 
 MAIN_LOOP = symbol_address(listing, 'main_loop')
 WAIT_FRAME = symbol_address(listing, 'wait_frame')
+SPRITE_DATA = symbol_address(listing, 'sprite_data')
 XMIN, XMAX = 24, 250
 YMIN, YMAX = 50, 220
 
@@ -108,25 +118,49 @@ check("screen/color area correctly filled", all(b == 0b00010110 for b in mem[0x0
 check("border color set", mem[0xd020] == 6)
 check("sprite 0 enabled", mem[0xd015] & 1 != 0)
 check("sprite 0 color set", mem[0xd027] == 1)
-check("sprite 0 pointer set", mem[0x07f8] == 0x0900 // 64)
+check("sprite 0 pointer set", mem[0x07f8] == SPRITE_DATA // 64,
+      f"sprite_data=${SPRITE_DATA:04X}, expected pointer {SPRITE_DATA // 64}, got {mem[0x07f8]}")
 check("sprite starts at XMIN", mem[0xd000] == XMIN, f"got {mem[0xd000]}")
 check("sprite starts at YMIN", mem[0xd001] == YMIN, f"got {mem[0xd001]}")
+check("SID volume set (SID_INIT ran)", mem[0xd418] == 0x0f)
 
-print("=== simulated animation: bounces within bounds on both axes ===")
+print("=== simulated animation: bounces within bounds, sound fires exactly on impact ===")
 xs, ys = [], []
 frame_count = 0
+sound_this_frame = False
+sound_frames = []          # frame indices where the bounce sound fired
+false_positive_frames = []  # sound fired but neither axis was at a bound
+missed_bounce_frames = []   # an axis was at a bound but sound didn't fire
 for _ in range(20_000_000):
     if m.cpu.pc == WAIT_FRAME:
         m.cpu.memory[0xd012] = 0xfb
     if m.cpu.pc == MAIN_LOOP:
+        if frame_count > 0:
+            x, y = mem[0xd000], mem[0xd001]
+            at_edge = x in (XMIN, XMAX) or y in (YMIN, YMAX)
+            if sound_this_frame:
+                sound_frames.append(frame_count)
+            if sound_this_frame and not at_edge:
+                false_positive_frames.append(frame_count)
+            if at_edge and not sound_this_frame:
+                missed_bounce_frames.append(frame_count)
+            xs.append(x)
+            ys.append(y)
         frame_count += 1
-        xs.append(m.cpu.memory[0xd000])
-        ys.append(m.cpu.memory[0xd001])
-        if frame_count >= 600:
+        sound_this_frame = False
+        if frame_count > 600:
             break
+    before = mem[0xd404]
     m.step()
+    after = mem[0xd404]
+    # $10001 = triangle waveform + gate on -- the specific byte
+    # PLAY_SOUND's own call in bounce.asm writes last (see sound.inc);
+    # a plain gate-off ($00, written first by every PLAY_SOUND call
+    # to force-retrigger the envelope) doesn't count as "fired".
+    if after != before and after & 0b00010001:
+        sound_this_frame = True
 
-check("600 frames simulated without hanging", frame_count == 600)
+check("600 frames simulated without hanging", frame_count == 601)
 check("X position never leaves [XMIN, XMAX]",
       all(XMIN <= x <= XMAX for x in xs),
       f"range was {min(xs)}-{max(xs)}")
@@ -140,6 +174,14 @@ check("ball actually reverses direction on X (not just static/drifting)", x_boun
       f"observed {x_bounces} reversals")
 check("ball actually reverses direction on Y (not just static/drifting)", y_bounces >= 1,
       f"observed {y_bounces} reversals")
+
+check("bounce sound fires at least once over the run", len(sound_frames) > 0)
+check("bounce sound never fires without actually hitting a bound",
+      len(false_positive_frames) == 0,
+      f"false positives at frames {false_positive_frames}")
+check("bounce sound fires on every single frame a bound is hit",
+      len(missed_bounce_frames) == 0,
+      f"missed at frames {missed_bounce_frames}")
 
 print()
 print(f"{passed} passed, {failed} failed")

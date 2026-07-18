@@ -1,100 +1,148 @@
-; c64asm listing  (origin $0801, 319 bytes)
+; c64asm listing  (origin $0801, 447 bytes)
 
-080D  4C 61 08          .basic start   ; needed once graphics.inc's own code (wait_frame,
+080D  4C 9D 08          .basic start   ; needed once library code (graphics.inc's
 0810  AD 12 D0          lda VIC_RASTER
 0813  C9 FB             cmp #$fb
 0815  D0 F9             bne wait_frame
 0817  60                rts
-0818  A5 04             lda xdir
-081A  F0 0F             beq __local2_move_left
-081C  E6 02             inc xpos
-081E  A5 02             lda xpos
-0820  C9 FA             cmp #XMAX
-0822  D0 13             bne __local2_x_done
-0824  A9 00             lda #0
-0826  85 04             sta xdir             ; hit the right edge -- reverse
-0828  4C 37 08          jmp __local2_x_done
-082B  C6 02             dec xpos
-082D  A5 02             lda xpos
-082F  C9 18             cmp #XMIN
-0831  D0 04             bne __local2_x_done
-0833  A9 01             lda #1
-0835  85 04             sta xdir             ; hit the left edge -- reverse
-0837  A5 05             lda ydir
-0839  F0 0F             beq __local2_move_up
-083B  E6 03             inc ypos
-083D  A5 03             lda ypos
-083F  C9 DC             cmp #YMAX
-0841  D0 13             bne __local2_y_done
-0843  A9 00             lda #0
-0845  85 05             sta ydir             ; hit the bottom edge -- reverse
-0847  4C 56 08          jmp __local2_y_done
-084A  C6 03             dec ypos
-084C  A5 03             lda ypos
-084E  C9 32             cmp #YMIN
-0850  D0 04             bne __local2_y_done
-0852  A9 01             lda #1
-0854  85 05             sta ydir             ; hit the top edge -- reverse
-0856  A5 02             lda xpos
-0858  8D 00 D0          sta SPRITE0_X
-085B  A5 03             lda ypos
-085D  8D 01 D0          sta SPRITE0_Y
-0860  60                rts
-0861  AD 11 D0          lda VIC_CTRL1
-0864  09 20             ora #%00100000        
-0866  8D 11 D0          sta VIC_CTRL1
-0869  AD 18 D0          lda VIC_MEMPTRS
-086C  29 F0             and #%11110000        
-086E  09 08             ora #((BITMAP) / 1024)   
-0870  8D 18 D0          sta VIC_MEMPTRS
-0873  A9 00             lda #<(BITMAP)
-0875  85 FB             sta gfx_ptr
-0877  A9 20             lda #>(BITMAP)
-0879  85 FC             sta gfx_ptr+1
-087B  A2 20             ldx #32
-087D  A9 00             lda #$00
-087F  A0 00             ldy #$00
-0881  91 FB             sta (gfx_ptr),y
-0883  C8                iny
-0884  D0 FB             bne __local5_clear_byte
-0886  E6 FC             inc gfx_ptr+1
-0888  CA                dex
-0889  D0 F4             bne __local5_clear_loop
-088B  A9 00             lda #<SCREEN
-088D  85 FB             sta gfx_ptr
-088F  A9 04             lda #>SCREEN
-0891  85 FC             sta gfx_ptr+1
-0893  A2 04             ldx #4
-0895  A9 16             lda #%00010110
-0897  A0 00             ldy #$00
-0899  91 FB             sta (gfx_ptr),y
-089B  C8                iny
-089C  D0 FB             bne __local6_fill_byte
-089E  E6 FC             inc gfx_ptr+1
-08A0  CA                dex
-08A1  D0 F4             bne __local6_fill_loop
-08A3  A9 06             lda #6               ; border matches the bitmap's background color
-08A5  8D 20 D0          sta VIC_BORDER
-08A8  A9 18             lda #XMIN
-08AA  85 02             sta xpos
-08AC  A9 32             lda #YMIN
-08AE  85 03             sta ypos
-08B0  A9 01             lda #1
-08B2  85 04             sta xdir             ; start out moving right...
-08B4  85 05             sta ydir             ; ...and down
-08B6  A9 24             lda #((SPRITE_DATA) / 64)
-08B8  8D F8 07          sta SPRITE_PTR0
-08BB  A9 01             lda #1
-08BD  8D 27 D0          sta SPRITE0_COLOR
-08C0  A9 18             lda #XMIN
-08C2  8D 00 D0          sta SPRITE0_X
-08C5  A9 32             lda #YMIN
-08C7  8D 01 D0          sta SPRITE0_Y
-08CA  A9 01             lda #%00000001
-08CC  8D 15 D0          sta SPRITE_ENABLE
-08CF  20 10 08          jsr wait_frame
-08D2  20 18 08          jsr sprite0_bounce_step
-08D5  4C CF 08          jmp main_loop
+0818  A2 00             ldx #0                ; returned: did X bounce this frame?
+081A  A0 00             ldy #0                ; returned: did Y bounce this frame?
+081C  A5 04             lda xdir
+081E  F0 11             beq __local2_move_left
+0820  E6 02             inc xpos
+0822  A5 02             lda xpos
+0824  C9 FA             cmp #XMAX
+0826  D0 17             bne __local2_x_done
+0828  A9 00             lda #0
+082A  85 04             sta xdir             ; hit the right edge -- reverse
+082C  A2 01             ldx #1
+082E  4C 3F 08          jmp __local2_x_done
+0831  C6 02             dec xpos
+0833  A5 02             lda xpos
+0835  C9 18             cmp #XMIN
+0837  D0 06             bne __local2_x_done
+0839  A9 01             lda #1
+083B  85 04             sta xdir             ; hit the left edge -- reverse
+083D  A2 01             ldx #1
+083F  A5 05             lda ydir
+0841  F0 11             beq __local2_move_up
+0843  E6 03             inc ypos
+0845  A5 03             lda ypos
+0847  C9 DC             cmp #YMAX
+0849  D0 17             bne __local2_y_done
+084B  A9 00             lda #0
+084D  85 05             sta ydir             ; hit the bottom edge -- reverse
+084F  A0 01             ldy #1
+0851  4C 62 08          jmp __local2_y_done
+0854  C6 03             dec ypos
+0856  A5 03             lda ypos
+0858  C9 32             cmp #YMIN
+085A  D0 06             bne __local2_y_done
+085C  A9 01             lda #1
+085E  85 05             sta ydir             ; hit the top edge -- reverse
+0860  A0 01             ldy #1
+0862  A5 02             lda xpos
+0864  8D 00 D0          sta SPRITE0_X
+0867  A5 03             lda ypos
+0869  8D 01 D0          sta SPRITE0_Y
+086C  60                rts
+086D  A5 06             lda engine_playing
+086F  D0 1D             bne __local3_already_on
+0871  A9 00             lda #$00
+0873  8D 00 D4          sta VOICE1_FREQ_LO
+0876  A9 08             lda #$08
+0878  8D 01 D4          sta VOICE1_FREQ_HI
+087B  A9 00             lda #$00
+087D  8D 05 D4          sta VOICE1_AD
+0880  A9 F8             lda #$f8
+0882  8D 06 D4          sta VOICE1_SR
+0885  A9 81             lda #%10000001          ; noise waveform, gate on
+0887  8D 04 D4          sta VOICE1_CTRL
+088A  A9 01             lda #1
+088C  85 06             sta engine_playing
+088E  60                rts
+088F  A5 06             lda engine_playing
+0891  F0 09             beq __local4_already_off
+0893  A9 80             lda #%10000000          ; noise waveform, gate off
+0895  8D 04 D4          sta VOICE1_CTRL
+0898  A9 00             lda #0
+089A  85 06             sta engine_playing
+089C  60                rts
+089D  AD 11 D0          lda VIC_CTRL1
+08A0  09 20             ora #%00100000        
+08A2  8D 11 D0          sta VIC_CTRL1
+08A5  AD 18 D0          lda VIC_MEMPTRS
+08A8  29 F0             and #%11110000        
+08AA  09 08             ora #((BITMAP) / 1024)   
+08AC  8D 18 D0          sta VIC_MEMPTRS
+08AF  A9 00             lda #<(BITMAP)
+08B1  85 FB             sta gfx_ptr
+08B3  A9 20             lda #>(BITMAP)
+08B5  85 FC             sta gfx_ptr+1
+08B7  A2 20             ldx #32
+08B9  A9 00             lda #$00
+08BB  A0 00             ldy #$00
+08BD  91 FB             sta (gfx_ptr),y
+08BF  C8                iny
+08C0  D0 FB             bne __local7_clear_byte
+08C2  E6 FC             inc gfx_ptr+1
+08C4  CA                dex
+08C5  D0 F4             bne __local7_clear_loop
+08C7  A9 00             lda #<SCREEN
+08C9  85 FB             sta gfx_ptr
+08CB  A9 04             lda #>SCREEN
+08CD  85 FC             sta gfx_ptr+1
+08CF  A2 04             ldx #4
+08D1  A9 16             lda #%00010110
+08D3  A0 00             ldy #$00
+08D5  91 FB             sta (gfx_ptr),y
+08D7  C8                iny
+08D8  D0 FB             bne __local8_fill_byte
+08DA  E6 FC             inc gfx_ptr+1
+08DC  CA                dex
+08DD  D0 F4             bne __local8_fill_loop
+08DF  A9 06             lda #6               ; border matches the bitmap's background color
+08E1  8D 20 D0          sta VIC_BORDER
+08E4  A9 0F             lda #$0f
+08E6  8D 18 D4          sta SID_VOLUME
+08E9  A9 00             lda #$00
+08EB  8D 04 D4          sta VOICE1_CTRL
+08EE  A9 18             lda #XMIN
+08F0  85 02             sta xpos
+08F2  A9 32             lda #YMIN
+08F4  85 03             sta ypos
+08F6  A9 01             lda #1
+08F8  85 04             sta xdir             ; start out moving right...
+08FA  85 05             sta ydir             ; ...and down
+08FC  A9 26             lda #((sprite_data) / 64)
+08FE  8D F8 07          sta SPRITE_PTR0
+0901  A9 01             lda #1
+0903  8D 27 D0          sta SPRITE0_COLOR
+0906  A9 18             lda #XMIN
+0908  8D 00 D0          sta SPRITE0_X
+090B  A9 32             lda #YMIN
+090D  8D 01 D0          sta SPRITE0_Y
+0910  A9 01             lda #%00000001
+0912  8D 15 D0          sta SPRITE_ENABLE
+0915  20 10 08          jsr wait_frame
+0918  20 18 08          jsr sprite0_bounce_step
+091B  E0 00             cpx #0               ; sprite0_bounce_step (graphics.inc) returns
+091D  D0 04             bne bounced           ; whether X and/or Y bounced this frame in
+091F  C0 00             cpy #0                ; the X/Y registers themselves -- see its
+0921  F0 1E             beq no_bounce         ; own comment for why
+0923  A9 00             lda #$00
+0925  8D 04 D4          sta VOICE1_CTRL
+0928  A9 00             lda #$00
+092A  8D 00 D4          sta VOICE1_FREQ_LO
+092D  A9 18             lda #$18
+092F  8D 01 D4          sta VOICE1_FREQ_HI
+0932  A9 06             lda #$06
+0934  8D 05 D4          sta VOICE1_AD
+0937  A9 00             lda #$00
+0939  8D 06 D4          sta VOICE1_SR
+093C  A9 11             lda #%00010001
+093E  8D 04 D4          sta VOICE1_CTRL
+0941  4C 15 09          jmp main_loop
 
 Symbol table:
   BITMAP               = $2000
@@ -109,7 +157,6 @@ Symbol table:
   SPRITE0_COLOR        = $D027
   SPRITE0_X            = $D000
   SPRITE0_Y            = $D001
-  SPRITE_DATA          = $0900
   SPRITE_ENABLE        = $D015
   SPRITE_PTR0          = $07F8
   VIC_BG0              = $D021
@@ -127,19 +174,26 @@ Symbol table:
   XMIN                 = $0018
   YMAX                 = $00DC
   YMIN                 = $0032
-  __local2_move_left   = $082B
-  __local2_move_up     = $084A
-  __local2_x_done      = $0837
-  __local2_y_done      = $0856
-  __local5_clear_byte  = $0881
-  __local5_clear_loop  = $087F
-  __local6_fill_byte   = $0899
-  __local6_fill_loop   = $0897
+  __local2_move_left   = $0831
+  __local2_move_up     = $0854
+  __local2_x_done      = $083F
+  __local2_y_done      = $0862
+  __local3_already_on  = $088E
+  __local4_already_off = $089C
+  __local7_clear_byte  = $08BD
+  __local7_clear_loop  = $08BB
+  __local8_fill_byte   = $08D5
+  __local8_fill_loop   = $08D3
+  bounced              = $0923
+  engine_playing       = $0006
+  engine_sound_off     = $088F
+  engine_sound_on      = $086D
   gfx_ptr              = $00FB
-  main_loop            = $08CF
+  main_loop            = $0915
+  no_bounce            = $0941
   sprite0_bounce_step  = $0818
-  sprite_data          = $0900
-  start                = $0861
+  sprite_data          = $0980
+  start                = $089D
   wait_frame           = $0810
   xdir                 = $0004
   xpos                 = $0002

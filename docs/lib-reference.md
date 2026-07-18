@@ -252,6 +252,19 @@ actually found; none was visible from the assembled bytes or a careful
 listing read alone. `test_demo.py` (alongside `demo.asm`) is a
 permanent regression test for all three.
 
+`bounce.asm` is a smaller, more focused example of the same idea:
+`graphics.inc` (bitmap/sprite setup, `wait_frame`, `sprite0_bounce_step`)
+composed with `sound.inc` (`PLAY_SOUND`) to play a sound effect exactly
+on the frames the ball hits a wall, and not on any others. Since
+`sprite0_bounce_step` reports which axis (if either) bounced via the
+CPU's own X/Y registers rather than a shared flag graphics.inc and
+sound.inc would both need to know about, the two library files stay
+completely independent of each other — see `graphics.inc`'s own
+comment on `sprite0_bounce_step` for the exact pattern, and
+`test_bounce.py` for a regression test that checks the sound fires on
+every single frame a bound is hit and never on any frame it isn't,
+across hundreds of simulated frames — not just that it fires *at all*.
+
 ## Testing your own programs with mini6502.py
 
 `mini6502.py`, in this project's outputs alongside the library itself,

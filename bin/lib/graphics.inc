@@ -211,11 +211,36 @@ wait_frame:
 ;                partway past it -- see bounce.asm for a worked example
 ;                sized for its particular sprite.
 ;
-; Only sets SPRITE0_X, so X stays within a single byte (0-255) -- see
-; c64-memory-reference.md for extending this to the full 320-pixel
-; width via the X-MSB register ($d010) if you need the sprite to reach
-; the right portion of the screen this can't.
+; Only sets SPRITE0_X, so position stays within a single byte (0-255)
+; -- see c64-memory-reference.md for extending this to the full
+; 320-pixel width via the X-MSB register ($d010) if you need the
+; sprite to reach the right portion of the screen this can't.
+;
+; Returns which axis (if either) bounced *this* frame in the CPU's own
+; X and Y index registers -- 1 if that axis hit one of its bounds and
+; reversed direction just now, 0 if it didn't (moved normally). Neither
+; register is used for anything else in this routine, so this doesn't
+; cost the caller anything it wasn't already free to use; a caller that
+; doesn't care can simply ignore both, exactly as if this returned
+; nothing at all. Typical use is triggering a sound effect only on the
+; frames where a bounce actually happened, rather than a hit test of
+; your own:
+;
+;       jsr sprite0_bounce_step
+;       cpx #0
+;       bne bounced
+;       cpy #0
+;       beq no_bounce
+;   bounced:
+;       PLAY_SOUND $18, $06, $00, %00010001   ; sound.inc
+;   no_bounce:
+;
+; (Not folded into this routine directly, so graphics.inc has no
+; dependency on sound.inc -- what to do on a bounce, if anything, is
+; entirely up to the caller. See bounce.asm for this exact pattern.)
 sprite0_bounce_step:
+        ldx #0                ; returned: did X bounce this frame?
+        ldy #0                ; returned: did Y bounce this frame?
         lda xdir
         beq @move_left
         inc xpos
@@ -224,6 +249,7 @@ sprite0_bounce_step:
         bne @x_done
         lda #0
         sta xdir             ; hit the right edge -- reverse
+        ldx #1
         jmp @x_done
 @move_left:
         dec xpos
@@ -232,6 +258,7 @@ sprite0_bounce_step:
         bne @x_done
         lda #1
         sta xdir             ; hit the left edge -- reverse
+        ldx #1
 @x_done:
         lda ydir
         beq @move_up
@@ -241,6 +268,7 @@ sprite0_bounce_step:
         bne @y_done
         lda #0
         sta ydir             ; hit the bottom edge -- reverse
+        ldy #1
         jmp @y_done
 @move_up:
         dec ypos
@@ -249,6 +277,7 @@ sprite0_bounce_step:
         bne @y_done
         lda #1
         sta ydir             ; hit the top edge -- reverse
+        ldy #1
 @y_done:
         lda xpos
         sta SPRITE0_X
