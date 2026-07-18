@@ -28,11 +28,13 @@
 ; a zero-page address of its own -- see text.inc's header comment for
 ; the same reasoning applied to str_ptr).
 ;
-; sprite0_bounce_step needs eight more, unrelated to gfx_ptr: xpos,
-; ypos, xdir, ydir (one byte each -- see its own comment below for
-; exactly what they're for and why, unlike gfx_ptr, they don't have to
-; be zero page at all) and XMIN, XMAX, YMIN, YMAX (compile-time
-; constants, the bounds to bounce within).
+; sprite0_bounce_step needs eight more, unrelated to gfx_ptr: xpos
+; (TWO bytes -- xpos and xpos+1, the low/high byte of a 16-bit X
+; position, since the visible screen's right edge is itself past 255),
+; ypos, xdir, ydir (one byte each -- see sprite0_bounce_step's own
+; comment below for exactly what they're for and why, unlike gfx_ptr,
+; none of these have to be zero page at all), and XMIN, XMAX, YMIN,
+; YMAX (compile-time constants, the bounds to bounce within).
 ;
 ; gfx_ptr and all eight of sprite0_bounce_step's symbols are required
 ; as soon as you .include this file, EVEN IF your program never calls
@@ -41,8 +43,8 @@
 ; unconditionally, and that code references these symbols regardless
 ; of whether anything ever jsr's to it or expands the relevant macro.
 ; A program that only wants BITMAP_MODE_ON/BITMAP_MODE_OFF still needs
-; all nine defined, or assembly fails on an undefined symbol inside
-; code it never actually uses.
+; all nine defined (xpos+1 included, ten addresses total), or assembly
+; fails on an undefined symbol inside code it never actually uses.
 ;
 ; SPRITE_INIT's `data` argument must itself be 64-byte aligned (see
 ; this assembler's .align directive) and, like any sprite data on this
@@ -187,34 +189,38 @@ wait_frame:
 
 ; sprite0_bounce_step -- advances sprite 0 by one pixel on each axis,
 ; reversing direction whenever it reaches a caller-defined bound, and
-; writes the result to SPRITE0_X/SPRITE0_Y. Call this once per frame
-; (typically right after wait_frame) to animate a sprite bouncing
-; around inside a rectangular area, the way bounce.asm's ball does.
+; writes the result to SPRITE0_X/SPRITE0_Y (and SPRITE_X_MSB, as
+; needed -- see below). Call this once per frame (typically right
+; after wait_frame) to animate a sprite bouncing around inside a
+; rectangular area, the way bounce.asm's ball does.
 ;
 ; Needs six things defined by the including program, none of which
 ; this library claims on your behalf:
-;   xpos, ypos   current position, one byte each. Unlike gfx_ptr and
-;                similar pointers elsewhere in this library, these
-;                don't need to be zero page -- they're read and written
-;                with plain (non-indirect) addressing here, so any RAM
-;                location works. Zero page is still a reasonable
-;                choice, purely because it makes the including
-;                program's own code a byte shorter wherever it touches
-;                them too, not because this routine requires it.
-;   xdir, ydir   direction flags, one byte each, same non-requirement
-;                as above: 1 means increasing (right/down), 0 means
-;                decreasing (left/up).
+;   xpos   current X position, TWO bytes (xpos and xpos+1, low byte
+;          and high byte of a 16-bit value) -- unlike a single-byte
+;          position, this can represent the full 0-511 range sprite X
+;          actually has, needed because the visible screen's right
+;          edge (around X=344) is itself past 255. xpos+1 will only
+;          ever hold 0 or 1 in practice, but is handled as a normal
+;          16-bit high byte throughout.
+;   ypos   current Y position, one byte -- sprite Y never exceeds 255,
+;          so no second byte is needed here the way X needs one.
+;   xdir, ydir   direction flags, one byte each: 1 means increasing
+;          (right/down), 0 means decreasing (left/up).
 ;   XMIN, XMAX, YMIN, YMAX   compile-time constants (`=`), the
-;                rectangular bounds to bounce within. XMAX/YMAX should
-;                leave room for the sprite's own width/height so it
-;                visually bounces off the edge rather than running
-;                partway past it -- see bounce.asm for a worked example
-;                sized for its particular sprite.
+;          rectangular bounds to bounce within. XMAX/YMAX should leave
+;          room for the sprite's own width/height so it visually
+;          bounces off the edge rather than running partway past it --
+;          see bounce.asm for a worked example sized for its
+;          particular sprite. XMAX may be (and, for a sprite that
+;          should reach the right portion of the screen, normally
+;          needs to be) greater than 255.
 ;
-; Only sets SPRITE0_X, so position stays within a single byte (0-255)
-; -- see c64-memory-reference.md for extending this to the full
-; 320-pixel width via the X-MSB register ($d010) if you need the
-; sprite to reach the right portion of the screen this can't.
+; None of xpos/ypos/xdir/ydir need to be zero page -- they're read and
+; written with plain (non-indirect) addressing here, so any RAM
+; location works. Zero page is still a reasonable choice, purely
+; because it makes the including program's own code a byte shorter
+; wherever it touches them too, not because this routine requires it.
 ;
 ; Returns which axis (if either) bounced *this* frame in the CPU's own
 ; X and Y index registers -- 1 if that axis hit one of its bounds and
@@ -243,18 +249,31 @@ sprite0_bounce_step:
         ldy #0                ; returned: did Y bounce this frame?
         lda xdir
         beq @move_left
-        inc xpos
-        lda xpos
-        cmp #XMAX
+        inc xpos              ; 16-bit increment: bump the low byte, and
+        bne @x_inc_done        ; only the high byte too if that wrapped
+        inc xpos+1
+@x_inc_done:
+        lda xpos              ; 16-bit compare against XMAX
+        cmp #<XMAX
+        bne @x_done
+        lda xpos+1
+        cmp #>XMAX
         bne @x_done
         lda #0
         sta xdir             ; hit the right edge -- reverse
         ldx #1
         jmp @x_done
 @move_left:
+        lda xpos              ; 16-bit decrement: only borrow into the
+        bne @x_dec_done         ; high byte if the low byte was already 0
+        dec xpos+1
+@x_dec_done:
         dec xpos
-        lda xpos
-        cmp #XMIN
+        lda xpos              ; 16-bit compare against XMIN (XMIN is
+        cmp #<XMIN              ; ordinarily under 256, so xpos+1 will
+        bne @x_done               ; ordinarily be checked against 0 here,
+        lda xpos+1                  ; but this works for any XMIN value)
+        cmp #>XMIN
         bne @x_done
         lda #1
         sta xdir             ; hit the left edge -- reverse
@@ -281,6 +300,17 @@ sprite0_bounce_step:
 @y_done:
         lda xpos
         sta SPRITE0_X
+        lda xpos+1
+        beq @msb_clear
+        lda SPRITE_X_MSB
+        ora #%00000001       ; set sprite 0's bit only -- other sprites'
+        sta SPRITE_X_MSB       ; MSB bits, if any, are left untouched
+        jmp @msb_done
+@msb_clear:
+        lda SPRITE_X_MSB
+        and #%11111110
+        sta SPRITE_X_MSB
+@msb_done:
         lda ypos
         sta SPRITE0_Y
         rts

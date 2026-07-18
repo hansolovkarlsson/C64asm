@@ -21,23 +21,36 @@
                           ; start: -- see c64asm-reference.md §7
 
 gfx_ptr = $fb               ; graphics.inc's required zero-page scratch
-xpos = $02                 ; sprite X position (kept to a single byte -- see note)
-ypos = $03                 ; sprite Y position
-xdir = $04                 ; 1 = moving right, 0 = moving left
-ydir = $05                 ; 1 = moving down,  0 = moving up
-engine_playing = $06     ; sound.inc's required flag byte -- its
+xpos = $02                 ; sprite X position -- TWO bytes (xpos, xpos+1:
+                              ; low/high byte of a 16-bit value), since the
+                              ; screen's right edge is itself past 255 --
+                              ; see graphics.inc's own note on this
+ypos = $04                 ; sprite Y position (one byte -- Y never needs
+                              ; a second byte the way X does)
+xdir = $05                 ; 1 = moving right, 0 = moving left
+ydir = $06                 ; 1 = moving down,  0 = moving up
+engine_playing = $07     ; sound.inc's required flag byte -- its
                             ; engine_sound_on/off code is assembled
                             ; unconditionally once sound.inc is
                             ; included, even though this demo never
                             ; actually calls either
 
-; Bounds are chosen to keep the whole demo within a single-byte X range
-; (0-255) so no X-MSB handling ($D010) is needed -- see c64-memory-
-; reference.md §4 for how to extend this to the full 320-pixel width.
+; The ball should visually touch each edge of the visible screen, not
+; stop noticeably short of it -- so these aren't just "a comfortable
+; margin", they're the actual documented visible-screen edges (left
+; X=24, top Y=50, right X=344, bottom Y=250 -- see c64-memory-
+; reference.md's sprite positioning section) with the sprite's own
+; width (24px) and height (21px) subtracted from the far bounds, so
+; it's the sprite's OWN far edge that reaches the screen edge, not its
+; near one running past it. XMAX (320) is past 255, which is exactly
+; why sprite0_bounce_step needs the two-byte xpos above -- see its own
+; comment in graphics.inc for the X-MSB handling this requires and
+; c64-memory-reference.md's "Positioning a sprite beyond X=255" for the
+; general technique.
 XMIN = 24
-XMAX = 250
+XMAX = 320
 YMIN = 50
-YMAX = 220
+YMAX = 229
 
         .include "lib/graphics.inc"
         .include "lib/sound.inc"
@@ -55,13 +68,21 @@ start:
 
         SID_INIT
 
-        lda #XMIN
+        lda #<XMIN
         sta xpos
+        lda #>XMIN
+        sta xpos+1           ; XMIN is well under 256, but xpos+1 still
+                               ; needs an explicit, correct starting value
+                               ; -- see graphics.inc's sprite0_bounce_step
         lda #YMIN
         sta ypos
         lda #1
         sta xdir             ; start out moving right...
         sta ydir             ; ...and down
+
+        lda SPRITE_X_MSB
+        and #%11111110       ; sprite 0's X starts under 256 (XMIN=24),
+        sta SPRITE_X_MSB       ; so its MSB bit should start cleared too
 
         SPRITE_INIT sprite_data, 1, XMIN, YMIN   ; color = white
 

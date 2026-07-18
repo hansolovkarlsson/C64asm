@@ -24,6 +24,19 @@ to share; see graphics.inc's own comment on the routine for the exact
 convention this test is also implicitly checking bounce.asm follows
 correctly.
 
+Also guards against a real, since-fixed bug: sprite0_bounce_step
+originally tracked X as a single byte (0-255), so XMAX could never be
+set past 255 -- but the visible screen's right edge sits at X=344,
+well past that. The result wasn't a crash or an assembly error, just a
+sprite that visibly stopped bouncing well short of the right edge (and
+similarly, before YMAX was separately recalibrated, a bit short of the
+bottom edge too) -- exactly the kind of thing that's easy to miss
+reading a listing and only obvious watching it actually run. This test
+checks the ball's own far edge reaches the screen's true right (X=344)
+and bottom (Y=250) edges, not just that it stays inside *some* bound,
+and cross-checks SPRITE0_X/the X-MSB register ($d010 bit 0) stay
+correctly in sync with the real 16-bit X position on every frame.
+
 mini6502 doesn't simulate the VIC-II's raster line advancing on its
 own, so this test pokes $d012 to the value wait_frame polls for every
 time execution reaches wait_frame, advancing one simulated "frame" per
@@ -92,8 +105,13 @@ with open('/tmp/bounce_regress.lst') as f:
 MAIN_LOOP = symbol_address(listing, 'main_loop')
 WAIT_FRAME = symbol_address(listing, 'wait_frame')
 SPRITE_DATA = symbol_address(listing, 'sprite_data')
-XMIN, XMAX = 24, 250
-YMIN, YMAX = 50, 220
+XPOS_ADDR = symbol_address(listing, 'xpos')  # 2 bytes: XPOS_ADDR, XPOS_ADDR+1
+SPRITE_W, SPRITE_H = 24, 21
+XMIN, XMAX = 24, 320   # XMAX > 255 -- needs the X-MSB register; this is
+YMIN, YMAX = 50, 229    # the specific thing this test exists to check
+TRUE_RIGHT_EDGE = 344   # the visible screen's actual right/bottom edges
+TRUE_BOTTOM_EDGE = 250   # -- XMAX/YMAX above should place the sprite's
+                           # own far edge exactly on these, not short of them
 
 m = C64Machine()
 target = m.find_sys_target(data)
@@ -122,33 +140,38 @@ check("sprite 0 pointer set", mem[0x07f8] == SPRITE_DATA // 64,
       f"sprite_data=${SPRITE_DATA:04X}, expected pointer {SPRITE_DATA // 64}, got {mem[0x07f8]}")
 check("sprite starts at XMIN", mem[0xd000] == XMIN, f"got {mem[0xd000]}")
 check("sprite starts at YMIN", mem[0xd001] == YMIN, f"got {mem[0xd001]}")
+check("X-MSB bit starts cleared (XMIN < 256)", mem[0xd010] & 1 == 0)
 check("SID volume set (SID_INIT ran)", mem[0xd418] == 0x0f)
 
-print("=== simulated animation: bounces within bounds, sound fires exactly on impact ===")
-xs, ys = [], []
+print("=== simulated animation: reaches the TRUE screen edges, sound fires exactly on impact ===")
+x16s, ys = [], []
 frame_count = 0
 sound_this_frame = False
 sound_frames = []          # frame indices where the bounce sound fired
 false_positive_frames = []  # sound fired but neither axis was at a bound
 missed_bounce_frames = []   # an axis was at a bound but sound didn't fire
-for _ in range(20_000_000):
+msb_sync_errors = []        # SPRITE0_X/SPRITE_X_MSB out of sync with xpos
+for _ in range(40_000_000):
     if m.cpu.pc == WAIT_FRAME:
         m.cpu.memory[0xd012] = 0xfb
     if m.cpu.pc == MAIN_LOOP:
         if frame_count > 0:
-            x, y = mem[0xd000], mem[0xd001]
-            at_edge = x in (XMIN, XMAX) or y in (YMIN, YMAX)
+            x16 = mem[XPOS_ADDR] | (mem[XPOS_ADDR + 1] << 8)
+            y = mem[0xd001]
+            at_edge = x16 in (XMIN, XMAX) or y in (YMIN, YMAX)
             if sound_this_frame:
                 sound_frames.append(frame_count)
             if sound_this_frame and not at_edge:
                 false_positive_frames.append(frame_count)
             if at_edge and not sound_this_frame:
                 missed_bounce_frames.append(frame_count)
-            xs.append(x)
+            if mem[0xd000] != (x16 & 0xff) or (mem[0xd010] & 1) != (1 if x16 >= 256 else 0):
+                msb_sync_errors.append(frame_count)
+            x16s.append(x16)
             ys.append(y)
         frame_count += 1
         sound_this_frame = False
-        if frame_count > 600:
+        if frame_count > 1200:
             break
     before = mem[0xd404]
     m.step()
@@ -160,15 +183,27 @@ for _ in range(20_000_000):
     if after != before and after & 0b00010001:
         sound_this_frame = True
 
-check("600 frames simulated without hanging", frame_count == 601)
-check("X position never leaves [XMIN, XMAX]",
-      all(XMIN <= x <= XMAX for x in xs),
-      f"range was {min(xs)}-{max(xs)}")
+check("1200 frames simulated without hanging", frame_count == 1201)
+check("X position (16-bit) never leaves [XMIN, XMAX]",
+      all(XMIN <= x <= XMAX for x in x16s),
+      f"range was {min(x16s)}-{max(x16s)}")
 check("Y position never leaves [YMIN, YMAX]",
       all(YMIN <= y <= YMAX for y in ys),
       f"range was {min(ys)}-{max(ys)}")
+check("SPRITE0_X / X-MSB bit always in sync with the real 16-bit X position",
+      len(msb_sync_errors) == 0,
+      f"out of sync at frames {msb_sync_errors[:5]}")
 
-x_bounces = sum(1 for i in range(1, len(xs) - 1) if (xs[i] - xs[i - 1]) * (xs[i + 1] - xs[i]) < 0)
+check("ball's right edge actually reaches the true screen edge (X=344)",
+      max(x16s) + SPRITE_W == TRUE_RIGHT_EDGE,
+      f"max X seen was {max(x16s)}, sprite right edge at {max(x16s) + SPRITE_W}, expected {TRUE_RIGHT_EDGE}")
+check("ball's bottom edge actually reaches the true screen edge (Y=250)",
+      max(ys) + SPRITE_H == TRUE_BOTTOM_EDGE,
+      f"max Y seen was {max(ys)}, sprite bottom edge at {max(ys) + SPRITE_H}, expected {TRUE_BOTTOM_EDGE}")
+check("X-MSB bit actually gets set at some point (X crosses 256)",
+      any(x >= 256 for x in x16s))
+
+x_bounces = sum(1 for i in range(1, len(x16s) - 1) if (x16s[i] - x16s[i - 1]) * (x16s[i + 1] - x16s[i]) < 0)
 y_bounces = sum(1 for i in range(1, len(ys) - 1) if (ys[i] - ys[i - 1]) * (ys[i + 1] - ys[i]) < 0)
 check("ball actually reverses direction on X (not just static/drifting)", x_bounces >= 1,
       f"observed {x_bounces} reversals")

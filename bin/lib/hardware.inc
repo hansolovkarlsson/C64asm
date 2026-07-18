@@ -48,6 +48,11 @@ VIC_BORDER  = $d020     ; border color
 VIC_BG0     = $d021     ; background color 0
 SPRITE0_X   = $d000     ; sprite 0 X position (low 8 bits)
 SPRITE0_Y   = $d001     ; sprite 0 Y position
+SPRITE_X_MSB = $d010    ; bit N = bit 8 of sprite N's X position, letting
+                           ; a sprite's X reach the full 0-511 range instead
+                           ; of just 0-255 -- needed for a sprite to reach
+                           ; the right portion of the visible screen, which
+                           ; starts around X=344
 SPRITE_ENABLE = $d015   ; bit N = 1 enables sprite N
 SPRITE0_COLOR = $d027   ; sprite 0's color
 SPRITE_PTR0 = SCREEN + $3f8   ; sprite 0's data pointer, in the sprite

@@ -67,10 +67,13 @@ ever `jsr`s to it, so assembly fails on an undefined symbol otherwise.
   `read_joy2`/`READ_KEY`.
 - **`graphics.inc`** needs one 2-byte zero-page location, `gfx_ptr`
   (used by `CLEAR_BITMAP`/`SET_SCREEN_COLOR`), plus eight more,
-  unrelated, used by `sprite0_bounce_step`: `xpos`, `ypos`, `xdir`,
-  `ydir` (one byte each, not necessarily zero page — see the file's own
-  header comment) and `XMIN`, `XMAX`, `YMIN`, `YMAX` (compile-time
-  constants) — all nine, even if your program only ever calls
+  unrelated, used by `sprite0_bounce_step`: `xpos` (TWO bytes — low/high
+  byte of a 16-bit X position, since the screen's right edge is itself
+  past 255), `ypos`, `xdir`, `ydir` (one byte each, none needing to be
+  zero page — see the file's own header comment) and `XMIN`, `XMAX`,
+  `YMIN`, `YMAX` (compile-time constants; `XMAX` will normally need to
+  be greater than 255 for a sprite that should reach the right portion
+  of the screen) — all of it, even if your program only ever calls
   `BITMAP_MODE_ON`/`BITMAP_MODE_OFF`.
 - **`sound.inc`** needs a 1-byte flag, `engine_playing` (used by
   `engine_sound_on`/`engine_sound_off`; anywhere in RAM, not
@@ -86,14 +89,15 @@ word_dest_ptr = $fb    ; safe to alias with str_ptr -- see text.inc's
                           ; header comment for why
 engine_playing = $09
 gfx_ptr = $fd
-xpos = $06              ; sprite0_bounce_step's state -- see
-ypos = $07                ; graphics.inc's header comment for why
-xdir = $08                 ; these don't need to be zero page
-ydir = $0a
+xpos = $06              ; sprite0_bounce_step's state -- xpos needs
+                           ; TWO bytes (xpos and xpos+1); see
+ypos = $0b                  ; graphics.inc's header comment for why
+xdir = $0c                    ; none of these need to be zero page
+ydir = $0e
 XMIN = 24                ; sprite0_bounce_step's bounds -- any
-XMAX = 250                 ; values work if you're not actually
+XMAX = 320                 ; values work if you're not actually
 YMIN = 50                    ; using it yet, but see bounce.asm
-YMAX = 220                     ; for a real, worked example
+YMAX = 229                     ; for a real, worked example
         .include "lib/text.inc"
         .include "lib/input.inc"
         .include "lib/sound.inc"
@@ -208,6 +212,31 @@ immediately after `BITMAP_MODE_ON`:
                                                   ; reaches into the sprite
                                                   ; pointer bytes too
 ```
+
+### A `sprite0_bounce_step` bug this library used to have (now fixed, no action needed)
+
+An earlier version of `sprite0_bounce_step` tracked X as a single byte
+(0-255). That's not a bug by itself — plenty of sprites never need to
+go further right than that — but it quietly capped how far right a
+sprite bouncing off the screen edges could actually go, since the
+visible screen's right edge sits at X≈344, well past 255. There was no
+error, no crash, nothing wrong in a listing: the ball in `bounce.asm`
+simply stopped and reversed noticeably short of the right edge (and,
+separately, a bit short of the bottom edge too, before `YMAX` was
+recalibrated against the actual screen dimensions) — the kind of thing
+that's only obvious watching the program actually run, not reading its
+source.
+
+This is fixed as of this version: `xpos` is now two bytes (a proper
+16-bit X position), and `sprite0_bounce_step` maintains the sprite's
+X-MSB bit (`$D010` bit 0) itself as X crosses 256, the same technique
+`c64-memory-reference.md`'s "Positioning a sprite beyond X=255" shows
+doing by hand. There's nothing for a program using this library to do
+differently beyond the setup change already described above (`xpos`
+needing two bytes, and `XMAX` now able to — and normally needing to —
+exceed 255) — this section exists mainly so the symptom (a bounce that
+stops well short of an edge, with no error anywhere) is recognizable if
+something similar ever turns up in code that doesn't use this library.
 
 ### An `input.inc` bug this library used to have (now fixed, no action needed)
 
