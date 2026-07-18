@@ -10,6 +10,7 @@
 ;   SPRITE_INIT data, color, x, y  macro
 ;   wait_frame                     subroutine
 ;   sprite0_bounce_step            subroutine
+;   sprite0_explode                subroutine
 ;
 ; bitmap_addr must be one of the 8 addresses the VIC-II can use for
 ; bitmap data within its current 16K bank: a multiple of $2000 relative
@@ -313,4 +314,47 @@ sprite0_bounce_step:
 @msb_done:
         lda ypos
         sta SPRITE0_Y
+        rts
+
+; sprite0_explode -- a quick "boom" effect: doubles sprite 0's size,
+; flashes it through a caller-provided sequence of colors (two frames
+; each, synced via wait_frame -- roughly a quarter second per color at
+; a 50-60Hz refresh rate), then hides the sprite entirely. Sprite 0
+; must already be positioned wherever the explosion should appear, and
+; enabled, before calling this -- it doesn't touch position, only size,
+; color, and visibility.
+;
+; Call with the color sequence's address in A (low byte) / Y (high
+; byte), and how many colors it holds in X:
+;
+;       ldx #8
+;       lda #<my_boom_colors
+;       ldy #>my_boom_colors
+;       jsr sprite0_explode
+;   my_boom_colors: .byte 7,8,2,1,7,8,2,1   ; yellow,orange,red,white x2
+;
+; Reuses gfx_ptr for the color table (see CLEAR_BITMAP/SET_SCREEN_COLOR
+; above for the same symbol) -- safe because an explosion never happens
+; at the same moment as a bitmap-clear or screen-color fill, the same
+; "never simultaneously active" reasoning this library uses for its
+; other shared pointers.
+sprite0_explode:
+        sta gfx_ptr
+        sty gfx_ptr+1
+        lda #%00000001
+        sta SPRITE_X_EXPAND
+        sta SPRITE_Y_EXPAND
+        ldy #$00
+@loop:
+        lda (gfx_ptr),y
+        sta SPRITE0_COLOR
+        jsr wait_frame
+        jsr wait_frame
+        iny
+        dex
+        bne @loop
+        lda #0
+        sta SPRITE_ENABLE
+        sta SPRITE_X_EXPAND
+        sta SPRITE_Y_EXPAND
         rts

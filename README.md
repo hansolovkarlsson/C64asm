@@ -129,9 +129,9 @@ unzip c64asm-split-src.zip && make
 | `mini6502.zip` | **mini6502** — a from-scratch 6502/C64 emulator used to test-drive every demo and library routine below (see below) |
 | `hello.asm` / `.prg` / `.lst` | Demo: prints text via `CHROUT` and cycles the border color |
 | `bounce.asm` / `.prg` / `.lst` | Demo: a sprite bouncing around a bitmap graphics screen, raster-synced |
-| `pong.asm` / `.prg` / `.lst` | Demo: two-paddle Pong, CIA keyboard-matrix input, ball/paddle collision |
+| `pong.asm` / `.prg` / `.lst` | Demo: two-paddle Pong — joystick and keyboard-matrix input, ball/paddle collision, AI opponent; uses the standard library (`lib/graphics.inc`, `lib/input.inc`, `lib/sound.inc`) rather than reimplementing raster timing, input handling, and sound |
 | `adventure.asm` / `.prg` / `.lst` | Demo: a small text adventure — typed commands via `CHRIN`, a room/item/puzzle state machine; uses the standard library (`lib/text.inc`, `lib/input.inc`) rather than reimplementing string/input handling |
-| `lander.asm` / `.prg` / `.lst` | Demo: lunar lander — bitmap graphics, physics, terrain collision, a fuel bar, sound, and an explosion animation |
+| `lander.asm` / `.prg` / `.lst` | Demo: lunar lander — bitmap graphics, physics, terrain collision, a fuel bar, sound, and an explosion animation; uses the standard library (`lib/graphics.inc`, `lib/input.inc`, `lib/sound.inc`, `lib/text.inc`) rather than reimplementing bitmap setup, input handling, sound, and text output |
 
 Start with `c64asm-reference.md` for assembler syntax, `c64asm-opcode-reference.md`
 for what a given instruction actually does, and `c64-memory-reference.md`
@@ -170,18 +170,22 @@ joystick/keyboard/typed-line input, bitmap graphics setup, and SID sound
 effects — extracted from and cross-checked against the demo programs
 that originally implemented each piece from scratch. Nothing in it is
 new, untested logic; it's existing, hardware-verified patterns pulled
-into reusable form. `adventure.asm` above is the clearest example of a
-program built *on* the library rather than duplicating it — see
-`lib-reference.md` (inside the zip) for the full API, required
-zero-page setup per file, and worked examples, including the two
-smaller, focused demo programs (`demo.asm`, `adventure.asm`) built
-specifically to exercise the library in isolation.
+into reusable form. Five of the six programs above (`adventure.asm`,
+`bounce.asm`, `pong.asm`, `lander.asm`, and the library-focused
+`demo.asm`) are built *on* the library rather than duplicating it —
+only `hello.asm` still has everything written out locally, since it's
+deliberately meant as the simplest possible complete program, with no
+dependencies at all — see `lib-reference.md` (inside the zip) for the
+full API, required zero-page setup per file, and worked examples,
+including two smaller, even more focused demo programs (`demo.asm`,
+alongside `bounce.asm`) built specifically to exercise the library in
+relative isolation.
 
 By default, each project needs its own copy of `lib/` sitting next to
 its `.asm` files (`.include` paths resolve relative to the including
 file). To share one `lib/` directory across several separate projects
-instead, pass `--lib-dir <path to the directory containing lib/>` on
-the command line — it's a fallback only, tried just when the default
+instead, pass `--lib-dir <path to the lib/ folder itself>` on the
+command line — it's a fallback only, tried just when the default
 lookup doesn't find the file, so it's safe to pass unconditionally
 without it overriding a project's own local files. See
 `c64asm-reference.md` §1 for the full behavior and an example.
@@ -225,14 +229,33 @@ for worked regression suites built on it).
 ## A note on the demos
 
 Every demo here is more than filler — each one is the program that shook
-out real bugs during development (a text-encoding mixup, a broken
-multiplication operator, a silently-corrupting `.org` gap, a VIC-II
-character-ROM address collision, a CIA data-direction-register
-collision between joystick and keyboard reads, and — most recently, while
-extracting shared code into the standard library — a stale calling
-convention left behind by a refactor, and the discovery that typed
-keyboard input and `.text`-encoded strings must use identical PETSCII
-encoding or every keyword comparison in a program silently fails), all
-of which got fixed in the assembler or library itself, not worked
-around in the examples. They're a reasonable starting point to build
-your own programs from.
+out a real bug during development, all fixed in the assembler or
+library itself rather than worked around in the examples:
+
+- A text-encoding mixup, a broken multiplication operator, and a
+  silently-corrupting `.org` gap (assembler bugs, caught early)
+- A VIC-II character-ROM address collision (sprite/bitmap data placed
+  where the VIC-II substitutes its own character ROM instead)
+- A CIA data-direction-register collision between joystick and
+  keyboard reads — found *three separate times*, independently, in
+  `demo.asm`, `pong.asm`, and `lander.asm` (the last one the worst:
+  fuel drained and the ship drifted sideways on every single flight,
+  with nothing held at all)
+- A stale calling convention left behind by a refactor, and the
+  discovery that typed keyboard input and `.text`-encoded strings must
+  use identical PETSCII encoding, or every keyword comparison in a
+  program silently fails
+- A missing newline that ran a typed command's response onto the same
+  screen line as what was just typed
+- A sprite that visibly stopped short of the screen's true edges
+  because its position was tracked in a single byte — found in both
+  `bounce.asm` (the ball) and `pong.asm` (the right paddle and net,
+  using only about 2/3 of the available width)
+- A more subtle sibling of that same bug: once `pong.asm`'s paddle
+  bounds were corrected to actually reach the true bottom edge, a
+  served ball could land exactly on that edge while still heading
+  toward it — past where the wall-bounce check (built to catch a ball
+  only at the instant it *arrives* there) could ever detect it — and
+  sail straight through, wrapping around instead of bouncing
+
+They're a reasonable starting point to build your own programs from.

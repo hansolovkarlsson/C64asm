@@ -54,7 +54,9 @@ SPRITE_X_MSB = $d010    ; bit N = bit 8 of sprite N's X position, letting
                            ; the right portion of the visible screen, which
                            ; starts around X=344
 SPRITE_ENABLE = $d015   ; bit N = 1 enables sprite N
+SPRITE_Y_EXPAND = $d017 ; bit N = 1 doubles sprite N's height
 SPRITE0_COLOR = $d027   ; sprite 0's color
+SPRITE_X_EXPAND = $d01d ; bit N = 1 doubles sprite N's width
 SPRITE_PTR0 = SCREEN + $3f8   ; sprite 0's data pointer, in the sprite
                                 ; pointer block at the end of screen memory
                                 ; -- holds (data address / 64)

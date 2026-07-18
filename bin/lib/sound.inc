@@ -8,8 +8,9 @@
 ; PLAY_SOUND is for short, fire-and-forget effects (a hit, a bounce, an
 ; explosion) -- each call fully retriggers the envelope, so calling it
 ; again while a previous sound is still sounding cuts that one off and
-; starts the new one, exactly like this project's own pong.asm/
-; lander.asm sound effects.
+; starts the new one. pong.asm uses this for all three of its effects
+; (wall bounce, paddle hit, score); lander.asm's own sound effects
+; follow the identical pattern without (yet) using this library.
 ;
 ; engine_sound_on/off are for a continuous tone that starts and stops
 ; based on held input (a thruster, an engine) -- unlike PLAY_SOUND,

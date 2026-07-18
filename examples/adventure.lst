@@ -448,12 +448,16 @@ Symbol table:
   SPRITE0_Y            = $D001
   SPRITE_ENABLE        = $D015
   SPRITE_PTR0          = $07F8
+  SPRITE_X_EXPAND      = $D01D
+  SPRITE_X_MSB         = $D010
+  SPRITE_Y_EXPAND      = $D017
   TREASURE             = $0002
   VIC_BG0              = $D021
   VIC_BORDER           = $D020
   VIC_CTRL1            = $D011
   VIC_CTRL2            = $D016
   VIC_MEMPTRS          = $D018
+  VIC_RASTER           = $D012
   VOICE1_AD            = $D405
   VOICE1_CTRL          = $D404
   VOICE1_FREQ_HI       = $D401

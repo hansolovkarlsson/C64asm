@@ -16,32 +16,34 @@
 ; simulated pilot actually needs.
 ;
 ; Controls: joystick port 2, or the keyboard fallback W (thrust up),
-; A (thrust left), D (thrust right) -- reusing pong.asm's fixed
-; input-reading pattern: JOY2 is captured into a saved copy ONCE before
-; any keyboard column-select write touches $DC00, since JOY2 and the
-; keyboard column register are the same address (this was a real,
-; confirmed bug in an earlier version of pong.asm). W/A are in keyboard
-; matrix column 1, D is in column 2, and Y (used to restart after landing
-; or crashing) is in column 3 -- all positions taken directly from the
-; C64-Wiki's keyboard matrix reference table, not from memory.
+; A (thrust left), D (thrust right), Y (restart after landing/crashing).
+;
+; Uses lib/graphics.inc (BITMAP_MODE_ON/OFF, CLEAR_BITMAP,
+; SET_SCREEN_COLOR, SPRITE_INIT, wait_frame, sprite0_explode),
+; lib/input.inc (read_joy2, READ_KEY, CIA_KEYBOARD_SETUP), lib/sound.inc
+; (SID_INIT, PLAY_SOUND, engine_sound_on/off), and lib/text.inc
+; (print_msg/PRINT) rather than its own copies of these -- most were
+; originally written here and generalized into the library (see each
+; file's own header comment for exactly which demo each routine traces
+; back to); update_engine_sound in particular was, word for word, where
+; sound.inc's engine_sound_on/off themselves came from.
+;
+; Refactoring the joystick reading onto input.inc's read_joy2/READ_KEY
+; also fixed a real bug, the same one found in pong.asm: this file used
+; to leave CIA1 port A permanently configured as keyboard column-select
+; output from setup onward, so JOY2 reads afterward silently read back
+; stale column-select data instead of the joystick. The visible
+; symptom here was worse than a stationary paddle -- fuel drained and
+; the ship visibly drifted sideways with nothing held at all, exactly
+; the "silently unwinnable" kind of bug simulation is good at catching
+; in aggregate stats but bad at catching by inspection, since nothing
+; about the drift looks obviously wrong frame to frame.
 
-CHROUT = $ffd2
-JOY2   = $dc00
-VOICE1_FREQ_LO = $d400
-VOICE1_FREQ_HI = $d401
-VOICE1_CTRL    = $d404
-VOICE1_AD      = $d405
-VOICE1_SR      = $d406
-SID_VOLUME     = $d418
-SCREEN = $0400
-COLOR  = $d800
-BITMAP = $2000   ; 8K-aligned bitmap data; same proven-safe address bounce.asm uses
-
-SHIP_DATA = $0e00   ; 64-byte aligned; clear of code, and NOT in the VIC's
-                      ; $1000-$1FFF character-ROM shadow range (see
-                      ; c64-memory-reference.md sec4 -- this exact mistake
-                      ; broke a sprite in an earlier demo)
-SPRITE_PTR0 = SCREEN + $3f8
+        .basic start   ; needed once library code (wait_frame,
+                          ; sprite0_bounce_step, sprite0_explode,
+                          ; read_joy2, READ_KEY, engine_sound_on/off,
+                          ; print_msg, str_equal) sits between .basic
+                          ; and start: -- see c64asm-reference.md §7
 
 ptr             = $fb   ; temporary 16-bit pointer, used only during setup
 ship_x          = $02
@@ -70,6 +72,36 @@ last_fuel_cols  = $11   ; scratch: fuel-bar column count as of the last
 fuel_ptr        = $12   ; 2 bytes ($12/$13): bitmap address of the
                           ; current rightmost lit fuel-bar column
 engine_playing  = $14   ; 0/1: is the thruster sound currently gated on?
+                          ; ALSO sound.inc's own required flag for the
+                          ; same purpose -- engine_sound_on/off (below)
+                          ; are called directly now instead of this
+                          ; file keeping its own copy of that logic
+
+; text.inc's str_ptr/cmp_ptr/kw_ptr, input.inc's word_dest_ptr, and
+; graphics.inc's gfx_ptr are all required (each file's code is
+; assembled unconditionally on .include, whether or not this program
+; calls everything in it -- see text.inc's header comment) but never
+; actually needed at the same moment as ptr's own setup-time use --
+; gfx_ptr genuinely is used, by CLEAR_BITMAP/SET_SCREEN_COLOR/
+; sprite0_explode below, just never at the same time ptr itself is;
+; str_ptr/word_dest_ptr/cmp_ptr/kw_ptr are dead-code requirements only
+; (str_equal and extract_word are never actually called here), so
+; those four are just as safe aliased onto real gameplay state instead
+; -- see graphics.inc's header comment for why a routine that's never
+; invoked can never conflict with anything, at any point in time.
+str_ptr = ptr
+word_dest_ptr = ptr
+gfx_ptr = ptr
+cmp_ptr = ship_x
+kw_ptr = vx_dir
+
+; graphics.inc's sprite0_bounce_step is never called here either (this
+; ship's movement is its own accel_v/accel_h physics, not a wall
+; bounce), so xpos/ypos/xdir/ydir are dead-code requirements too.
+xpos = ship_x
+ypos = ship_y
+xdir = vx_dir
+ydir = vy_dir
 
 MAX_V         = 2      ; lowered from 3 -- a lower top speed means SAFE_V
                           ; (below) covers nearly the whole speed range,
@@ -84,6 +116,9 @@ FUEL_DELAY    = 3      ; frames between fuel decrements while thrusting
 YMIN     = 50
 XMIN     = 24
 XMAX     = 250
+YMAX     = 255   ; not otherwise used by this program -- only required
+                    ; because graphics.inc's sprite0_bounce_step (never
+                    ; actually called here) references it
 
 PAD_ROW = 20            ; the terrain row value that marks the flat landing pad
 SAFE_V  = 2              ; landing is safe if both vx_mag and vy_mag <= this
@@ -137,73 +172,36 @@ H37 = 21
 H38 = 20
 H39 = 18
 
-        .basic
+        .include "lib/graphics.inc"
+        .include "lib/input.inc"
+        .include "lib/sound.inc"
+        .include "lib/text.inc"
 
 start:
-        ; CIA1 data-direction setup for keyboard scanning: port A
-        ; outputs (column select), port B inputs (row read). Every
-        ; working reference for manual matrix scanning sets this
-        ; explicitly rather than assuming it's already correct.
-        lda #%11111111
-        sta $dc02
-        lda #%00000000
-        sta $dc03
+        CIA_KEYBOARD_SETUP   ; sets CIA1 port B to all-input, for reading
+                                ; keyboard row data; port A's direction is
+                                ; managed per-call by read_joy2/READ_KEY
+                                ; themselves, not set once here -- see the
+                                ; header comment above for why that
+                                ; per-call approach is the actual fix
 
-        lda #$0f
-        sta SID_VOLUME            ; full volume, no filter
-        lda #$00
-        sta VOICE1_CTRL            ; make sure voice 1 starts silent
-        sta engine_playing
+        SID_INIT
+        sta engine_playing        ; SID_INIT leaves A=$00 -- reuse it rather
+                                     ; than an extra `lda #0`
+
+        BITMAP_MODE_ON BITMAP
+        CLEAR_BITMAP BITMAP
 
         ; --- fill the screen memory nibble data (fg=high nibble, bg=low
         ; nibble, per 8x8 cell) with grey terrain on black sky. This is
         ; standard (non-multicolor) bitmap mode, where SCREEN holds this
         ; per-cell color data and COLOR RAM is not used at all. ---
-        lda #<SCREEN
-        sta ptr
-        lda #>SCREEN
-        sta ptr+1
-        ldx #4
-        lda #$c0                ; grey terrain (high nibble) on black sky (low nibble)
-clear_screen:
-        ldy #$00
-clear_screen_byte:
-        sta (ptr),y
-        iny
-        bne clear_screen_byte
-        inc ptr+1
-        dex
-        bne clear_screen
+        SET_SCREEN_COLOR $c0   ; grey terrain (high nibble) on black sky
+                                  ; (low nibble)
 
         lda #0
-        sta $d020
-        sta $d021
-
-        ; --- switch on standard bitmap mode ---
-        lda $d011
-        ora #%00100000           ; BMM
-        sta $d011
-        lda $d018
-        and #%11110000           ; keep the screen-pointer bits (still $0400)
-        ora #%00001000           ; bitmap pointer bit 3 set -> bitmap at $2000
-        sta $d018
-
-        ; --- clear the 8K bitmap (32 pages of 256 bytes) to all-sky ---
-        lda #<BITMAP
-        sta ptr
-        lda #>BITMAP
-        sta ptr+1
-        ldx #32
-        lda #$00
-clear_bitmap:
-        ldy #$00
-clear_bitmap_byte:
-        sta (ptr),y
-        iny
-        bne clear_bitmap_byte
-        inc ptr+1
-        dex
-        bne clear_bitmap
+        sta VIC_BORDER
+        sta VIC_BG0
 
         ; --- color the landing pad columns (15-25) green, all 25 rows;
         ; safe to do for every row even above the terrain line, since the
@@ -249,12 +247,7 @@ color_fuel_row:
         jsr init_fuel_bar
 
         ; --- set up the ship sprite ---
-        lda #(SHIP_DATA / 64)
-        sta SPRITE_PTR0
-        lda #1                    ; white
-        sta $d027
-        lda #%00000001
-        sta $d015
+        SPRITE_INIT ship_data, 1, 128, YMIN   ; white
 
         ; --- initial state ---
         lda #128
@@ -287,33 +280,26 @@ main_loop:
         jsr check_landing
         jmp main_loop
 
-; Busy-waits for a raster line near the bottom of the display -- syncs
-; the main loop to the screen refresh rate for smooth, consistent speed.
-wait_frame:
-        lda $d012
-        cmp #$fb
-        bne wait_frame
-        rts
-
-; Reads joystick port 2 and the W/A/S keyboard fallback into
-; thrust_flag/left_flag/right_flag. JOY2 is saved to joy_state before any
-; keyboard scan touches $DC00 (see the header comment).
+; Reads joystick port 2 (via input.inc's read_joy2) and the W/A/D
+; keyboard fallback (via READ_KEY) into thrust_flag/left_flag/
+; right_flag. joy_state is captured once per frame, before any
+; READ_KEY call -- not because of any ordering requirement between the
+; two anymore (read_joy2/READ_KEY each fix up CIA1's direction register
+; themselves before they touch it, so they can run in either order
+; safely -- see input.inc's header comment), just so joy_state's value
+; stays consistent across all three checks below within the same frame.
 read_input:
-        lda JOY2
-        sta joy_state
+        jsr read_joy2
+        sta joy_state           ; active-HIGH (1=pressed) -- read_joy2's
+                                   ; own convention, see input.inc
 
         lda #0
         sta thrust_flag
         lda joy_state
         and #%00000001
-        beq set_thrust
-        sei
-        lda #%11111101
-        sta $dc00
-        lda $dc01
-        cli
-        and #%00000010          ; W
-        bne no_thrust_key
+        bne set_thrust
+        READ_KEY %11111101, %00000010   ; W key (matrix column 1, bit 1)
+        beq no_thrust_key
 set_thrust:
         lda #1
         sta thrust_flag
@@ -323,14 +309,9 @@ no_thrust_key:
         sta left_flag
         lda joy_state
         and #%00000100
-        beq set_left
-        sei
-        lda #%11111101
-        sta $dc00
-        lda $dc01
-        cli
-        and #%00000100          ; A
-        bne no_left_key
+        bne set_left
+        READ_KEY %11111101, %00000100   ; A key (matrix column 1, bit 2)
+        beq no_left_key
 set_left:
         lda #1
         sta left_flag
@@ -340,14 +321,9 @@ no_left_key:
         sta right_flag
         lda joy_state
         and #%00001000
-        beq set_right
-        sei
-        lda #%11111011           ; select keyboard column 2 (has D)
-        sta $dc00
-        lda $dc01
-        cli
-        and #%00000100           ; D
-        bne no_right_key
+        bne set_right
+        READ_KEY %11111011, %00000100   ; D key (matrix column 2, bit 2)
+        beq no_right_key
 set_right:
         lda #1
         sta right_flag
@@ -378,46 +354,18 @@ fuel_not_empty:
 consume_fuel_done:
         rts
 
-; Keeps the thruster engine sound gated on for as long as any thruster
-; is active this frame, and gated off otherwise -- checked once per
-; frame, but only actually *written* to the SID on the frame the state
-; changes, so holding a thruster down doesn't repeatedly retrigger the
-; envelope's attack phase (which would make it stutter instead of
-; sounding like one continuous engine note). Uses a sustain-heavy
-; envelope, unlike the fire-and-forget effects elsewhere in this
-; project, since this needs to keep sounding for as long as the gate is
-; held rather than naturally fade out on its own.
+; Dispatches to sound.inc's engine_sound_on/off based on whether any
+; thruster is active this frame -- see that file for the actual
+; gate-retriggering logic (this file's own copy of it, word for word,
+; is where sound.inc's version originally came from).
 update_engine_sound:
         lda thrust_flag
         ora left_flag
         ora right_flag
         beq engine_should_stop
-
-        lda engine_playing
-        bne engine_sound_done      ; already playing -- don't retrigger
-        lda #$00
-        sta VOICE1_FREQ_LO
-        lda #$08
-        sta VOICE1_FREQ_HI
-        lda #$00
-        sta VOICE1_AD               ; attack 0, decay 0
-        lda #$f8
-        sta VOICE1_SR                ; sustain 15 (holds while gated), release 8
-        lda #%10000001                 ; noise waveform, gate on
-        sta VOICE1_CTRL
-        lda #1
-        sta engine_playing
-        rts
-
+        jmp engine_sound_on
 engine_should_stop:
-        lda engine_playing
-        beq engine_sound_done
-        lda #%10000000            ; noise waveform, gate off
-        sta VOICE1_CTRL
-        lda #0
-        sta engine_playing
-engine_sound_done:
-        rts
+        jmp engine_sound_off
 
 ; One tick of acceleration toward accel_want_dir (0 or 1), applied to a
 ; direction/magnitude pair. accel_v handles vy_dir/vy_mag, accel_h
@@ -555,9 +503,9 @@ physics_done:
 
 update_sprite:
         lda ship_x
-        sta $d000
+        sta SPRITE0_X
         lda ship_y
-        sta $d001
+        sta SPRITE0_Y
         rts
 
 ; Fills each of the 40 columns' bitmap cells solid from its terrain row
@@ -738,26 +686,15 @@ check_landing:
 
         ; Switch back to standard text mode before printing anything --
         ; bitmap mode has no mechanism to render PETSCII text at all.
-        ; CHROUT's clear-screen and character output both assume SCREEN
-        ; memory holds character codes; in bitmap mode it holds color
-        ; nibbles instead, so "printing" a message there was really just
-        ; overwriting each cell's color with the character code's numeric
-        ; value, while the old terrain/ship pixels stayed in the bitmap
-        ; underneath -- which is exactly the "mess of colored blobs".
-        lda $d011
-        and #%11011111           ; clear BMM
-        sta $d011
-        lda #$14                  ; screen at $0400, characters at $1000
-        sta $d018                  ; (the standard default char ROM shadow)
+        ; See graphics.inc's own comment on BITMAP_MODE_OFF for why
+        ; this step specifically is easy to forget and what it looks
+        ; like when you do (this exact bug, right here, is where that
+        ; macro's warning comes from).
+        BITMAP_MODE_OFF
 
-        lda #$93                 ; clear screen
-        jsr CHROUT
-        lda #<msg_success1
-        ldy #>msg_success1
-        jsr print_msg
-        lda #<msg_success2
-        ldy #>msg_success2
-        jsr print_msg
+        CLS
+        PRINT msg_success1
+        PRINT msg_success2
 
         lda #%10000000            ; make sure the engine sound is off --
         sta VOICE1_CTRL            ; thrust might have been held right up
@@ -770,74 +707,38 @@ check_landing:
 do_crash:
         jsr show_explosion
 
-        lda $d011
-        and #%11011111
-        sta $d011
-        lda #$14
-        sta $d018
+        BITMAP_MODE_OFF
 
-        lda #$93
-        jsr CHROUT
-        lda #<msg_crash1
-        ldy #>msg_crash1
-        jsr print_msg
-        lda #<msg_crash2
-        ldy #>msg_crash2
-        jsr print_msg
+        CLS
+        PRINT msg_crash1
+        PRINT msg_crash2
 
 show_try_again:
-        lda #<msg_try_again
-        ldy #>msg_try_again
-        jsr print_msg
+        PRINT msg_try_again
         jmp wait_for_restart
 
 check_landing_done:
         rts
 
 ; A quick "boom": the sprite doubles in size and flashes through a few
-; fire colors for about a quarter of a second (each color held 2 frames,
-; synced via wait_frame same as everywhere else), then disappears
+; fire colors for about a quarter of a second, then disappears
 ; entirely. Runs while still in bitmap mode, at the ship's actual crash
 ; position (already snapped to the ground by check_landing above), so it
-; visibly happens right where the ship hit.
+; visibly happens right where the ship hit. The visual effect itself is
+; graphics.inc's sprite0_explode -- this file is where that routine was
+; generalized from -- with this program's own fire-colored sequence.
 show_explosion:
         ; the engine sound might still be gated on if thrust was held
         ; right up to the moment of impact -- silence it before the
         ; crash sound so they don't overlap
-        lda #%10000000
-        sta VOICE1_CTRL
-        lda #0
-        sta engine_playing
+        jsr engine_sound_off
 
-        lda #$00
-        sta VOICE1_CTRL           ; force gate off first (fresh retrigger)
-        lda #$00
-        sta VOICE1_FREQ_LO
-        lda #$04
-        sta VOICE1_FREQ_HI        ; low pitch for a deep boom
-        lda #$0f
-        sta VOICE1_AD              ; attack 0, decay 15 (long, rumbling decay)
-        lda #$00
-        sta VOICE1_SR               ; sustain 0, release 0
-        lda #%10000001                ; noise waveform, gate on
-        sta VOICE1_CTRL
-
-        lda #%00000001
-        sta $d01d                ; sprite 0 X-expand
-        sta $d017                 ; sprite 0 Y-expand
-        ldx #$00
-explosion_loop:
-        lda explosion_colors,x
-        sta $d027
-        jsr wait_frame
-        jsr wait_frame
-        inx
-        cpx #8
-        bne explosion_loop
-        lda #0
-        sta $d015                 ; hide the ship
-        sta $d01d                  ; tidy up the expand bits (harmless either way now)
-        sta $d017
+        PLAY_SOUND $04, $0f, $00, %10000001   ; low pitch, long rumbling
+                                                 ; decay, noise waveform
+        ldx #8
+        lda #<explosion_colors
+        ldy #>explosion_colors
+        jsr sprite0_explode
         rts
 
 ; A short 5-note ascending arpeggio played once on a successful landing.
@@ -879,33 +780,15 @@ melody_loop:
         bne melody_loop
         rts
 
-; Polls the keyboard for Y (matrix column 3, bit 1) and, once pressed,
-; jumps back to start: which reinitializes and redraws everything and
-; runs the game again. Re-running the CIA setup on every restart is
-; harmless (it's the same idempotent two writes each time), so there's
-; no need for a separate, trimmed entry point.
+; Polls the keyboard for Y and, once pressed, jumps back to start: which
+; reinitializes and redraws everything and runs the game again.
+; Re-running CIA_KEYBOARD_SETUP on every restart is harmless (it's the
+; same idempotent write each time), so there's no need for a separate,
+; trimmed entry point.
 wait_for_restart:
-        sei
-        lda #%11110111           ; select keyboard column 3 (has Y)
-        sta $dc00
-        lda $dc01
-        cli
-        and #%00000010           ; Y
-        bne wait_for_restart
+        READ_KEY %11110111, %00000010   ; Y key (matrix column 3, bit 1)
+        beq wait_for_restart
         jmp start
-
-print_msg:
-        sta ptr
-        sty ptr+1
-        ldy #$00
-print_msg_loop:
-        lda (ptr),y
-        beq print_msg_done
-        jsr CHROUT
-        iny
-        bne print_msg_loop
-print_msg_done:
-        rts
 
 ; terrain_row[col] is the character row (0-24) the ground starts at for
 ; that column. terrain_addr[col] is the corresponding starting bitmap
@@ -931,7 +814,6 @@ terrain_addr:
         .word BITMAP+H32*320+32*8, BITMAP+H33*320+33*8, BITMAP+H34*320+34*8, BITMAP+H35*320+35*8
         .word BITMAP+H36*320+36*8, BITMAP+H37*320+37*8, BITMAP+H38*320+38*8, BITMAP+H39*320+39*8
 
-        * = $0cf0
 accel_want_dir: .byte 0
 
 msg_success1:
@@ -960,7 +842,14 @@ melody_freq_lo:
 melody_freq_hi:
         .byte $0c,$10,$14,$18,$20
 
-        * = SHIP_DATA
+        ; NOTE: sprite/bitmap/screen data must avoid $1000-$1FFF (and
+        ; $9000-$9FFF) within the current VIC bank -- the VIC-II always
+        ; substitutes the character ROM for its own reads in those ranges,
+        ; regardless of what's actually stored there in RAM. .align (rather
+        ; than a fixed address) means this always lands correctly right
+        ; after the code above, whatever that code's exact size happens to
+        ; be -- see c64asm-reference.md §7 for the directive itself.
+        .align 64
 ship_data:
         ; a small rocket/lander silhouette, tapering to a point at top
         .byte %00000011,%11000000,%00000000

@@ -35,7 +35,7 @@ for the full behavior.
 | `lib/hardware.inc` | VIC-II, SID, CIA, and KERNAL register constants. No code — always safe to `.include`. |
 | `lib/text.inc` | `PRINT msg`, `CLS`, `NEWLINE`, the `print_msg` subroutine they're built on, and `str_equal` for comparing typed input against known keywords. |
 | `lib/input.inc` | `CIA_KEYBOARD_SETUP`, `read_joy2`, `READ_KEY column, mask` for joystick/keyboard-matrix input; `read_line` and `extract_word` for reading and tokenizing a typed line via `CHRIN`. |
-| `lib/graphics.inc` | `BITMAP_MODE_ON addr`, `BITMAP_MODE_OFF`, `CLEAR_BITMAP addr`, `SET_SCREEN_COLOR value`, `SPRITE_INIT data, color, x, y` for bitmap/sprite setup; `wait_frame` for raster-synced timing and `sprite0_bounce_step` for animating a sprite bouncing within a rectangular area. |
+| `lib/graphics.inc` | `BITMAP_MODE_ON addr`, `BITMAP_MODE_OFF`, `CLEAR_BITMAP addr`, `SET_SCREEN_COLOR value`, `SPRITE_INIT data, color, x, y` for bitmap/sprite setup; `wait_frame` for raster-synced timing; `sprite0_bounce_step` for animating a sprite bouncing within a rectangular area; `sprite0_explode` for a caller-colored expand-flash-hide effect (an explosion, a hit, anything that needs a sprite to visibly go away). |
 | `lib/sound.inc` | `SID_INIT`, `PLAY_SOUND freq_hi, ad, sr, waveform`, `engine_sound_on`/`engine_sound_off`. |
 
 ## Using a library file
@@ -293,6 +293,96 @@ comment on `sprite0_bounce_step` for the exact pattern, and
 `test_bounce.py` for a regression test that checks the sound fires on
 every single frame a bound is hit and never on any frame it isn't,
 across hundreds of simulated frames — not just that it fires *at all*.
+
+`pong.asm` is the clearest case yet of refactoring onto this library
+catching a real bug rather than just removing duplication. Its own,
+hand-rolled joystick reading left CIA1's port A permanently configured
+for keyboard column-select output from setup onward, so reading the
+joystick afterward silently read back stale column-select data instead
+— the player paddle drifted downward on its own with nothing held or
+the joystick unplugged, indistinguishable at a glance from "the AI is
+just very good." Switching to `input.inc`'s `read_joy2`/`READ_KEY`
+(which set CIA1's direction register to whatever they specifically
+need immediately before each read, rather than trusting a one-time
+setup to have left it right) fixed this outright. `test_pong.py`
+checks the paddle now stays perfectly still with nothing held, and
+(at the time that fix was made) separately cross-checked the
+refactored file against the pre-refactor one under *real*, deliberate
+joystick input to confirm only the bug had changed and nothing else
+about how the game played.
+
+A second, separate `pong.asm` fix followed the same pattern bounce.asm
+needed: the right paddle and the net both stopped noticeably short of
+where they should be, using only about 2/3 of the screen's width, for
+the exact same reason bounce.asm's ball did -- the true right edge
+sits at X=344, past what fits in a single byte, and both the paddle's
+X position and the ball's own X bounds were kept under 256 to avoid
+needing the X-MSB register. Unlike the ball in bounce.asm, the right
+paddle never moves in X, so its X-MSB bit only needs setting once, at
+startup, not maintained every frame the way `sprite0_bounce_step`
+maintains the ball's own bit in that file -- pong.asm's ball *does*
+move in X every frame here too (it tests against paddles, not just
+walls, so it doesn't reuse `sprite0_bounce_step` directly), and
+maintains its own X-MSB bit in `update_sprites` using the identical
+technique. `test_pong.py` checks the ball actually reaches the
+corrected `BALL_XMAX` (now past 255), that `SPRITE0_X`/the X-MSB bit
+stay in sync with the real 16-bit ball position every frame, and that
+the right paddle and net both ended up in the right place.
+
+A third fix, same axis of "stops short of the true edge" but on Y this
+time: `PADDLE_YMIN`/`PADDLE_YMAX` had originally been calibrated only
+to the *minimum* needed for ball coverage (a paddle positioned at
+`PADDLE_YMAX` could still, with `PADDLE_RANGE`'s help, reach a ball all
+the way at the bottom wall) -- a different thing from the paddle's own
+sprite being able to visually reach the true bottom of the screen.
+Recalibrating them the same way as `YMIN_WALL`/`YMAX_WALL` (the paddle
+is the same height as the ball) surfaced a genuinely new, more subtle
+bug: when a point is scored, the ball serves from roughly the missing
+paddle's own center (`paddle_y + 8`), and once `PADDLE_YMAX` and
+`YMAX_WALL` sat close together, that serve position could land at or
+past `YMAX_WALL` itself -- serving the ball already at (or past) the
+wall it's about to test against, moving toward it. `move_ball`'s own
+wall-bounce check only fires the instant `ball_y` *becomes*
+`YMAX_WALL` via increment, so a ball that starts there already, still
+moving down, sails straight past 255 and wraps. The fix clamps the
+served position to strictly less than `YMAX_WALL`, not "close enough":
+landing exactly on it has the identical bug even without any actual
+clamping being involved, since `PADDLE_YMAX + 8` can coincide with
+`YMAX_WALL` on perfectly ordinary, non-clamped serves too, depending
+on exactly where the paddle happened to be. Coverage was re-verified
+with the same kind of exhaustive Python simulation used for the
+original `PADDLE_YMAX` bug during this program's initial development,
+checking every `ball_y`/`paddle_y` combination directly rather than
+trusting the arithmetic alone.
+
+`lander.asm` is where `graphics.inc`'s `BITMAP_MODE_OFF` and
+`sound.inc`'s `engine_sound_on`/`engine_sound_off` were originally
+extracted from, word for word, so bringing it onto the library mostly
+means deleting its own copies of things and calling the shared ones
+instead — including `update_engine_sound`, which shrinks from a full
+copy of the gate-retriggering logic to a three-line dispatcher that
+just decides which of `engine_sound_on`/`engine_sound_off` to call
+each frame. The one genuinely new library addition this pass adds is
+`sprite0_explode` (see the Files table above), generalized from this
+file's own `show_explosion` — the sprite expand/color-cycle/hide
+mechanics stayed in the library, while the specific fire-colored
+sequence and the crash sound that accompanies it stayed here, passed
+in as a plain color table.
+
+Refactoring the joystick reading onto `read_joy2`/`READ_KEY` fixed the
+same class of bug found in `pong.asm`, and here the visible symptom
+was worse: with nothing held, fuel drained and the ship visibly
+drifted sideways on every single flight, silently eating into (or
+outright destroying) the fuel margin the whole game's balance was
+tuned around. `test_lander.py` checks fuel and horizontal position
+both stay perfectly constant with nothing held, while gravity (a
+vertical fall, not "input" at all) still correctly isn't affected —
+and separately drives both the success-landing and crash paths
+directly by placing the ship at a specific position/speed rather than
+trying to fly a full simulated approach, checking the exact color
+sequence `sprite0_explode` produces on a crash, that both outcomes
+correctly leave bitmap mode, and that Y correctly restarts the program
+afterward.
 
 ## Testing your own programs with mini6502.py
 
