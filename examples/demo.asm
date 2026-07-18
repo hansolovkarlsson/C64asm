@@ -3,19 +3,22 @@
 ; sound.inc all .include hardware.inc -- it should only be processed
 ; once (see c64asm-reference.md, "Includes").
 
-        .basic
-        jmp start   ; .basic's SYS stub runs whatever comes immediately
-                      ; after it -- and the .include lines below emit real
-                      ; subroutine code (print_msg, read_joy2, ...), not
-                      ; just constants/macros. Without this jmp, SYS would
-                      ; land inside the FIRST included subroutine instead
-                      ; of at the real entry point below, running it with
-                      ; whatever garbage happens to be in A/Y at power-on.
-                      ; This exact mistake is why an earlier build of this
-                      ; demo printed garbage and returned immediately
-                      ; instead of running at all -- see lib-reference.md's
-                      ; note on this for the general pattern to follow in
-                      ; your own programs.
+        .basic start   ; auto-emits `jmp start` right after the loader
+                          ; stub. This matters here because the
+                          ; .include lines below emit real subroutine
+                          ; code (print_msg, read_joy2, ...), not just
+                          ; constants/macros -- without a jump straight
+                          ; to start, SYS would land inside the FIRST
+                          ; included subroutine instead, running it with
+                          ; whatever garbage happens to be in A/Y at
+                          ; power-on. This exact mistake, back when it
+                          ; had to be written by hand as a separate `jmp
+                          ; start` line that was easy to forget, is why
+                          ; an earlier build of this demo printed
+                          ; garbage and returned immediately instead of
+                          ; running at all -- seeing it happen twice is
+                          ; what prompted adding the `start` operand to
+                          ; `.basic` itself.
 
 str_ptr = $fb           ; text.inc's required zero-page scratch
 cmp_ptr = $02            ; also required by text.inc -- its str_equal

@@ -24,11 +24,10 @@
 ; printed message -- stays here, since none of that is reusable across
 ; other programs the way the underlying string/input primitives are.
 
-        .basic
-        jmp start   ; see lib-reference.md's note on why this is needed
-                      ; whenever a library that emits real code (as
-                      ; text.inc/input.inc both do) is .include'd
-                      ; between .basic and the real entry point
+        .basic start   ; auto-emits `jmp start` right after the loader
+                          ; stub -- needed because the .include lines
+                          ; below (text.inc/input.inc) emit real code,
+                          ; which would otherwise run first
 
 ; Zero-page pointers. Each pair is shared by two routines that are never
 ; active at the same time (e.g. str_ptr is only needed once tokenizing,

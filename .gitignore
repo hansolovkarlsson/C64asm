@@ -5,5 +5,7 @@ mini6502/
 tests/
 
 vice.log
+todo.md
+notes.txt
 
 src/*.o

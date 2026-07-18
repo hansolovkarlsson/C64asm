@@ -1112,6 +1112,25 @@ class Assembler:
                 pc = code_start
                 if label:
                     self._define_symbol(label, pc, line_no, pass_no, li, raw=raw)
+                if operand:
+                    # An explicit start label: emit `jmp <label>` right
+                    # after the stub, so SYS always lands at the real
+                    # entry point even if code-emitting .include lines
+                    # (a library's own routines, say) sit between here
+                    # and the label -- forgetting this by hand was a
+                    # recurring, hard-to-spot bug (SYS silently landing
+                    # inside the first included routine instead).
+                    val, undef = eval_expr(operand, self.symbols, pc, line_no)
+                    if undef and pass_no == 2:
+                        raise AsmError(
+                            f"Undefined symbol in .basic start operand '{operand}'",
+                            line_no, raw)
+                    if pass_no == 2:
+                        output.append(0x4C)
+                        output.append(val & 0xFF)
+                        output.append((val >> 8) & 0xFF)
+                        self.listing.append((pc, raw, output[-3:]))
+                    pc += 3
                 continue
 
             if op == '.org':

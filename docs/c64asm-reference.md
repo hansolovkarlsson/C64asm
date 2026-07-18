@@ -202,7 +202,7 @@ uppercase regardless of the case used in the source.
 | `.text "..."` | `.asc` | comma-separated `"strings"` (or bare text) | PETSCII-encode and emit text (§6). |
 | `.fill count, value` | `.ds`, `.res` | count, optional fill byte (default 0) | Emit `count` bytes of `value`. |
 | `.align n` | — | one expression | Pad with zero bytes, if necessary, until the program counter is a multiple of `n`. A no-op if it already is. `n` must evaluate to a positive value. A label on the same line (`sprite_data: .align 64`) is bound to the *aligned* address, matching how `.org`'s same-line label works. |
-| `.basic` | — | none | Emit a tokenized BASIC line `10 SYS <addr>` at `$0801`, where `<addr>` is automatically computed to point at the very next byte of assembled code — i.e. wherever the code following `.basic` ends up. Typing `LOAD"...",8,1` then `RUN` starts the machine code directly. Must appear before any code you want it to `SYS` into. |
+| `.basic [start]` | — | optional label/expression | Emit a tokenized BASIC line `10 SYS <addr>` at `$0801`, where `<addr>` is automatically computed to point at the very next byte of assembled code — i.e. wherever the code following `.basic` ends up. Typing `LOAD"...",8,1` then `RUN` starts the machine code directly. Must appear before any code you want it to `SYS` into. With an operand, also emits `jmp start` immediately after the stub — see the example and gotcha below. |
 | `label = expr` | `.equ` | one expression | Bind `label` to the value of `expr` (not to the current PC). See §2. |
 
 `.byte`/`.word`/`.text`/`.fill` all accept comma-separated argument lists,
@@ -252,6 +252,47 @@ start:
 assembles to a file whose first bytes are a valid `10 SYS 2061` BASIC
 line (or whatever address the code actually starts at — the assembler
 computes this for you), immediately followed by the `start:` code.
+
+### `.basic start`: the entry-point gotcha, and its fix
+
+Without an operand, `.basic`'s `SYS` stub jumps to whatever comes
+**immediately after** the `.basic` line — not to a label named `start`
+or anything else specific. That's harmless above, since `start:` really
+is the next thing in the file. It stops being harmless the moment
+something that emits real code — most commonly an `.include`d library
+file — sits between `.basic` and your actual entry point:
+
+```
+        .basic
+        .include "lib/text.inc"   ; emits print_msg's real code
+start:
+        ; SYS lands inside print_msg above, not here
+```
+
+`SYS` runs whatever that included code happens to be first, with
+whatever garbage is in the registers at power-on, instead of your
+program. This is a real bug this project's own demos hit more than
+once — nothing about it looks wrong from the source, since `start:` is
+still right there in the file; it's just not where execution actually
+begins.
+
+Giving `.basic` your entry point's label fixes it by construction:
+
+```
+        .basic start
+        .include "lib/text.inc"
+start:
+        ; SYS now lands here correctly, no matter what's above
+```
+
+`.basic start` emits `jmp start` (a plain 3-byte absolute jump)
+immediately after the loader stub, so it no longer matters what ends up
+between `.basic` and `start:`. The operand can be any label or
+expression, evaluated the same way any instruction operand is —
+including a forward reference to a label defined later in the file, as
+in the example above. There's no real downside to using this form even
+in a program with nothing between `.basic` and `start:` yet, since it's
+just one harmless extra jump; it's the recommended default.
 
 ---
 
@@ -790,6 +831,7 @@ Common errors:
 | `'.elif' is not allowed after '.ifdef'/'.ifndef'` | `.elif` only works in an `.if` chain; use `.else` after `.ifdef`/`.ifndef` instead. |
 | `unclosed '.if'/'.ifdef'/'.ifndef' at end of file` | A conditional block's `.endif` is missing; the message names the line the block started on. |
 | `conditional nesting too deep (max 16)` | More than 16 levels of nested `.if`/`.ifdef`/`.ifndef`. |
+| `Undefined symbol in .basic start operand '...'` | `.basic`'s optional start-label operand (§7) referenced a symbol never defined anywhere in the file. |
 
 ---
 

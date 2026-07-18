@@ -178,6 +178,28 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
             origin = 0x0801;
             pc = code_start;
             if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw, li);
+            if (L->operand[0] != '\0') {
+                /* An explicit start label: emit `jmp <label>` right
+                 * after the stub, so SYS always lands at the real
+                 * entry point even if code-emitting .include lines (a
+                 * library's own routines, say) sit between here and
+                 * the label -- forgetting this by hand was a
+                 * recurring, hard-to-spot bug (SYS silently landing
+                 * inside the first included routine instead). */
+                int undef = 0;
+                long target = eval_expr(L->operand, pc, L->line_no, &undef);
+                if (undef && pass_no == 2)
+                    asm_error(L->line_no, L->raw, "Undefined symbol in .basic start operand '%s'", L->operand);
+                if (pass_no == 2) {
+                    unsigned char jmp_bytes[3];
+                    jmp_bytes[0] = 0x4C;
+                    jmp_bytes[1] = (unsigned char)(target & 0xFF);
+                    jmp_bytes[2] = (unsigned char)((target >> 8) & 0xFF);
+                    bb_push_n(output, jmp_bytes, 3);
+                    listing_add(pc, L->raw, jmp_bytes, 3);
+                }
+                pc += 3;
+            }
             continue;
         }
 

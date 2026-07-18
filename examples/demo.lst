@@ -1,6 +1,6 @@
 ; c64asm listing  (origin $0801, 574 bytes)
 
-080D  4C DE 08          jmp start   ; .basic's SYS stub runs whatever comes immediately
+080D  4C DE 08          .basic start   ; auto-emits `jmp start` right after the loader
 0810  85 FB             sta str_ptr
 0812  84 FC             sty str_ptr+1
 0814  A0 00             ldy #$00
