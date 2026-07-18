@@ -3,13 +3,22 @@
 ; Turns on standard (hi-res) bitmap mode, fills it with a solid color,
 ; and animates one sprite bouncing off all four edges of the visible
 ; screen, synced to the display's raster for smooth, consistent motion.
+;
+; Uses lib/graphics.inc (BITMAP_MODE_ON, CLEAR_BITMAP, SET_SCREEN_COLOR,
+; SPRITE_INIT, wait_frame, sprite0_bounce_step) rather than its own
+; copies of these -- they were originally written here (and, for
+; wait_frame, independently duplicated again in pong.asm and
+; lander.asm), then generalized into the library. What's specific to
+; *this* particular demo -- the actual sprite image, and the exact
+; bounds it bounces within -- stays here.
 
-BITMAP      = $2000        ; 8K bitmap data, 8-aligned within the VIC bank
-SCREEN      = $0400        ; screen/color-nibble area (bitmap mode) + sprite pointers
-SPRITE_DATA = $0900        ; 64-byte aligned; see note below on why $1000 won't work
-SPRITE_PTR0 = SCREEN + $3f8   ; = $07F8, sprite 0's pointer slot
+        .basic start   ; needed once graphics.inc's own code (wait_frame,
+                          ; sprite0_bounce_step) sits between .basic and
+                          ; start: -- see c64asm-reference.md §7
 
-ptr  = $fb                 ; temporary 16-bit pointer, used only during setup
+SPRITE_DATA = $0900   ; 64-byte aligned; see note below on why $1000 won't work
+
+gfx_ptr = $fb               ; graphics.inc's required zero-page scratch
 xpos = $02                 ; sprite X position (kept to a single byte -- see note)
 ypos = $03                 ; sprite Y position
 xdir = $04                 ; 1 = moving right, 0 = moving left
@@ -23,64 +32,18 @@ XMAX = 250
 YMIN = 50
 YMAX = 220
 
-        .basic
+        .include "lib/graphics.inc"
 
 start:
-        ; --- switch on standard bitmap mode ---
-        lda $d011
-        ora #%00100000        ; BMM
-        sta $d011
-        lda $d018
-        and #%11110000        ; keep the screen-pointer bits (still $0400)
-        ora #%00001000        ; bitmap pointer bit 3 set -> bitmap at $2000
-        sta $d018
-
-        ; --- clear the 8K bitmap (32 pages of 256 bytes) to all-background ---
-        lda #<BITMAP
-        sta ptr
-        lda #>BITMAP
-        sta ptr+1
-        ldx #32
-        lda #$00
-clear_bitmap:
-        ldy #$00
-clear_bitmap_byte:
-        sta (ptr),y
-        iny
-        bne clear_bitmap_byte
-        inc ptr+1
-        dex
-        bne clear_bitmap
-
-        ; --- set the screen/color area: high nibble = fg, low nibble = bg ---
-        ; (foreground is unused since every bitmap byte is 0, so only the
-        ; low nibble -- the background color -- actually shows on screen)
-        lda #<SCREEN
-        sta ptr
-        lda #>SCREEN
-        sta ptr+1
-        ldx #4
-        lda #%00010110       ; fg = white(1), bg = blue(6)
-fill_colors:
-        ldy #$00
-fill_colors_byte:
-        sta (ptr),y
-        iny
-        bne fill_colors_byte
-        inc ptr+1
-        dex
-        bne fill_colors
+        BITMAP_MODE_ON BITMAP
+        CLEAR_BITMAP BITMAP
+        SET_SCREEN_COLOR %00010110   ; fg = white(1), bg = blue(6) -- fg is
+                                        ; unused since every bitmap byte is
+                                        ; 0, so only the low nibble (bg)
+                                        ; actually shows on screen
 
         lda #6               ; border matches the bitmap's background color
-        sta $d020
-
-        ; --- set up the sprite ---
-        lda #(SPRITE_DATA / 64)
-        sta SPRITE_PTR0
-        lda #1               ; sprite color = white
-        sta $d027
-        lda #%00000001
-        sta $d015            ; enable sprite 0 (only)
+        sta VIC_BORDER
 
         lda #XMIN
         sta xpos
@@ -90,61 +53,12 @@ fill_colors_byte:
         sta xdir             ; start out moving right...
         sta ydir             ; ...and down
 
+        SPRITE_INIT SPRITE_DATA, 1, XMIN, YMIN   ; color = white
+
 main_loop:
         jsr wait_frame
-        jsr move_sprite
+        jsr sprite0_bounce_step
         jmp main_loop
-
-; Busy-waits for a raster line near the bottom of the visible display --
-; a simple polling way to sync the main loop to the screen's refresh rate
-; (roughly 50/60 Hz) so the sprite moves at a smooth, consistent speed
-; regardless of how many cycles the rest of the loop happens to take.
-wait_frame:
-        lda $d012
-        cmp #$fb
-        bne wait_frame
-        rts
-
-move_sprite:
-        lda xdir
-        beq move_left
-        inc xpos
-        lda xpos
-        cmp #XMAX
-        bne x_done
-        lda #0
-        sta xdir             ; hit the right edge -- reverse
-        jmp x_done
-move_left:
-        dec xpos
-        lda xpos
-        cmp #XMIN
-        bne x_done
-        lda #1
-        sta xdir             ; hit the left edge -- reverse
-x_done:
-        lda ydir
-        beq move_up
-        inc ypos
-        lda ypos
-        cmp #YMAX
-        bne y_done
-        lda #0
-        sta ydir             ; hit the bottom edge -- reverse
-        jmp y_done
-move_up:
-        dec ypos
-        lda ypos
-        cmp #YMIN
-        bne y_done
-        lda #1
-        sta ydir             ; hit the top edge -- reverse
-y_done:
-        lda xpos
-        sta $d000
-        lda ypos
-        sta $d001
-        rts
 
         ; NOTE: sprite/bitmap/screen data must avoid $1000-$1FFF (and
         ; $9000-$9FFF) within the current VIC bank -- the VIC-II always

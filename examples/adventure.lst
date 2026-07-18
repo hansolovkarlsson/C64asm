@@ -454,6 +454,7 @@ Symbol table:
   VIC_CTRL1            = $D011
   VIC_CTRL2            = $D016
   VIC_MEMPTRS          = $D018
+  VIC_RASTER           = $D012
   VOICE1_AD            = $D405
   VOICE1_CTRL          = $D404
   VOICE1_FREQ_HI       = $D401

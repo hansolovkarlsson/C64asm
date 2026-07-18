@@ -39,6 +39,9 @@ BITMAP = $2000            ; a common, VIC-bank-aligned bitmap address this
 ; --- VIC-II (video) ---
 VIC_CTRL1   = $d011     ; control register 1: bit 5 = BMM (bitmap mode),
                           ; bits 0-2 = vertical fine scroll (leave as-is)
+VIC_RASTER  = $d012     ; current raster line (bits 0-7; bit 8 lives in
+                          ; VIC_CTRL1, not broken out here since none of
+                          ; this project's own code needs lines 256-311)
 VIC_CTRL2   = $d016     ; control register 2: bit 4 = MCM (multicolor mode)
 VIC_MEMPTRS = $d018     ; screen/character (or bitmap) pointer register
 VIC_BORDER  = $d020     ; border color

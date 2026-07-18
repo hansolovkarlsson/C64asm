@@ -35,7 +35,7 @@ for the full behavior.
 | `lib/hardware.inc` | VIC-II, SID, CIA, and KERNAL register constants. No code — always safe to `.include`. |
 | `lib/text.inc` | `PRINT msg`, `CLS`, `NEWLINE`, the `print_msg` subroutine they're built on, and `str_equal` for comparing typed input against known keywords. |
 | `lib/input.inc` | `CIA_KEYBOARD_SETUP`, `read_joy2`, `READ_KEY column, mask` for joystick/keyboard-matrix input; `read_line` and `extract_word` for reading and tokenizing a typed line via `CHRIN`. |
-| `lib/graphics.inc` | `BITMAP_MODE_ON addr`, `BITMAP_MODE_OFF`, `CLEAR_BITMAP addr`, `SET_SCREEN_COLOR value`, `SPRITE_INIT data, color, x, y`. |
+| `lib/graphics.inc` | `BITMAP_MODE_ON addr`, `BITMAP_MODE_OFF`, `CLEAR_BITMAP addr`, `SET_SCREEN_COLOR value`, `SPRITE_INIT data, color, x, y` for bitmap/sprite setup; `wait_frame` for raster-synced timing and `sprite0_bounce_step` for animating a sprite bouncing within a rectangular area. |
 | `lib/sound.inc` | `SID_INIT`, `PLAY_SOUND freq_hi, ad, sr, waveform`, `engine_sound_on`/`engine_sound_off`. |
 
 ## Using a library file
@@ -66,7 +66,12 @@ ever `jsr`s to it, so assembly fails on an undefined symbol otherwise.
   (used by `extract_word`) — even if your program only ever calls
   `read_joy2`/`READ_KEY`.
 - **`graphics.inc`** needs one 2-byte zero-page location, `gfx_ptr`
-  (used by `CLEAR_BITMAP`/`SET_SCREEN_COLOR`).
+  (used by `CLEAR_BITMAP`/`SET_SCREEN_COLOR`), plus eight more,
+  unrelated, used by `sprite0_bounce_step`: `xpos`, `ypos`, `xdir`,
+  `ydir` (one byte each, not necessarily zero page — see the file's own
+  header comment) and `XMIN`, `XMAX`, `YMIN`, `YMAX` (compile-time
+  constants) — all nine, even if your program only ever calls
+  `BITMAP_MODE_ON`/`BITMAP_MODE_OFF`.
 - **`sound.inc`** needs a 1-byte flag, `engine_playing` (used by
   `engine_sound_on`/`engine_sound_off`; anywhere in RAM, not
   necessarily zero page).
@@ -81,6 +86,14 @@ word_dest_ptr = $fb    ; safe to alias with str_ptr -- see text.inc's
                           ; header comment for why
 engine_playing = $09
 gfx_ptr = $fd
+xpos = $06              ; sprite0_bounce_step's state -- see
+ypos = $07                ; graphics.inc's header comment for why
+xdir = $08                 ; these don't need to be zero page
+ydir = $0a
+XMIN = 24                ; sprite0_bounce_step's bounds -- any
+XMAX = 250                 ; values work if you're not actually
+YMIN = 50                    ; using it yet, but see bounce.asm
+YMAX = 220                     ; for a real, worked example
         .include "lib/text.inc"
         .include "lib/input.inc"
         .include "lib/sound.inc"

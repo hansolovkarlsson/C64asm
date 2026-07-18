@@ -30,6 +30,16 @@ word_dest_ptr = $fb      ; input.inc's required zero-page scratch (its
                             ; called here); safe to alias with str_ptr
 engine_playing = $09    ; sound.inc's required engine-state byte
 gfx_ptr = $fd            ; graphics.inc's required zero-page scratch
+xpos = $06               ; also required by graphics.inc -- its
+ypos = $07                ; sprite0_bounce_step code is assembled
+xdir = $08                 ; unconditionally once graphics.inc is
+ydir = $0a                  ; included, even though this demo never
+                               ; actually calls it (need not be zero
+                               ; page at all -- see graphics.inc)
+XMIN = 24                ; likewise unused compile-time constants
+XMAX = 250                 ; sprite0_bounce_step's code references;
+YMIN = 50                    ; any values satisfy the assembler here
+YMAX = 220
 
         .include "lib/text.inc"
         .include "lib/input.inc"

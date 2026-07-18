@@ -1,4 +1,6 @@
-; graphics.inc - standard bitmap mode and sprite setup.
+; graphics.inc - standard bitmap mode, sprite setup, and the raster-sync/
+; bounce-movement routines this project's own bitmap/sprite demos each
+; ended up needing.
 ;
 ; Provides:
 ;   BITMAP_MODE_ON bitmap_addr    macro
@@ -6,6 +8,8 @@
 ;   CLEAR_BITMAP bitmap_addr       macro
 ;   SET_SCREEN_COLOR value         macro
 ;   SPRITE_INIT data, color, x, y  macro
+;   wait_frame                     subroutine
+;   sprite0_bounce_step            subroutine
 ;
 ; bitmap_addr must be one of the 8 addresses the VIC-II can use for
 ; bitmap data within its current 16K bank: a multiple of $2000 relative
@@ -23,6 +27,22 @@
 ; gfx_ptr, defined by the including program (this library doesn't claim
 ; a zero-page address of its own -- see text.inc's header comment for
 ; the same reasoning applied to str_ptr).
+;
+; sprite0_bounce_step needs eight more, unrelated to gfx_ptr: xpos,
+; ypos, xdir, ydir (one byte each -- see its own comment below for
+; exactly what they're for and why, unlike gfx_ptr, they don't have to
+; be zero page at all) and XMIN, XMAX, YMIN, YMAX (compile-time
+; constants, the bounds to bounce within).
+;
+; gfx_ptr and all eight of sprite0_bounce_step's symbols are required
+; as soon as you .include this file, EVEN IF your program never calls
+; CLEAR_BITMAP/SET_SCREEN_COLOR or sprite0_bounce_step: like every file
+; in this library, .include splices in graphics.inc's code
+; unconditionally, and that code references these symbols regardless
+; of whether anything ever jsr's to it or expands the relevant macro.
+; A program that only wants BITMAP_MODE_ON/BITMAP_MODE_OFF still needs
+; all nine defined, or assembly fails on an undefined symbol inside
+; code it never actually uses.
 ;
 ; SPRITE_INIT's `data` argument must itself be 64-byte aligned (see
 ; this assembler's .align directive) and, like any sprite data on this
@@ -150,3 +170,88 @@
         lda #%00000001
         sta SPRITE_ENABLE
 .endmacro
+
+; wait_frame -- busy-waits for a raster line near the bottom of the
+; visible display, then returns. A simple polling way to sync a main
+; loop to the screen's refresh rate (roughly 50/60 Hz) so animation
+; moves at a smooth, consistent speed regardless of how many cycles the
+; rest of the loop happens to take -- call this once per frame, first
+; thing in the loop, before moving anything. Proven identically across
+; three of this project's own demos (bounce.asm, pong.asm, lander.asm)
+; before being pulled out here.
+wait_frame:
+        lda VIC_RASTER
+        cmp #$fb
+        bne wait_frame
+        rts
+
+; sprite0_bounce_step -- advances sprite 0 by one pixel on each axis,
+; reversing direction whenever it reaches a caller-defined bound, and
+; writes the result to SPRITE0_X/SPRITE0_Y. Call this once per frame
+; (typically right after wait_frame) to animate a sprite bouncing
+; around inside a rectangular area, the way bounce.asm's ball does.
+;
+; Needs six things defined by the including program, none of which
+; this library claims on your behalf:
+;   xpos, ypos   current position, one byte each. Unlike gfx_ptr and
+;                similar pointers elsewhere in this library, these
+;                don't need to be zero page -- they're read and written
+;                with plain (non-indirect) addressing here, so any RAM
+;                location works. Zero page is still a reasonable
+;                choice, purely because it makes the including
+;                program's own code a byte shorter wherever it touches
+;                them too, not because this routine requires it.
+;   xdir, ydir   direction flags, one byte each, same non-requirement
+;                as above: 1 means increasing (right/down), 0 means
+;                decreasing (left/up).
+;   XMIN, XMAX, YMIN, YMAX   compile-time constants (`=`), the
+;                rectangular bounds to bounce within. XMAX/YMAX should
+;                leave room for the sprite's own width/height so it
+;                visually bounces off the edge rather than running
+;                partway past it -- see bounce.asm for a worked example
+;                sized for its particular sprite.
+;
+; Only sets SPRITE0_X, so X stays within a single byte (0-255) -- see
+; c64-memory-reference.md for extending this to the full 320-pixel
+; width via the X-MSB register ($d010) if you need the sprite to reach
+; the right portion of the screen this can't.
+sprite0_bounce_step:
+        lda xdir
+        beq @move_left
+        inc xpos
+        lda xpos
+        cmp #XMAX
+        bne @x_done
+        lda #0
+        sta xdir             ; hit the right edge -- reverse
+        jmp @x_done
+@move_left:
+        dec xpos
+        lda xpos
+        cmp #XMIN
+        bne @x_done
+        lda #1
+        sta xdir             ; hit the left edge -- reverse
+@x_done:
+        lda ydir
+        beq @move_up
+        inc ypos
+        lda ypos
+        cmp #YMAX
+        bne @y_done
+        lda #0
+        sta ydir             ; hit the bottom edge -- reverse
+        jmp @y_done
+@move_up:
+        dec ypos
+        lda ypos
+        cmp #YMIN
+        bne @y_done
+        lda #1
+        sta ydir             ; hit the top edge -- reverse
+@y_done:
+        lda xpos
+        sta SPRITE0_X
+        lda ypos
+        sta SPRITE0_Y
+        rts
