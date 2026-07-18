@@ -1,5 +1,26 @@
 /*
- * error.c - see error.h for the design rationale.
+ * error.c - see error.h for the public API. This file has two halves:
+ *
+ *   1. asm_error() -- unchanged from before multi-error reporting
+ *      existed: prints one message and exits immediately. Still used
+ *      for genuinely fatal, whole-file-structural problems (a missing
+ *      file, a circular .include, a broken macro or conditional-
+ *      assembly block).
+ *
+ *   2. The recoverable multi-error mechanism -- asm_error_recoverable()
+ *      records a message (using the exact same formatting asm_error()
+ *      has always produced) and returns normally instead of exiting.
+ *      Each call site supplies its own safe fallback value right after
+ *      the call, exactly as it already had to decide what to return in
+ *      the success case. This is what lets one assembly run surface
+ *      several independent mistakes instead of stopping at the first
+ *      one. It's an intentional trade-off: a later error's line number
+ *      and message are still exactly correct, but if an earlier error
+ *      meant a value or an addressing-mode decision came out different
+ *      from what the source actually implies, a handful of further
+ *      messages may be downstream noise from that first real mistake
+ *      rather than independent problems of their own -- fix the first
+ *      one and reassemble if the rest look strange.
  */
 
 #include <stdio.h>
@@ -25,28 +46,20 @@ void asm_error_note_include_used(void) {
     g_multi_file_mode = 1;
 }
 
-void asm_error(int line_no, const char *raw, const char *fmt, ...) {
-    /* Render the caller's printf-style message into a fixed buffer
-     * first, so the "(line N: ...)" suffix can be appended afterward
-     * regardless of what the caller passed in. va_list/va_start/va_end
-     * are the standard C mechanism for a function that -- like
-     * printf itself -- accepts a variable number of arguments. */
-    char msg[1024];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(msg, sizeof(msg), fmt, ap);
-    va_end(ap);
-
+/* Builds the exact "Assembly error: ..." text into a caller-supplied
+ * buffer instead of straight to stderr -- shared by the fatal path
+ * (asm_error) and the recoverable path (asm_error_recoverable) so the
+ * two produce byte-for-byte identical formatting for the same inputs. */
+static void format_error_message(char *buf, size_t bufsz, int line_no,
+                                  const char *raw, const char *msg) {
     if (line_no > 0) {
+        char head[MAX_LINE_LEN + 256];
         if (g_multi_file_mode && g_current_error_file[0])
-            fprintf(stderr, "Assembly error: %s (%s, line %d", msg, g_current_error_file, line_no);
+            snprintf(head, sizeof(head), "Assembly error: %s (%s, line %d",
+                     msg, g_current_error_file, line_no);
         else
-            fprintf(stderr, "Assembly error: %s (line %d", msg, line_no);
+            snprintf(head, sizeof(head), "Assembly error: %s (line %d", msg, line_no);
         if (raw && raw[0]) {
-            /* Show the offending line, trimmed of the trailing newline
-             * fgets() leaves on it and any surrounding whitespace, so
-             * the error reads cleanly regardless of how the user
-             * indented their source. */
             char trimmed[MAX_LINE_LEN];
             strncpy(trimmed, raw, sizeof(trimmed) - 1);
             trimmed[sizeof(trimmed) - 1] = '\0';
@@ -56,11 +69,76 @@ void asm_error(int line_no, const char *raw, const char *fmt, ...) {
                 trimmed[--n] = '\0';
             size_t start = 0;
             while (trimmed[start] == ' ' || trimmed[start] == '\t') start++;
-            fprintf(stderr, ": %s", trimmed + start);
+            snprintf(buf, bufsz, "%s: %s)", head, trimmed + start);
+        } else {
+            snprintf(buf, bufsz, "%s)", head);
         }
-        fprintf(stderr, ")\n");
     } else {
-        fprintf(stderr, "Assembly error: %s\n", msg);
+        snprintf(buf, bufsz, "Assembly error: %s", msg);
     }
+}
+
+void asm_error(int line_no, const char *raw, const char *fmt, ...) {
+    char msg[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    char full[MAX_LINE_LEN + 1280];
+    format_error_message(full, sizeof(full), line_no, raw, msg);
+    fprintf(stderr, "%s\n", full);
     exit(1);
+}
+
+#define MAX_COLLECTED_ERRORS 20
+static char *g_collected_errors[MAX_COLLECTED_ERRORS];
+static int g_collected_count = 0;
+static long g_total_error_count = 0;
+
+int any_errors_recorded(void) { return g_total_error_count > 0; }
+
+/* Must be called once, before the source file is loaded -- not just
+ * before pass 1. Loading itself (line_parser.c's split_line(), via
+ * whatever drives it) can record recoverable errors of its own (e.g.
+ * "Unknown mnemonic or directive"), and those need to survive into the
+ * pass-1/pass-2 checks; resetting after loading would silently wipe
+ * them out. */
+void reset_collected_errors(void) {
+    for (int i = 0; i < g_collected_count; i++) { free(g_collected_errors[i]); g_collected_errors[i] = NULL; }
+    g_collected_count = 0;
+    g_total_error_count = 0;
+}
+
+void print_all_collected_errors_and_exit(void) {
+    for (int i = 0; i < g_collected_count; i++)
+        fprintf(stderr, "%s\n", g_collected_errors[i]);
+    long remaining = g_total_error_count - g_collected_count;
+    if (remaining > 0) {
+        fprintf(stderr, "... and %ld more error%s (stopping after %d)\n",
+                remaining, remaining == 1 ? "" : "s", MAX_COLLECTED_ERRORS);
+    }
+    fprintf(stderr, "%ld error%s.\n", g_total_error_count, g_total_error_count == 1 ? "" : "s");
+    exit(1);
+}
+
+void asm_error_recoverable(int line_no, const char *raw, const char *fmt, ...) {
+    char msg[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    g_total_error_count++;
+    if (g_collected_count < MAX_COLLECTED_ERRORS) {
+        size_t bufsz = MAX_LINE_LEN + 1280;
+        char *buf = malloc(bufsz);
+        if (!buf) { fprintf(stderr, "Out of memory\n"); exit(1); }
+        format_error_message(buf, bufsz, line_no, raw, msg);
+        g_collected_errors[g_collected_count++] = buf;
+        return;
+    }
+    /* At least the (MAX_COLLECTED_ERRORS+1)th error -- stop right here
+     * rather than continuing to burn through what could be an enormous,
+     * mostly-noise number of further messages on a badly-broken or
+     * wrong-language source file. */
+    print_all_collected_errors_and_exit();
 }

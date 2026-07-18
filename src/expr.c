@@ -39,6 +39,10 @@ typedef struct {
     long pc;
     int line_no;
     int undefined;
+    int tokenize_failed;   /* set only by tokenize_expr()'s "bad character"
+                               path; distinct from `undefined` (also set
+                               legitimately for an undefined SYMBOL found
+                               during parsing) -- see eval_expr() below */
     char err_text[MAX_LINE_LEN];
 } EParser;
 
@@ -71,14 +75,20 @@ static void tokenize_expr(const char *text, EParser *p) {
         if (c == '$') {
             size_t j = i + 1;
             while (j < len && isxdigit((unsigned char)s[j])) j++;
-            if (j == i + 1) asm_error(p->line_no, text, "Bad hex literal in expression '%s'", text);
+            if (j == i + 1)
+                asm_error_recoverable(p->line_no, text, "Bad hex literal in expression '%s'", text);
+                /* fallback: j stays i+1, so the token text is just "$" --
+                   parse_atom's TK_HEX case strtol()s the empty digit
+                   string after it to 0, a harmless placeholder value */
             size_t n = j - i; if (n >= MAX_IDENT) n = MAX_IDENT - 1;
             memcpy(t.text, s + i, n); t.text[n] = '\0';
             t.kind = TK_HEX; i = j;
         } else if (c == '%') {
             size_t j = i + 1;
             while (j < len && (s[j] == '0' || s[j] == '1')) j++;
-            if (j == i + 1) asm_error(p->line_no, text, "Bad binary literal in expression '%s'", text);
+            if (j == i + 1)
+                asm_error_recoverable(p->line_no, text, "Bad binary literal in expression '%s'", text);
+                /* same fallback idea as the hex case above */
             size_t n = j - i; if (n >= MAX_IDENT) n = MAX_IDENT - 1;
             memcpy(t.text, s + i, n); t.text[n] = '\0';
             t.kind = TK_BIN; i = j;
@@ -90,18 +100,27 @@ static void tokenize_expr(const char *text, EParser *p) {
             t.kind = TK_DEC; i = j;
         } else if (c == '\'') {
             size_t j = i + 1;
-            char inner = '\0';   /* asm_error() below never actually returns
-                                     (it always exit()s), but the compiler
-                                     has no way to know that -- initializing
-                                     this avoids a spurious "used
-                                     uninitialized" warning on the
-                                     technically-unreachable fallthrough path */
+            char inner = '\0';
+            int char_lit_error = 0;
             if (j < len && s[j] == '\\' && j + 1 < len) { inner = s[j+1]; j += 2; }
             else if (j < len) { inner = s[j]; j += 1; }
-            else asm_error(p->line_no, text, "Bad character literal in expression '%s'", text);
-            if (j >= len || s[j] != '\'')
-                asm_error(p->line_no, text, "Unterminated character literal in expression '%s'", text);
-            j++;
+            else {
+                asm_error_recoverable(p->line_no, text, "Bad character literal in expression '%s'", text);
+                char_lit_error = 1;   /* nothing left to look for a closing
+                                          quote in -- skip that check below
+                                          so this single malformed literal
+                                          doesn't also report as unterminated */
+            }
+            if (!char_lit_error) {
+                if (j >= len || s[j] != '\'')
+                    asm_error_recoverable(p->line_no, text, "Unterminated character literal in expression '%s'", text);
+                    /* fallback: don't consume whatever character sits where
+                       the closing quote should have been -- leave it for
+                       the next tokenize_expr() iteration to reprocess
+                       normally, rather than silently swallowing it */
+                else
+                    j++;
+            }
             t.text[0] = inner; t.text[1] = '\0';
             t.kind = TK_CHAR; i = j;
         } else if (is_ident_start(c)) {
@@ -114,11 +133,17 @@ static void tokenize_expr(const char *text, EParser *p) {
                    c == '<' || c == '>' || c == '*') {
             t.kind = TK_OP; t.text[0] = c; t.text[1] = '\0'; i++;
         } else {
-            asm_error(p->line_no, text, "Bad character '%c' in expression '%s'", c, text);
+            asm_error_recoverable(p->line_no, text, "Bad character '%c' in expression '%s'", c, text);
+            /* give up tokenizing the rest of this expression rather than
+               risk tokenizing more of a string already known malformed */
+            p->tokenize_failed = 1;
+            p->undefined = 1;
             return;
         }
         if (p->ntoks >= MAX_TOKENS)
             asm_error(p->line_no, text, "Expression too complex '%s'", text);
+            /* stays fatal: a fixed-size token buffer limit, not a
+               per-expression mistake in the source */
         p->toks[p->ntoks++] = t;
     }
 }
@@ -181,15 +206,16 @@ static long parse_atom(EParser *p) {
                 long v = parse_expr(p);
                 Token *close = ep_next(p);
                 if (!(close->kind == TK_OP && close->text[0] == ')'))
-                    asm_error(p->line_no, p->err_text, "Missing ')' in expression '%s'", p->err_text);
-                return v;
+                    asm_error_recoverable(p->line_no, p->err_text, "Missing ')' in expression '%s'", p->err_text);
+                return v;   /* fallback: whatever was successfully parsed
+                               inside the parens */
             }
             /* fallthrough to error */
             break;
         default: break;
     }
-    asm_error(p->line_no, p->err_text, "Cannot parse expression '%s'", p->err_text);
-    return 0;
+    asm_error_recoverable(p->line_no, p->err_text, "Cannot parse expression '%s'", p->err_text);
+    return 0;   /* fallback: smallest-footprint placeholder value */
 }
 
 /*
@@ -257,16 +283,30 @@ long eval_expr(const char *text, long pc, int line_no, int *undefined_out) {
     p.pc = pc;
     p.line_no = line_no;
     strncpy(p.err_text, text, sizeof(p.err_text) - 1);
-    if (text[0] == '\0') asm_error(line_no, text, "Empty expression");
+    if (text[0] == '\0') {
+        asm_error_recoverable(line_no, text, "Empty expression");
+        if (undefined_out) *undefined_out = 1;
+        return 0;
+    }
     tokenize_expr(text, &p);
+    if (p.tokenize_failed) {
+        /* tokenize_expr() already recorded its own error and gave up
+         * partway through -- don't also try to parse the possibly
+         * incomplete token list, which would just produce a second,
+         * redundant report for the exact same underlying problem. */
+        if (undefined_out) *undefined_out = 1;
+        return 0;
+    }
     long v = parse_expr(&p);
     /* If parse_expr() returned without consuming every token, there's
      * leftover text after what should have been the end of the
      * expression (e.g. "5 5", or a stray character the grammar has no
      * rule for) -- that's always a syntax error, never a valid partial
      * result. */
-    if (p.pos != p.ntoks)
-        asm_error(line_no, text, "Unexpected trailing text in expression '%s'", text);
+    if (p.pos != p.ntoks) {
+        asm_error_recoverable(line_no, text, "Unexpected trailing text in expression '%s'", text);
+        p.undefined = 1;
+    }
     if (undefined_out) *undefined_out = p.undefined;
-    return v;
+    return v;   /* fallback: whatever was successfully parsed so far */
 }

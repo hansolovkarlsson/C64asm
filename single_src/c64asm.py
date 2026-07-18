@@ -196,6 +196,93 @@ class AsmError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# Multi-error reporting. Raising AsmError (above) is for genuinely fatal
+# problems -- a missing file, a circular .include, a macro or
+# conditional-assembly block whose structure is broken -- where the
+# shape of the rest of the source file becomes ambiguous and there's no
+# reasonable way to keep going. Everything else -- an undefined symbol,
+# a malformed expression, an addressing mode a mnemonic doesn't support,
+# a branch out of range, a redefined symbol -- is a self-contained
+# problem with one specific line or operand. For those, record_error()
+# below records the message (in AsmError's exact display format)
+# instead of raising, and returns normally so the calling code can
+# carry on with some sensible fallback value (0 for a broken
+# expression, a plausible addressing mode, the previous value for a
+# symbol redefinition, and so on) -- each call site chooses its own
+# fallback right where it calls this, the same way it already had to
+# choose what to do in the success case.
+#
+# This is what lets one assembly run surface several independent
+# mistakes instead of stopping at the first one. It's an intentional
+# trade-off: a later error's line number and message are still exactly
+# correct, but if an earlier error meant a value or an addressing-mode
+# decision came out different from what the source actually implies, a
+# handful of further messages may be downstream noise from that first
+# real mistake rather than independent problems of their own -- fix the
+# first one and reassemble if the rest look strange. This is the same
+# trade-off multi-error reporting makes in essentially every compiler
+# that does it.
+# ---------------------------------------------------------------------------
+
+MAX_COLLECTED_ERRORS = 20
+_collected_errors = []      # formatted strings, capped at MAX_COLLECTED_ERRORS
+_total_error_count = 0       # number seen, uncapped
+
+
+def any_errors_recorded():
+    return _total_error_count > 0
+
+
+def reset_collected_errors():
+    """Called once per assemble_source() run, so a test harness or any
+    other caller invoking this more than once in the same Python
+    process starts each run with a clean slate."""
+    global _collected_errors, _total_error_count
+    _collected_errors = []
+    _total_error_count = 0
+
+
+def print_all_collected_errors_and_exit():
+    for line in _collected_errors:
+        print(line, file=sys.stderr)
+    remaining = _total_error_count - len(_collected_errors)
+    if remaining > 0:
+        plural = "" if remaining == 1 else "s"
+        print(f"... and {remaining} more error{plural} (stopping after {MAX_COLLECTED_ERRORS})",
+              file=sys.stderr)
+    plural = "" if _total_error_count == 1 else "s"
+    print(f"{_total_error_count} error{plural}.", file=sys.stderr)
+    sys.exit(1)
+
+
+def record_error(message, line_no=None, raw=None):
+    """The recoverable counterpart to `raise AsmError(...)` -- see the
+    module note above. Records the message and returns normally instead
+    of raising; the caller supplies its own fallback return value right
+    after this call, exactly as it already had to decide what to return
+    in the non-error case.
+
+    If the number of recorded errors reaches MAX_COLLECTED_ERRORS, this
+    prints everything collected so far and exits immediately -- so,
+    like `raise AsmError(...)`, this function may not return, and
+    callers must supply a fallback value as if it always does."""
+    global _total_error_count
+    _total_error_count += 1
+    if len(_collected_errors) < MAX_COLLECTED_ERRORS:
+        err = AsmError(message, line_no, raw)  # reuse AsmError's own
+                                                   # __str__ formatting,
+                                                   # without raising it
+        _collected_errors.append(f"Assembly error: {err}")
+        return  # still under the cap; nothing more to do
+    # This is at least the (MAX_COLLECTED_ERRORS+1)th error -- stop
+    # right here rather than continuing to burn through what could be
+    # an enormous, mostly-noise number of further messages on a
+    # badly-broken or wrong-language source file.
+    print_all_collected_errors_and_exit()
+
+
+
+# ---------------------------------------------------------------------------
 # ASCII -> PETSCII mapping for .text / .asc
 # ---------------------------------------------------------------------------
 
@@ -291,7 +378,13 @@ def split_line(raw_line, line_no):
     if op_lower == '.equ':
         return label, '=', operand
 
-    raise AsmError(f"Unknown mnemonic or directive '{op}'", line_no, raw_line)
+    record_error(f"Unknown mnemonic or directive '{op}'", line_no, raw_line)
+    # Treat the whole line as blank (no label, no op) rather than
+    # guessing -- label's role here was already ambiguous in some paths
+    # above (label? mistyped mnemonic?), so this matches the single-
+    # file/split-source C versions' own choice for the same situation:
+    # simple and safe rather than trying to preserve a partial guess.
+    return None, None, ''
 
 
 # ---------------------------------------------------------------------------
@@ -320,9 +413,17 @@ class ExprParser:
         self.symbols = symbols
         self.pc = pc
         self.line_no = line_no
-        self.tokens = self._tokenize(text)
         self.pos = 0
         self.undefined = False
+        self.tokenize_failed = False   # set only by _tokenize()'s own error
+                                          # path, distinct from `undefined`
+                                          # (which also gets legitimately set
+                                          # for an undefined SYMBOL found
+                                          # during parsing, not just a
+                                          # tokenizing problem) -- see
+                                          # parse() for why this distinction
+                                          # matters
+        self.tokens = self._tokenize(text)
 
     def _tokenize(self, text):
         toks = []
@@ -333,8 +434,13 @@ class ExprParser:
                 if text[i].isspace():
                     i += 1
                     continue
-                raise AsmError(f"Bad character '{text[i]}' in expression '{text}'",
-                                self.line_no)
+                record_error(f"Bad character '{text[i]}' in expression '{text}'",
+                             self.line_no)
+                self.undefined = True
+                self.tokenize_failed = True
+                return toks  # give up on this expression rather than risk
+                               # tokenizing more of a string we already know
+                               # is malformed
             i = m.end()
             kind = m.lastgroup
             val = m.group()
@@ -350,12 +456,29 @@ class ExprParser:
         return tok
 
     def parse(self):
+        if self.tokenize_failed:
+            # _tokenize already recorded its own error and gave up
+            # partway through -- don't also try to parse the possibly
+            # incomplete token list, which would just produce a second,
+            # redundant report for the exact same underlying problem.
+            # This is distinct from an empty token list from a
+            # genuinely empty expression (handled separately below) or
+            # from self.undefined alone (which also gets legitimately
+            # set for an expression that tokenizes fine but references
+            # an undefined SYMBOL -- that case has a full, valid token
+            # list well worth still trying to parse).
+            return 0
         if not self.tokens:
-            raise AsmError("Empty expression", self.line_no, self.text)
+            record_error("Empty expression", self.line_no, self.text)
+            self.undefined = True
+            return 0
         val = self.parse_expr()
         if self.pos != len(self.tokens):
-            raise AsmError(f"Unexpected trailing text in expression '{self.text}'",
-                            self.line_no)
+            record_error(f"Unexpected trailing text in expression '{self.text}'",
+                         self.line_no)
+            self.undefined = True
+            return val  # still return what was successfully parsed so far,
+                          # rather than discarding it for a trailing-text typo
         return val
 
     def parse_expr(self):
@@ -426,9 +549,15 @@ class ExprParser:
             val = self.parse_expr()
             k2, t2 = self.next()
             if not (k2 == 'op' and t2 == ')'):
-                raise AsmError(f"Missing ')' in expression '{self.text}'", self.line_no)
+                record_error(f"Missing ')' in expression '{self.text}'", self.line_no)
+                self.undefined = True
+                # fall through: use the sub-expression's value anyway
+                # rather than discarding work already correctly parsed
+                # just because the closing paren is missing
             return val
-        raise AsmError(f"Cannot parse expression '{self.text}'", self.line_no)
+        record_error(f"Cannot parse expression '{self.text}'", self.line_no)
+        self.undefined = True
+        return 0
 
 
 def eval_expr(text, symbols, pc, line_no):
@@ -476,7 +605,9 @@ def parse_operand(mnemonic, operand, symbols, pc, line_no):
     if op == '':
         if 'imp' in modes:
             return 'imp', None, False, None
-        raise AsmError(f"{mnemonic} requires an operand", line_no)
+        record_error(f"{mnemonic} requires an operand", line_no)
+        return 'imp', None, True, None  # smallest footprint for "we don't
+                                           # know what was meant"
 
     if op.upper() == 'A' and ('acc' in modes):
         return 'acc', None, False, None
@@ -496,7 +627,8 @@ def parse_operand(mnemonic, operand, symbols, pc, line_no):
         val, undef = eval_expr(m.group(1), symbols, pc, line_no)
         mode = 'indx' if 'indx' in modes else None
         if mode is None:
-            raise AsmError(f"{mnemonic} does not support (zp,X) addressing", line_no)
+            record_error(f"{mnemonic} does not support (zp,X) addressing", line_no)
+            return 'indx', m.group(1), True, val
         return mode, m.group(1), undef, val
 
     # Indirect indexed: (expr),Y
@@ -505,7 +637,8 @@ def parse_operand(mnemonic, operand, symbols, pc, line_no):
         val, undef = eval_expr(m.group(1), symbols, pc, line_no)
         mode = 'indy' if 'indy' in modes else None
         if mode is None:
-            raise AsmError(f"{mnemonic} does not support (zp),Y addressing", line_no)
+            record_error(f"{mnemonic} does not support (zp),Y addressing", line_no)
+            return 'indy', m.group(1), True, val
         return mode, m.group(1), undef, val
 
     # Indirect (JMP only): (expr)
@@ -514,7 +647,8 @@ def parse_operand(mnemonic, operand, symbols, pc, line_no):
         val, undef = eval_expr(m.group(1), symbols, pc, line_no)
         mode = 'ind' if 'ind' in modes else None
         if mode is None:
-            raise AsmError(f"{mnemonic} does not support indirect addressing", line_no)
+            record_error(f"{mnemonic} does not support indirect addressing", line_no)
+            return 'ind', m.group(1), True, val
         return mode, m.group(1), undef, val
 
     # expr,X  or  expr,Y
@@ -538,7 +672,8 @@ def parse_operand(mnemonic, operand, symbols, pc, line_no):
                 return 'absy', expr_text, undef, val
             if 'zpy' in modes:
                 return 'zpy', expr_text, undef, val
-        raise AsmError(f"{mnemonic} does not support that addressing mode", line_no)
+        record_error(f"{mnemonic} does not support that addressing mode", line_no)
+        return ('zp' if is_zp else 'abs'), expr_text, True, val
 
     # Plain expr -> zero page or absolute
     val, undef = eval_expr(op, symbols, pc, line_no)
@@ -549,7 +684,9 @@ def parse_operand(mnemonic, operand, symbols, pc, line_no):
         return 'abs', op, undef, val
     if 'zp' in modes:
         return 'zp', op, undef, val
-    raise AsmError(f"{mnemonic} does not support that addressing mode", line_no)
+    record_error(f"{mnemonic} does not support that addressing mode", line_no)
+    return 'imp', op, True, val  # reachable now: every real addressing
+                                    # mode has been ruled out
 
 
 def _looks_forced_absolute(expr_text):
@@ -1035,7 +1172,24 @@ class Assembler:
 
     def assemble(self):
         self._pass(pass_no=1)
+        if any_errors_recorded():
+            # Pass 1 already found at least one real problem -- don't
+            # even attempt pass 2. Pass 2 depends on pass 1 having
+            # produced a complete, trustworthy symbol table and a
+            # consistent set of addresses; running it anyway on top of
+            # a known-broken pass 1 would likely just flood the output
+            # with secondary "undefined symbol" noise stemming from the
+            # original mistakes, not independent problems worth
+            # separately reporting.
+            print_all_collected_errors_and_exit()
         result = self._pass(pass_no=2)
+        if any_errors_recorded():
+            # Pass 2 found problems pass 1 couldn't see (an addressing
+            # mode an opcode doesn't support, a branch out of range,
+            # and so on). No .prg or listing gets written by the caller
+            # -- there is nothing correct to write once any error was
+            # recorded.
+            print_all_collected_errors_and_exit()
         return result
 
     def _eval_if_condition(self, operand, pc, line_no, raw):
@@ -1154,37 +1308,53 @@ class Assembler:
                     # and the label -- forgetting this by hand was a
                     # recurring, hard-to-spot bug (SYS silently landing
                     # inside the first included routine instead).
+                    jmp_addr = pc
                     val, undef = eval_expr(operand, self.symbols, pc, line_no)
+                    pc += 3  # always exactly 3 bytes for this jmp, moved up
+                               # so it still happens even if the undefined-
+                               # symbol check just below is a recoverable
+                               # error -- otherwise every line after this
+                               # one would be 3 bytes off for the rest of
+                               # the file
                     if undef and pass_no == 2:
-                        raise AsmError(
+                        record_error(
                             f"Undefined symbol in .basic start operand '{operand}'",
                             line_no, raw)
                     if pass_no == 2:
                         output.append(0x4C)
                         output.append(val & 0xFF)
                         output.append((val >> 8) & 0xFF)
-                        self.listing.append((pc, raw, output[-3:]))
-                    pc += 3
+                        self.listing.append((jmp_addr, raw, output[-3:]))
                 continue
 
             if op == '.org':
                 val, undef = eval_expr(operand, self.symbols, pc, line_no)
                 if undef and pass_no == 2:
-                    raise AsmError(f"Undefined symbol in .org expression", line_no, raw)
-                if origin is None:
+                    record_error("Undefined symbol in .org expression", line_no, raw)
+                    # fallback: leave pc wherever it already was -- an
+                    # unknown target isn't something to guess at, and
+                    # this is at least deterministic for whatever comes
+                    # next
+                elif origin is None:
                     origin = val
+                    pc = val
                 elif pass_no == 2:
                     current_abs = origin + len(output)
                     gap = val - current_abs
                     if gap < 0:
-                        raise AsmError(
+                        record_error(
                             f".org cannot move the program counter backward "
                             f"(from ${current_abs:04X} to ${val:04X}) -- the "
                             f"assembler can't overwrite bytes already assembled",
                             line_no, raw)
-                    if gap > 0:
-                        output.extend(b'\x00' * gap)
-                pc = val
+                        # fallback: same as the undefined-symbol case
+                        # above -- don't move pc to an invalid target
+                    else:
+                        if gap > 0:
+                            output.extend(b'\x00' * gap)
+                        pc = val
+                else:
+                    pc = val
                 if label:
                     self._define_symbol(label, pc, line_no, pass_no, li, raw=raw)
                 continue
@@ -1199,7 +1369,7 @@ class Assembler:
                 # "moving backward" error to check for.
                 n, undef = eval_expr(operand, self.symbols, pc, line_no)
                 if undef and pass_no == 2:
-                    raise AsmError(f"Undefined symbol in .align expression", line_no, raw)
+                    record_error("Undefined symbol in .align expression", line_no, raw)
                 if undef:
                     # Forward-referenced alignment value, pass 1 only
                     # (pass 2 would already have raised above). n is
@@ -1208,15 +1378,24 @@ class Assembler:
                     # dividing by it would be meaningless (and, for 0
                     # specifically, a division by zero), so pc simply
                     # doesn't advance this pass. That never produces
-                    # incorrect output: pass 2 always catches the
-                    # undefined symbol and aborts before anything
-                    # computed from a wrong pass-1 address could ship.
+                    # incorrect output in a clean assembly: pass 2
+                    # always catches the undefined symbol and (so long
+                    # as pass 1 came back completely clean, a
+                    # precondition for even attempting pass 2 -- see
+                    # assemble()) aborts before anything computed from a
+                    # wrong pass-1 address could ship.
                     target = pc
+                elif n <= 0:
+                    record_error(
+                        f".align requires a positive alignment value (got {n})",
+                        line_no, raw)
+                    target = pc  # same "don't move" fallback as above --
+                                   # and necessary here, not just
+                                   # consistent: n<=0 below would divide
+                                   # by zero (n==0, an uncaught Python
+                                   # ZeroDivisionError) or produce a
+                                   # nonsensical negative gap (n<0)
                 else:
-                    if n <= 0:
-                        raise AsmError(
-                            f".align requires a positive alignment value (got {n})",
-                            line_no, raw)
                     target = ((pc + n - 1) // n) * n
                 if pass_no == 2:
                     gap = target - pc
@@ -1249,7 +1428,7 @@ class Assembler:
                     else:
                         val, undef = eval_expr(a, self.symbols, pc, line_no)
                         if undef and pass_no == 2:
-                            raise AsmError(f"Undefined symbol in .byte '{a}'", line_no, raw)
+                            record_error(f"Undefined symbol in .byte '{a}'", line_no, raw)
                         if pass_no == 2:
                             output.append(val & 0xFF)
                         pc += 1
@@ -1259,7 +1438,7 @@ class Assembler:
                 for a in split_args(operand):
                     val, undef = eval_expr(a, self.symbols, pc, line_no)
                     if undef and pass_no == 2:
-                        raise AsmError(f"Undefined symbol in .word '{a}'", line_no, raw)
+                        record_error(f"Undefined symbol in .word '{a}'", line_no, raw)
                     if pass_no == 2:
                         output.append(val & 0xFF)
                         output.append((val >> 8) & 0xFF)
@@ -1293,17 +1472,23 @@ class Assembler:
             size = MODE_SIZE[mode]
 
             if pass_no == 2:
-                if mnemonic not in OPCODES or mode not in OPCODES[mnemonic]:
-                    raise AsmError(f"Invalid addressing mode for {mnemonic}", line_no, raw)
-                opcode = OPCODES[mnemonic][mode]
+                mode_ok = mnemonic in OPCODES and mode in OPCODES[mnemonic]
+                opcode = OPCODES[mnemonic][mode] if mode_ok else 0x00  # BRK's
+                    # opcode -- an arbitrary but harmless placeholder;
+                    # never written to the .prg, since a mode_ok failure
+                    # here always means at least one error was recorded,
+                    # and this build never writes output once any error
+                    # exists (see main())
+                if not mode_ok:
+                    record_error(f"Invalid addressing mode for {mnemonic}", line_no, raw)
                 if undef:
-                    raise AsmError(f"Undefined symbol in operand '{operand}'", line_no, raw)
+                    record_error(f"Undefined symbol in operand '{operand}'", line_no, raw)
 
                 if mode == 'rel':
                     target = val
                     offset = target - (entry_pc + 2)
                     if offset < -128 or offset > 127:
-                        raise AsmError(
+                        record_error(
                             f"Branch target out of range ({offset:+d}) for {mnemonic} {operand}",
                             line_no, raw)
                     output.append(opcode)
@@ -1367,7 +1552,10 @@ class Assembler:
             self.symbol_first_li[name] = li
         if pass_no == 1:
             if name in self.symbols and not allow_redefine and self.symbols[name] != value:
-                raise AsmError(f"Symbol '{name}' already defined", line_no, raw)
+                record_error(f"Symbol '{name}' already defined", line_no, raw)
+                # fallback: fall through to the assignment below anyway --
+                # last definition wins, deterministic and safe, even
+                # though it's now flagged as a mistake
             self.symbols[name] = value
         else:
             self.symbols[name] = value
@@ -1375,6 +1563,14 @@ class Assembler:
 
 def assemble_source(main_path, lib_dir=None):
     asm = Assembler()
+    reset_collected_errors()   # must happen before load() -- split_line()
+                                 # (called from load(), via emit()) can
+                                 # itself record recoverable errors (e.g.
+                                 # "Unknown mnemonic or directive"), and
+                                 # those need to survive into assemble()'s
+                                 # pass-1/pass-2 checks rather than being
+                                 # wiped out by a reset that runs after
+                                 # load() already recorded them
     asm.load(main_path, lib_dir=lib_dir)
     origin, code = asm.assemble()
     return origin, code, asm.listing, asm.symbols

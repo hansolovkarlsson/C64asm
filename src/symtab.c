@@ -42,7 +42,7 @@ void define_symbol(const char *name, long value, int line_no,
          * Note first_li is deliberately NOT touched here -- it should
          * always reflect the symbol's very first definition. */
         if (pass_no == 1 && !allow_redefine && s->value != value)
-            asm_error(line_no, raw, "Symbol '%s' already defined", name);
+            asm_error_recoverable(line_no, raw, "Symbol '%s' already defined", name);
         s->value = value;
         return;
     }

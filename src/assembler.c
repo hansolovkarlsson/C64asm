@@ -189,7 +189,7 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                 int undef = 0;
                 long target = eval_expr(L->operand, pc, L->line_no, &undef);
                 if (undef && pass_no == 2)
-                    asm_error(L->line_no, L->raw, "Undefined symbol in .basic start operand '%s'", L->operand);
+                    asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in .basic start operand '%s'", L->operand);
                 if (pass_no == 2) {
                     unsigned char jmp_bytes[3];
                     jmp_bytes[0] = 0x4C;
@@ -206,13 +206,17 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
         if (strcmp(L->op, ".org") == 0) {
             int undef = 0;
             long val = eval_expr(L->operand, pc, L->line_no, &undef);
-            if (undef && pass_no == 2)
-                asm_error(L->line_no, L->raw, "Undefined symbol in .org expression");
-            if (origin < 0) {
+            if (undef && pass_no == 2) {
+                asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in .org expression");
+                /* fallback: leave pc wherever it already was -- an unknown
+                   target isn't something to guess at, and this is at
+                   least deterministic for whatever comes next */
+            } else if (origin < 0) {
                 /* The very first .org in the file just sets the
                  * program's load address -- there's no "gap" to pad
                  * yet, since nothing has been assembled before it. */
                 origin = val;
+                pc = val;
             } else if (pass_no == 2) {
                 /* A *later* .org moves the program counter forward
                  * (typically to place data at a specific aligned
@@ -224,24 +228,26 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                  * filled with zero bytes, or everything assembled
                  * after this point would silently end up at the wrong
                  * file offset (and therefore the wrong real address
-                 * once loaded). This padding step was missing in an
-                 * earlier version of this assembler; without it, a
-                 * forward .org produced a shorter-than-expected file
-                 * that quietly corrupted the addresses of everything
-                 * after the jump. Moving *backward* is rejected
+                 * once loaded). Moving *backward* is rejected
                  * outright, since overwriting already-emitted bytes
                  * isn't something this simple, append-only output
                  * buffer can do at all. */
                 long current_abs = origin + (long)output->len;
                 long gap = val - current_abs;
-                if (gap < 0)
-                    asm_error(L->line_no, L->raw,
+                if (gap < 0) {
+                    asm_error_recoverable(L->line_no, L->raw,
                         ".org cannot move the program counter backward (from $%04lX to $%04lX) "
                         "-- the assembler can't overwrite bytes already assembled",
                         current_abs, val);
-                for (long i = 0; i < gap; i++) bb_push(output, 0x00);
+                    /* fallback: same as the undefined-symbol case above --
+                       don't move pc to an invalid target */
+                } else {
+                    for (long i = 0; i < gap; i++) bb_push(output, 0x00);
+                    pc = val;
+                }
+            } else {
+                pc = val;
             }
-            pc = val;
             if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw, li);
             continue;
         }
@@ -257,7 +263,7 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
             int undef = 0;
             long n = eval_expr(L->operand, pc, L->line_no, &undef);
             if (undef && pass_no == 2)
-                asm_error(L->line_no, L->raw, "Undefined symbol in .align expression");
+                asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in .align expression");
             long target;
             if (undef) {
                 /* Forward-referenced alignment value, pass 1 only (pass
@@ -272,10 +278,16 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                  * from a wrong pass-1 address could ship. */
                 target = pc;
             } else {
-                if (n <= 0)
-                    asm_error(L->line_no, L->raw,
+                if (n <= 0) {
+                    asm_error_recoverable(L->line_no, L->raw,
                         ".align requires a positive alignment value (got %ld)", n);
-                target = ((pc + n - 1) / n) * n;
+                    target = pc;   /* fallback: don't move pc -- necessary,
+                                       not just consistent: n<=0 below would
+                                       divide by zero (n==0) or produce a
+                                       nonsensical negative gap (n<0) */
+                } else {
+                    target = ((pc + n - 1) / n) * n;
+                }
             }
             if (pass_no == 2) {
                 long gap = target - pc;
@@ -325,7 +337,7 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                     int undef = 0;
                     long v = eval_expr(a, pc, L->line_no, &undef);
                     if (undef && pass_no == 2)
-                        asm_error(L->line_no, L->raw, "Undefined symbol in .byte '%s'", a);
+                        asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in .byte '%s'", a);
                     if (pass_no == 2) bb_push(output, (unsigned char)(v & 0xFF));
                     pc += 1;
                 }
@@ -340,7 +352,7 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                 int undef = 0;
                 long v = eval_expr(args[i], pc, L->line_no, &undef);
                 if (undef && pass_no == 2)
-                    asm_error(L->line_no, L->raw, "Undefined symbol in .word '%s'", args[i]);
+                    asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in .word '%s'", args[i]);
                 if (pass_no == 2) {
                     /* 16-bit values are stored little-endian on the
                      * 6502, low byte first -- same as every multi-byte
@@ -413,11 +425,16 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
              * limitations" section. */
             if (pass_no == 2) {
                 OpcodeEntry *e = find_mnemonic(L->op);
-                if (!e || e->op[mode] == -1)
-                    asm_error(L->line_no, L->raw, "Invalid addressing mode for %s", L->op);
-                int opcode = e->op[mode];
+                int mode_ok = (e != NULL) && (e->op[mode] != -1);
+                int opcode = mode_ok ? e->op[mode] : 0x00;   /* BRK's opcode --
+                    an arbitrary but harmless placeholder; never actually
+                    written to the .prg, since a mode_ok failure here always
+                    means at least one error was recorded, and main() never
+                    writes output once any error exists */
+                if (!mode_ok)
+                    asm_error_recoverable(L->line_no, L->raw, "Invalid addressing mode for %s", L->op);
                 if (undef)
-                    asm_error(L->line_no, L->raw, "Undefined symbol in operand '%s'", L->operand);
+                    asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in operand '%s'", L->operand);
 
                 unsigned char bytes[3]; int nb = 0;
                 if (mode == M_REL) {
@@ -429,7 +446,7 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                      * compute the actual jump target at runtime. */
                     long offset = val - (entry_pc + 2);
                     if (offset < -128 || offset > 127)
-                        asm_error(L->line_no, L->raw,
+                        asm_error_recoverable(L->line_no, L->raw,
                                   "Branch target out of range (%+ld) for %s %s",
                                   offset, L->op, L->operand);
                     bytes[nb++] = (unsigned char)opcode;

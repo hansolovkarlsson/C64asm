@@ -848,8 +848,7 @@ only real 6502 instructions appear there.
 
 ## 15. Error messages
 
-All errors are fatal (assembly stops immediately) and are printed in the
-form:
+Each error is printed in the form:
 
 ```
 Assembly error: <message> (line <N>: <source text>)
@@ -867,6 +866,52 @@ Assembly error: <message> (<filename>, line <N>: <source text>)
 A program that never uses `.include` sees no change here at all: its
 error messages are identical to what they'd have been before `.include`
 existed.
+
+### Multiple errors per run
+
+Most kinds of mistake — an undefined symbol, a malformed expression, an
+addressing mode a mnemonic doesn't support, a branch out of range, a
+redefined symbol, an unrecognized mnemonic or directive — don't stop
+assembly immediately. Instead, the assembler keeps going, collects up
+to 20 independent problems, and reports all of them together:
+
+```
+Assembly error: Undefined symbol in operand 'undefined1' (line 2: lda undefined1)
+Assembly error: Undefined symbol in operand 'undefined2' (line 3: sta undefined2)
+Assembly error: Invalid addressing mode for TXA (line 5: txa #$05)
+3 errors.
+```
+
+If more than 20 problems are found, the assembler stops collecting and
+prints a summary line instead of continuing indefinitely:
+
+```
+... and 4 more errors (stopping after 20)
+24 errors.
+```
+
+No `.prg` or listing file is written once *any* error has been
+recorded, from either pass.
+
+A small category of problems — a missing `.include`d file, a circular
+or too-deeply-nested `.include` chain, a malformed `.macro`/`.endmacro`
+or conditional-assembly (`.if`/`.elif`/`.else`/`.endif`) block, or a
+forward reference inside a `.if`/`.elif` condition — still stops
+assembly immediately with a single message, the same way every error
+did before this feature existed. These are whole-file *structural*
+problems: once one of them is true, the shape of the rest of the source
+file is ambiguous enough that there's no reasonable way to keep
+parsing it, so collecting further "errors" downstream of it wouldn't
+be meaningful.
+
+There's one trade-off worth knowing about: later error messages'
+line numbers and text are always exactly correct, but if an earlier
+mistake meant a value or an addressing-mode decision came out
+different from what the source actually implies, a handful of the
+messages after it may be downstream noise from that first real
+mistake rather than independent problems of their own. If the error
+list looks unexpectedly long or repetitive, fix the first one or two
+and reassemble — the rest often disappear.
 
 Common errors:
 
@@ -917,8 +962,10 @@ Common errors:
   (§11). `.include` doesn't need manual include guards even without
   conditional assembly backing them — see §10.
 - **No undocumented/illegal opcodes.**
-- **Single error at a time.** Assembly halts at the first error rather
-  than collecting and reporting multiple problems.
+- **Multi-error reporting has a noise trade-off.** A single run can
+  surface several independent mistakes (see §15), but messages after
+  the first one can occasionally be downstream noise rather than
+  genuinely separate problems — see the note at the end of §15.
 - **PETSCII output is uppercase-only** (see §6).
 
 ---

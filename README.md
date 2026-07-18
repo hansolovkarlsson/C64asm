@@ -218,7 +218,12 @@ for worked regression suites built on it).
   gets defined or which file gets `.include`d (see `c64asm-reference.md`
   §16 for the full list)
 - No undocumented/illegal 6502 opcodes
-- Assembly halts at the first error rather than collecting several
+- Assembly can surface several independent errors from one run (see
+  `c64asm-reference.md` §15), though messages after the first can
+  occasionally be downstream noise rather than genuinely separate
+  problems; a handful of whole-file structural errors (missing/circular
+  `.include`, a broken macro or conditional-assembly block) still stop
+  assembly immediately
 - `.text`/`.asc`/quoted `.byte` output uppercase-only PETSCII (no
   charset-switch support for true lowercase)
 - A library file's code is assembled unconditionally once `.include`d,

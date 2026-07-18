@@ -1,6 +1,8 @@
 /*
- * error.h - the assembler's one and only error-reporting function, plus
- * the small bit of state that lets its messages be filename-aware once
+ * error.h - the assembler's error-reporting functions: asm_error() for
+ * genuinely fatal problems, and the recoverable multi-error mechanism
+ * (asm_error_recoverable() and friends) for everything else. Plus the
+ * small bit of state that lets messages be filename-aware once
  * .include (macro.h/includes.h) is used.
  */
 
@@ -11,15 +13,13 @@
  * Prints "Assembly error: <message> (line <N>: <source text>)" to
  * stderr and terminates the program immediately with exit status 1.
  *
- * This assembler does not try to recover from errors and keep going to
- * report a second or third problem -- the moment something is wrong, it
- * stops. That's a real, deliberate trade-off: a "keep going and collect
- * all the errors" assembler is friendlier for large programs with many
- * mistakes, but is also a lot more code (you have to decide, for every
- * kind of error, what a "reasonable" default is so the rest of the file
- * can still be processed meaningfully). For a small hobbyist assembler,
- * stop-at-the-first-error is simpler to get right and arguably more
- * honest: nothing after the first uncaught mistake is generated.
+ * Reserved for genuinely fatal problems -- a missing file, a circular
+ * .include, a macro or conditional-assembly block whose structure is
+ * broken -- where the shape of the rest of the source file becomes
+ * ambiguous and there's no reasonable way to keep going. Everything
+ * else uses asm_error_recoverable() below instead, so a single run can
+ * surface several independent mistakes rather than stopping at the
+ * first one.
  *
  * line_no: the 1-based source line the error relates to, or 0 if there
  *          isn't a specific line (e.g. a command-line argument problem).
@@ -31,10 +31,7 @@
  * asm_error_note_include_used() below), the message also names which
  * file line_no belongs to (see asm_error_set_file()) -- otherwise the
  * message is identical to what it would have been before .include
- * support existed, with no filename at all. That "no filename until
- * .include is actually used" behavior is deliberate: it means every
- * program that predates .include, or simply never uses it, gets
- * byte-for-byte identical error output to before.
+ * support existed, with no filename at all.
  *
  * This function never returns -- it always calls exit(1). It's still
  * declared as returning void rather than marked _Noreturn, to keep this
@@ -44,15 +41,45 @@
 void asm_error(int line_no, const char *raw, const char *fmt, ...);
 
 /*
- * Sets which file subsequent asm_error() calls should attribute their
- * line number to, until the next call. Pass NULL (or an empty string)
- * to clear it.
+ * The recoverable counterpart to asm_error() -- see the note at the top
+ * of error.c for the full design rationale. Records the message (in
+ * asm_error()'s exact display format) and returns normally instead of
+ * exiting, so the caller can carry on with some sensible fallback value
+ * -- each call site chooses its own fallback right where it calls this,
+ * the same way it already had to choose what to do in the success case.
+ *
+ * If the number of recorded errors reaches the cap (see error.c), this
+ * prints everything collected so far and exits immediately -- so, like
+ * asm_error(), this function may not return, and callers must supply a
+ * fallback value as if it always does.
+ */
+void asm_error_recoverable(int line_no, const char *raw, const char *fmt, ...);
+
+/* True if asm_error_recoverable() has recorded at least one error so far
+ * this run. */
+int any_errors_recorded(void);
+
+/* Clears all recorded errors and the total count. Must be called once,
+ * before loading/assembling a source file -- see the note in error.c
+ * about why this has to happen before the source is loaded, not just
+ * before pass 1. */
+void reset_collected_errors(void);
+
+/* Prints every collected error message, an "... and N more errors"
+ * summary line if the cap was hit, and a final "N errors." line, then
+ * exits with status 1. */
+void print_all_collected_errors_and_exit(void);
+
+/*
+ * Sets which file subsequent asm_error()/asm_error_recoverable() calls
+ * should attribute their line number to, until the next call. Pass NULL
+ * (or an empty string) to clear it.
  *
  * This is deliberately global, mutable state rather than a filename
  * parameter threaded through eval_expr(), parse_operand(), and every
- * other function that can call asm_error(): doing that properly would
- * mean touching a large fraction of this codebase's functions to plumb
- * a value through that, for the overwhelming majority of programs
+ * other function that can call these: doing that properly would mean
+ * touching a large fraction of this codebase's functions to plumb a
+ * value through that, for the overwhelming majority of programs
  * (anything not using .include), is never even read. Reading a small
  * piece of global state at the exact moment an error is actually raised
  * gets the same result with a far smaller footprint -- and it's safe
@@ -66,7 +93,7 @@ void asm_error_set_file(const char *filename);
 
 /*
  * Marks that .include has been used at least once in this run, so
- * asm_error() should start showing filenames. Idempotent -- safe to
+ * error messages should start showing filenames. Idempotent -- safe to
  * call every time an .include is processed, not just the first.
  */
 void asm_error_note_include_used(void);

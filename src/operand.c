@@ -76,7 +76,10 @@ Mode parse_operand(const char *mnemonic, const char *operand_in,
 
     if (op[0] == '\0') {
         if (e->op[M_IMP] != -1) return M_IMP;
-        asm_error(line_no, raw, "%s requires an operand", mnemonic);
+        asm_error_recoverable(line_no, raw, "%s requires an operand", mnemonic);
+        *undef_out = 1;
+        return M_IMP;   /* fallback: smallest footprint for "we don't know
+                            what was meant" */
     }
 
     if ((op[0]=='A'||op[0]=='a') && op[1]=='\0' && e->op[M_ACC] != -1) {
@@ -102,7 +105,12 @@ Mode parse_operand(const char *mnemonic, const char *operand_in,
 
     if (op[0] == '(') {
         int close = find_matching_paren(op, 0);
-        if (close < 0) asm_error(line_no, raw, "Unbalanced parentheses in operand '%s'", op);
+        if (close < 0) {
+            asm_error_recoverable(line_no, raw, "Unbalanced parentheses in operand '%s'", op);
+            *undef_out = 1;
+            return M_IMP;   /* fallback: don't try to index into `op` using
+                                an invalid close-paren position below */
+        }
         int oplen = (int)strlen(op);
         if (close == oplen - 1) {
             /* The whole operand is wrapped in one pair of parens, so
@@ -123,16 +131,22 @@ Mode parse_operand(const char *mnemonic, const char *operand_in,
                     size_t elen = p2 - 1;
                     memcpy(expr, inner, elen); expr[elen] = '\0';
                     trim(expr);
-                    if (e->op[M_INDX] == -1)
-                        asm_error(line_no, raw, "%s does not support (zp,X) addressing", mnemonic);
                     *val_out = eval_expr(expr, pc, line_no, undef_out);
-                    return M_INDX;
+                    if (e->op[M_INDX] == -1) {
+                        asm_error_recoverable(line_no, raw, "%s does not support (zp,X) addressing", mnemonic);
+                        *undef_out = 1;
+                    }
+                    return M_INDX;   /* still returned even when unsupported --
+                                        the pass-2 "Invalid addressing mode"
+                                        check catches it a second time */
                 }
             }
             /* Not ",X)" -- must be plain indirect, e.g. JMP ($1000). */
-            if (e->op[M_IND] == -1)
-                asm_error(line_no, raw, "%s does not support indirect addressing", mnemonic);
             *val_out = eval_expr(inner, pc, line_no, undef_out);
+            if (e->op[M_IND] == -1) {
+                asm_error_recoverable(line_no, raw, "%s does not support indirect addressing", mnemonic);
+                *undef_out = 1;
+            }
             return M_IND;
         } else {
             /* The matching ')' isn't the last character, so there's a
@@ -152,13 +166,17 @@ Mode parse_operand(const char *mnemonic, const char *operand_in,
                     if (ilen < 0) ilen = 0;
                     memcpy(inner, op + 1, ilen); inner[ilen] = '\0';
                     trim(inner);
-                    if (e->op[M_INDY] == -1)
-                        asm_error(line_no, raw, "%s does not support (zp),Y addressing", mnemonic);
                     *val_out = eval_expr(inner, pc, line_no, undef_out);
+                    if (e->op[M_INDY] == -1) {
+                        asm_error_recoverable(line_no, raw, "%s does not support (zp),Y addressing", mnemonic);
+                        *undef_out = 1;
+                    }
                     return M_INDY;
                 }
             }
-            asm_error(line_no, raw, "%s does not support that addressing mode ('%s')", mnemonic, op);
+            asm_error_recoverable(line_no, raw, "%s does not support that addressing mode ('%s')", mnemonic, op);
+            *undef_out = 1;
+            return M_IMP;
         }
     }
 
@@ -196,7 +214,14 @@ Mode parse_operand(const char *mnemonic, const char *operand_in,
                         if (e->op[M_ABSY] != -1) return M_ABSY;
                         if (e->op[M_ZPY] != -1) return M_ZPY;
                     }
-                    asm_error(line_no, raw, "%s does not support that addressing mode", mnemonic);
+                    asm_error_recoverable(line_no, raw, "%s does not support that addressing mode", mnemonic);
+                    *undef_out = 1;
+                    if (is_x) return is_zp ? M_ZPX : M_ABSX;   /* fallback: best-guess
+                                                                   mode; pass-2's "Invalid
+                                                                   addressing mode" check
+                                                                   will still catch it if
+                                                                   that guess is wrong */
+                    return is_zp ? M_ZPY : M_ABSY;
                 }
             }
         }
@@ -211,7 +236,10 @@ Mode parse_operand(const char *mnemonic, const char *operand_in,
         if (is_zp && e->op[M_ZP] != -1) return M_ZP;
         if (e->op[M_ABS] != -1) return M_ABS;
         if (e->op[M_ZP] != -1) return M_ZP;
-        asm_error(line_no, raw, "%s does not support that addressing mode", mnemonic);
+        asm_error_recoverable(line_no, raw, "%s does not support that addressing mode", mnemonic);
+        *undef_out = 1;
+        return is_zp ? M_ZP : M_ABS;   /* fallback: best-guess mode; pass-2's
+                                           "Invalid addressing mode" check
+                                           will still catch it */
     }
-    return M_IMP; /* unreachable -- asm_error() above always exits */
 }

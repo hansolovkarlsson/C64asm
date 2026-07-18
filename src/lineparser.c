@@ -153,7 +153,13 @@ void split_line(const char *raw_line, int line_no, SourceLine *out) {
                     strncpy(rest, remainder, sizeof(rest) - 1);
                     rest[sizeof(rest) - 1] = '\0';
                 } else {
-                    asm_error(line_no, raw_line, "Unknown mnemonic or directive '%s'", ident);
+                    asm_error_recoverable(line_no, raw_line, "Unknown mnemonic or directive '%s'", ident);
+                    /* fallback: treat the whole line as blank (no label,
+                       no op) rather than guessing -- ident's role here was
+                       already ambiguous (label? mistyped mnemonic?) */
+                    out->has_label = 0;
+                    out->label[0] = '\0';
+                    return;
                 }
             }
             /* else: ident itself is the op; leave rest as the full
@@ -211,5 +217,12 @@ void split_line(const char *raw_line, int line_no, SourceLine *out) {
         return;
     }
 
-    asm_error(line_no, raw_line, "Unknown mnemonic or directive '%s'", op_tok);
+    asm_error_recoverable(line_no, raw_line, "Unknown mnemonic or directive '%s'", op_tok);
+    /* fallback: treat the whole line as blank (no label, no op) --
+       simple and safe rather than trying to preserve a partial guess */
+    out->has_label = 0;
+    out->label[0] = '\0';
+    out->has_op = 0;
+    out->op[0] = '\0';
+    out->operand[0] = '\0';
 }

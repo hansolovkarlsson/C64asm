@@ -311,17 +311,20 @@ static void set_error_file(const char *filename) {
     }
 }
 
-static void asm_error(int line_no, const char *raw, const char *fmt, ...) {
-    char msg[1024];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(msg, sizeof(msg), fmt, ap);
-    va_end(ap);
+/* Builds the exact "Assembly error: ..." text asm_error() has always
+ * printed, but into a caller-supplied buffer instead of straight to
+ * stderr -- shared by the fatal path (asm_error, below) and the
+ * recoverable path (asm_error_recoverable, further down) so the two
+ * produce byte-for-byte identical formatting for the same inputs. */
+static void format_error_message(char *buf, size_t bufsz, int line_no,
+                                  const char *raw, const char *msg) {
     if (line_no > 0) {
+        char head[MAX_LINE_LEN + 256];
         if (g_multi_file_mode && g_current_error_file[0])
-            fprintf(stderr, "Assembly error: %s (%s, line %d", msg, g_current_error_file, line_no);
+            snprintf(head, sizeof(head), "Assembly error: %s (%s, line %d",
+                     msg, g_current_error_file, line_no);
         else
-            fprintf(stderr, "Assembly error: %s (line %d", msg, line_no);
+            snprintf(head, sizeof(head), "Assembly error: %s (line %d", msg, line_no);
         if (raw && raw[0]) {
             char trimmed[MAX_LINE_LEN];
             strncpy(trimmed, raw, sizeof(trimmed) - 1);
@@ -332,13 +335,112 @@ static void asm_error(int line_no, const char *raw, const char *fmt, ...) {
                 trimmed[--n] = '\0';
             size_t start = 0;
             while (trimmed[start] == ' ' || trimmed[start] == '\t') start++;
-            fprintf(stderr, ": %s", trimmed + start);
+            snprintf(buf, bufsz, "%s: %s)", head, trimmed + start);
+        } else {
+            snprintf(buf, bufsz, "%s)", head);
         }
-        fprintf(stderr, ")\n");
     } else {
-        fprintf(stderr, "Assembly error: %s\n", msg);
+        snprintf(buf, bufsz, "Assembly error: %s", msg);
     }
+}
+
+static void asm_error(int line_no, const char *raw, const char *fmt, ...) {
+    char msg[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    char full[MAX_LINE_LEN + 1280];
+    format_error_message(full, sizeof(full), line_no, raw, msg);
+    fprintf(stderr, "%s\n", full);
     exit(1);
+}
+
+/* --------------------------------------------------------------------- */
+/* Multi-error reporting. asm_error() above is for genuinely fatal
+ * problems -- a missing file, a circular .include, a macro or
+ * conditional-assembly block whose structure is broken -- where the
+ * shape of the rest of the source file becomes ambiguous and there's no
+ * reasonable way to keep going. Everything else -- an undefined symbol,
+ * a malformed expression, an addressing mode a mnemonic doesn't
+ * support, a branch out of range, a redefined symbol -- is a
+ * self-contained problem with one specific line or operand. For those,
+ * asm_error_recoverable() below records the message (in asm_error()'s
+ * exact display format) instead of exiting, and returns normally so the
+ * calling code can carry on with some sensible fallback value (0 for a
+ * broken expression, a plausible addressing mode, the previous value
+ * for a symbol redefinition, and so on) -- each call site chooses its
+ * own fallback right where it calls this, the same way it already had
+ * to choose what to do in the success case.
+ *
+ * This is what lets one assembly run surface several independent
+ * mistakes instead of stopping at the first one. It's an intentional
+ * trade-off: a later error's line number and message are still exactly
+ * correct, but if an earlier error meant a value or an addressing-mode
+ * decision came out different from what the source actually implies, a
+ * handful of further messages may be downstream noise from that first
+ * real mistake rather than independent problems of their own -- fix the
+ * first one and reassemble if the rest look strange.
+ * --------------------------------------------------------------------- */
+
+#define MAX_COLLECTED_ERRORS 20
+static char *g_collected_errors[MAX_COLLECTED_ERRORS];
+static int g_collected_count = 0;
+static long g_total_error_count = 0;
+
+static int any_errors_recorded(void) { return g_total_error_count > 0; }
+
+/* Called once per assembly run so re-running the assembler logic more
+ * than once in the same process (not that main() currently does)
+ * starts with a clean slate. */
+static void reset_collected_errors(void) {
+    for (int i = 0; i < g_collected_count; i++) { free(g_collected_errors[i]); g_collected_errors[i] = NULL; }
+    g_collected_count = 0;
+    g_total_error_count = 0;
+}
+
+static void print_all_collected_errors_and_exit(void) {
+    for (int i = 0; i < g_collected_count; i++)
+        fprintf(stderr, "%s\n", g_collected_errors[i]);
+    long remaining = g_total_error_count - g_collected_count;
+    if (remaining > 0) {
+        fprintf(stderr, "... and %ld more error%s (stopping after %d)\n",
+                remaining, remaining == 1 ? "" : "s", MAX_COLLECTED_ERRORS);
+    }
+    fprintf(stderr, "%ld error%s.\n", g_total_error_count, g_total_error_count == 1 ? "" : "s");
+    exit(1);
+}
+
+/* The recoverable counterpart to asm_error() -- see the note above.
+ * Records the message and returns normally instead of exiting; the
+ * caller supplies its own fallback return value right after this call,
+ * exactly as it already had to decide what to return in the
+ * non-error case.
+ *
+ * If the number of recorded errors reaches MAX_COLLECTED_ERRORS, this
+ * prints everything collected so far and exits immediately -- so, like
+ * asm_error(), this function may not return, and callers must supply a
+ * fallback value as if it always does. */
+static void asm_error_recoverable(int line_no, const char *raw, const char *fmt, ...) {
+    char msg[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    g_total_error_count++;
+    if (g_collected_count < MAX_COLLECTED_ERRORS) {
+        size_t bufsz = MAX_LINE_LEN + 1280;
+        char *buf = malloc(bufsz);
+        if (!buf) { fprintf(stderr, "Out of memory\n"); exit(1); }
+        format_error_message(buf, bufsz, line_no, raw, msg);
+        g_collected_errors[g_collected_count++] = buf;
+        return;
+    }
+    /* At least the (MAX_COLLECTED_ERRORS+1)th error -- stop right here
+     * rather than continuing to burn through what could be an enormous,
+     * mostly-noise number of further messages on a badly-broken or
+     * wrong-language source file. */
+    print_all_collected_errors_and_exit();
 }
 
 /* --------------------------------------------------------------------- */
@@ -411,7 +513,7 @@ static void define_symbol(const char *name, long value, int line_no,
     Symbol *s = find_symbol(name);
     if (s) {
         if (pass_no == 1 && !allow_redefine && s->value != value)
-            asm_error(line_no, raw, "Symbol '%s' already defined", name);
+            asm_error_recoverable(line_no, raw, "Symbol '%s' already defined", name);
         s->value = value;
         return;
     }
@@ -442,6 +544,11 @@ typedef struct {
     long pc;
     int line_no;
     int undefined;
+    int tokenize_failed;   /* set only by tokenize_expr()'s "bad character"
+                               path; distinct from `undefined` (also set
+                               legitimately for an undefined SYMBOL found
+                               during parsing) -- see eval_expr() for why
+                               this distinction matters */
     char err_text[MAX_LINE_LEN];
 } EParser;
 
@@ -456,14 +563,20 @@ static void tokenize_expr(const char *text, EParser *p) {
         if (c == '$') {
             size_t j = i + 1;
             while (j < len && isxdigit((unsigned char)s[j])) j++;
-            if (j == i + 1) asm_error(p->line_no, text, "Bad hex literal in expression '%s'", text);
+            if (j == i + 1)
+                asm_error_recoverable(p->line_no, text, "Bad hex literal in expression '%s'", text);
+                /* fallback: j stays i+1, so the token text is just "$" --
+                   parse_atom's TK_HEX case strtol()s the empty digit
+                   string after it to 0, a harmless placeholder value */
             size_t n = j - i; if (n >= MAX_IDENT) n = MAX_IDENT - 1;
             memcpy(t.text, s + i, n); t.text[n] = '\0';
             t.kind = TK_HEX; i = j;
         } else if (c == '%') {
             size_t j = i + 1;
             while (j < len && (s[j] == '0' || s[j] == '1')) j++;
-            if (j == i + 1) asm_error(p->line_no, text, "Bad binary literal in expression '%s'", text);
+            if (j == i + 1)
+                asm_error_recoverable(p->line_no, text, "Bad binary literal in expression '%s'", text);
+                /* same fallback idea as the hex case above */
             size_t n = j - i; if (n >= MAX_IDENT) n = MAX_IDENT - 1;
             memcpy(t.text, s + i, n); t.text[n] = '\0';
             t.kind = TK_BIN; i = j;
@@ -475,18 +588,27 @@ static void tokenize_expr(const char *text, EParser *p) {
             t.kind = TK_DEC; i = j;
         } else if (c == '\'') {
             size_t j = i + 1;
-            char inner = '\0';   /* asm_error() below never actually returns
-                                     (it always exit()s), but the compiler
-                                     has no way to know that -- initializing
-                                     this avoids a spurious "used
-                                     uninitialized" warning on the
-                                     technically-unreachable fallthrough path */
+            char inner = '\0';
+            int char_lit_error = 0;
             if (j < len && s[j] == '\\' && j + 1 < len) { inner = s[j+1]; j += 2; }
             else if (j < len) { inner = s[j]; j += 1; }
-            else asm_error(p->line_no, text, "Bad character literal in expression '%s'", text);
-            if (j >= len || s[j] != '\'')
-                asm_error(p->line_no, text, "Unterminated character literal in expression '%s'", text);
-            j++;
+            else {
+                asm_error_recoverable(p->line_no, text, "Bad character literal in expression '%s'", text);
+                char_lit_error = 1;   /* nothing left to look for a closing
+                                          quote in -- skip that check below
+                                          so this single malformed literal
+                                          doesn't also report as unterminated */
+            }
+            if (!char_lit_error) {
+                if (j >= len || s[j] != '\'')
+                    asm_error_recoverable(p->line_no, text, "Unterminated character literal in expression '%s'", text);
+                    /* fallback: don't consume whatever character sits where
+                       the closing quote should have been -- leave it for
+                       the next tokenize_expr() iteration to reprocess
+                       normally, rather than silently swallowing it */
+                else
+                    j++;
+            }
             t.text[0] = inner; t.text[1] = '\0';
             t.kind = TK_CHAR; i = j;
         } else if (is_ident_start(c)) {
@@ -499,11 +621,19 @@ static void tokenize_expr(const char *text, EParser *p) {
                    c == '<' || c == '>' || c == '*') {
             t.kind = TK_OP; t.text[0] = c; t.text[1] = '\0'; i++;
         } else {
-            asm_error(p->line_no, text, "Bad character '%c' in expression '%s'", c, text);
+            asm_error_recoverable(p->line_no, text, "Bad character '%c' in expression '%s'", c, text);
+            /* give up tokenizing the rest of this expression rather than
+               risk tokenizing more of a string already known malformed,
+               mirroring the Python implementation's tokenize_failed path */
+            p->tokenize_failed = 1;
+            p->undefined = 1;
             return;
         }
         if (p->ntoks >= MAX_TOKENS)
             asm_error(p->line_no, text, "Expression too complex '%s'", text);
+            /* stays fatal: a C-only fixed-size token buffer limit, in the
+               same spirit as MAX_SYMBOLS/MAX_LINES, not a per-expression
+               mistake in the source */
         p->toks[p->ntoks++] = t;
     }
 }
@@ -546,15 +676,16 @@ static long parse_atom(EParser *p) {
                 long v = parse_expr(p);
                 Token *close = ep_next(p);
                 if (!(close->kind == TK_OP && close->text[0] == ')'))
-                    asm_error(p->line_no, p->err_text, "Missing ')' in expression '%s'", p->err_text);
-                return v;
+                    asm_error_recoverable(p->line_no, p->err_text, "Missing ')' in expression '%s'", p->err_text);
+                return v;   /* fallback: whatever was successfully parsed
+                               inside the parens */
             }
             /* fallthrough to error */
             break;
         default: break;
     }
-    asm_error(p->line_no, p->err_text, "Cannot parse expression '%s'", p->err_text);
-    return 0;
+    asm_error_recoverable(p->line_no, p->err_text, "Cannot parse expression '%s'", p->err_text);
+    return 0;   /* fallback: smallest-footprint placeholder value */
 }
 
 static long parse_unary(EParser *p) {
@@ -596,13 +727,27 @@ static long eval_expr(const char *text, long pc, int line_no, int *undefined_out
     p.pc = pc;
     p.line_no = line_no;
     strncpy(p.err_text, text, sizeof(p.err_text) - 1);
-    if (text[0] == '\0') asm_error(line_no, text, "Empty expression");
+    if (text[0] == '\0') {
+        asm_error_recoverable(line_no, text, "Empty expression");
+        if (undefined_out) *undefined_out = 1;
+        return 0;
+    }
     tokenize_expr(text, &p);
+    if (p.tokenize_failed) {
+        /* tokenize_expr() already recorded its own error and gave up
+           partway through -- don't also try to parse the possibly
+           incomplete token list, which would just produce a second,
+           redundant report for the exact same underlying problem. */
+        if (undefined_out) *undefined_out = 1;
+        return 0;
+    }
     long v = parse_expr(&p);
-    if (p.pos != p.ntoks)
-        asm_error(line_no, text, "Unexpected trailing text in expression '%s'", text);
+    if (p.pos != p.ntoks) {
+        asm_error_recoverable(line_no, text, "Unexpected trailing text in expression '%s'", text);
+        p.undefined = 1;
+    }
     if (undefined_out) *undefined_out = p.undefined;
-    return v;
+    return v;   /* fallback: whatever was successfully parsed so far */
 }
 
 /* --------------------------------------------------------------------- */
@@ -753,7 +898,13 @@ static void split_line(const char *raw_line, int line_no, SourceLine *out) {
                     strncpy(rest, remainder, sizeof(rest) - 1);
                     rest[sizeof(rest) - 1] = '\0';
                 } else {
-                    asm_error(line_no, raw_line, "Unknown mnemonic or directive '%s'", ident);
+                    asm_error_recoverable(line_no, raw_line, "Unknown mnemonic or directive '%s'", ident);
+                    /* fallback: treat the whole line as blank (no label,
+                       no op) rather than guessing -- ident's role here was
+                       already ambiguous (label? mistyped mnemonic?) */
+                    out->has_label = 0;
+                    out->label[0] = '\0';
+                    return;
                 }
             }
             /* else: ident itself is the op; leave rest as full stripped line */
@@ -800,7 +951,14 @@ static void split_line(const char *raw_line, int line_no, SourceLine *out) {
         return;
     }
 
-    asm_error(line_no, raw_line, "Unknown mnemonic or directive '%s'", op_tok);
+    asm_error_recoverable(line_no, raw_line, "Unknown mnemonic or directive '%s'", op_tok);
+    /* fallback: treat the whole line as blank (no label, no op) --
+       simple and safe rather than trying to preserve a partial guess */
+    out->has_label = 0;
+    out->label[0] = '\0';
+    out->has_op = 0;
+    out->op[0] = '\0';
+    out->operand[0] = '\0';
 }
 
 /* --------------------------------------------------------------------- */
@@ -1441,7 +1599,10 @@ static Mode parse_operand(const char *mnemonic, const char *operand_in,
 
     if (op[0] == '\0') {
         if (e->op[M_IMP] != -1) return M_IMP;
-        asm_error(line_no, raw, "%s requires an operand", mnemonic);
+        asm_error_recoverable(line_no, raw, "%s requires an operand", mnemonic);
+        *undef_out = 1;
+        return M_IMP;   /* fallback: smallest footprint for "we don't know
+                            what was meant" */
     }
 
     if ((op[0]=='A'||op[0]=='a') && op[1]=='\0' && e->op[M_ACC] != -1) {
@@ -1463,7 +1624,12 @@ static Mode parse_operand(const char *mnemonic, const char *operand_in,
 
     if (op[0] == '(') {
         int close = find_matching_paren(op, 0);
-        if (close < 0) asm_error(line_no, raw, "Unbalanced parentheses in operand '%s'", op);
+        if (close < 0) {
+            asm_error_recoverable(line_no, raw, "Unbalanced parentheses in operand '%s'", op);
+            *undef_out = 1;
+            return M_IMP;   /* fallback: don't try to index into `op` using
+                                an invalid close-paren position below */
+        }
         int oplen = (int)strlen(op);
         if (close == oplen - 1) {
             /* either "(expr,X)" or plain "(expr)" */
@@ -1481,16 +1647,23 @@ static Mode parse_operand(const char *mnemonic, const char *operand_in,
                     size_t elen = p2 - 1;
                     memcpy(expr, inner, elen); expr[elen] = '\0';
                     trim(expr);
-                    if (e->op[M_INDX] == -1)
-                        asm_error(line_no, raw, "%s does not support (zp,X) addressing", mnemonic);
                     *val_out = eval_expr(expr, pc, line_no, undef_out);
-                    return M_INDX;
+                    if (e->op[M_INDX] == -1) {
+                        asm_error_recoverable(line_no, raw, "%s does not support (zp,X) addressing", mnemonic);
+                        *undef_out = 1;
+                    }
+                    return M_INDX;   /* still returned even when unsupported --
+                                        the pass-2 "Invalid addressing mode"
+                                        check catches it a second time, same
+                                        as the Python implementation */
                 }
             }
             /* plain indirect (JMP) */
-            if (e->op[M_IND] == -1)
-                asm_error(line_no, raw, "%s does not support indirect addressing", mnemonic);
             *val_out = eval_expr(inner, pc, line_no, undef_out);
+            if (e->op[M_IND] == -1) {
+                asm_error_recoverable(line_no, raw, "%s does not support indirect addressing", mnemonic);
+                *undef_out = 1;
+            }
             return M_IND;
         } else {
             /* expect "),Y" suffix */
@@ -1508,13 +1681,17 @@ static Mode parse_operand(const char *mnemonic, const char *operand_in,
                     if (ilen < 0) ilen = 0;
                     memcpy(inner, op + 1, ilen); inner[ilen] = '\0';
                     trim(inner);
-                    if (e->op[M_INDY] == -1)
-                        asm_error(line_no, raw, "%s does not support (zp),Y addressing", mnemonic);
                     *val_out = eval_expr(inner, pc, line_no, undef_out);
+                    if (e->op[M_INDY] == -1) {
+                        asm_error_recoverable(line_no, raw, "%s does not support (zp),Y addressing", mnemonic);
+                        *undef_out = 1;
+                    }
                     return M_INDY;
                 }
             }
-            asm_error(line_no, raw, "%s does not support that addressing mode ('%s')", mnemonic, op);
+            asm_error_recoverable(line_no, raw, "%s does not support that addressing mode ('%s')", mnemonic, op);
+            *undef_out = 1;
+            return M_IMP;
         }
     }
 
@@ -1546,7 +1723,14 @@ static Mode parse_operand(const char *mnemonic, const char *operand_in,
                         if (e->op[M_ABSY] != -1) return M_ABSY;
                         if (e->op[M_ZPY] != -1) return M_ZPY;
                     }
-                    asm_error(line_no, raw, "%s does not support that addressing mode", mnemonic);
+                    asm_error_recoverable(line_no, raw, "%s does not support that addressing mode", mnemonic);
+                    *undef_out = 1;
+                    if (is_x) return is_zp ? M_ZPX : M_ABSX;   /* fallback: best-guess
+                                                                   mode; pass-2's "Invalid
+                                                                   addressing mode" check
+                                                                   will still catch it if
+                                                                   that guess is wrong */
+                    return is_zp ? M_ZPY : M_ABSY;
                 }
             }
         }
@@ -1560,9 +1744,12 @@ static Mode parse_operand(const char *mnemonic, const char *operand_in,
         if (is_zp && e->op[M_ZP] != -1) return M_ZP;
         if (e->op[M_ABS] != -1) return M_ABS;
         if (e->op[M_ZP] != -1) return M_ZP;
-        asm_error(line_no, raw, "%s does not support that addressing mode", mnemonic);
+        asm_error_recoverable(line_no, raw, "%s does not support that addressing mode", mnemonic);
+        *undef_out = 1;
+        return is_zp ? M_ZP : M_ABS;   /* fallback: best-guess mode; pass-2's
+                                           "Invalid addressing mode" check
+                                           will still catch it */
     }
-    return M_IMP; /* unreachable */
 }
 
 /* --------------------------------------------------------------------- */
@@ -1859,7 +2046,7 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                 int undef = 0;
                 long target = eval_expr(L->operand, pc, L->line_no, &undef);
                 if (undef && pass_no == 2)
-                    asm_error(L->line_no, L->raw, "Undefined symbol in .basic start operand '%s'", L->operand);
+                    asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in .basic start operand '%s'", L->operand);
                 if (pass_no == 2) {
                     unsigned char jmp_bytes[3];
                     jmp_bytes[0] = 0x4C;
@@ -1876,21 +2063,31 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
         if (strcmp(L->op, ".org") == 0) {
             int undef = 0;
             long val = eval_expr(L->operand, pc, L->line_no, &undef);
-            if (undef && pass_no == 2)
-                asm_error(L->line_no, L->raw, "Undefined symbol in .org expression");
-            if (origin < 0) {
+            if (undef && pass_no == 2) {
+                asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in .org expression");
+                /* fallback: leave pc wherever it already was -- an unknown
+                   target isn't something to guess at, and this is at
+                   least deterministic for whatever comes next */
+            } else if (origin < 0) {
                 origin = val;
+                pc = val;
             } else if (pass_no == 2) {
                 long current_abs = origin + (long)output->len;
                 long gap = val - current_abs;
-                if (gap < 0)
-                    asm_error(L->line_no, L->raw,
+                if (gap < 0) {
+                    asm_error_recoverable(L->line_no, L->raw,
                         ".org cannot move the program counter backward (from $%04lX to $%04lX) "
                         "-- the assembler can't overwrite bytes already assembled",
                         current_abs, val);
-                for (long i = 0; i < gap; i++) bb_push(output, 0x00);
+                    /* fallback: same as the undefined-symbol case above --
+                       don't move pc to an invalid target */
+                } else {
+                    for (long i = 0; i < gap; i++) bb_push(output, 0x00);
+                    pc = val;
+                }
+            } else {
+                pc = val;
             }
-            pc = val;
             if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw, li);
             continue;
         }
@@ -1906,7 +2103,7 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
             int undef = 0;
             long n = eval_expr(L->operand, pc, L->line_no, &undef);
             if (undef && pass_no == 2)
-                asm_error(L->line_no, L->raw, "Undefined symbol in .align expression");
+                asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in .align expression");
             long target;
             if (undef) {
                 /* Forward-referenced alignment value, pass 1 only (pass
@@ -1920,10 +2117,14 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                  * undefined symbol and aborts before anything computed
                  * from a wrong pass-1 address could ship. */
                 target = pc;
+            } else if (n <= 0) {
+                asm_error_recoverable(L->line_no, L->raw,
+                    ".align requires a positive alignment value (got %ld)", n);
+                target = pc;   /* fallback: don't move pc -- necessary, not
+                                  just consistent: n<=0 below would divide
+                                  by zero (n==0) or produce a nonsensical
+                                  negative gap (n<0) */
             } else {
-                if (n <= 0)
-                    asm_error(L->line_no, L->raw,
-                        ".align requires a positive alignment value (got %ld)", n);
                 target = ((pc + n - 1) / n) * n;
             }
             if (pass_no == 2) {
@@ -1961,7 +2162,7 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                     int undef = 0;
                     long v = eval_expr(a, pc, L->line_no, &undef);
                     if (undef && pass_no == 2)
-                        asm_error(L->line_no, L->raw, "Undefined symbol in .byte '%s'", a);
+                        asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in .byte '%s'", a);
                     if (pass_no == 2) bb_push(output, (unsigned char)(v & 0xFF));
                     pc += 1;
                 }
@@ -1976,7 +2177,7 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                 int undef = 0;
                 long v = eval_expr(args[i], pc, L->line_no, &undef);
                 if (undef && pass_no == 2)
-                    asm_error(L->line_no, L->raw, "Undefined symbol in .word '%s'", args[i]);
+                    asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in .word '%s'", args[i]);
                 if (pass_no == 2) {
                     bb_push(output, (unsigned char)(v & 0xFF));
                     bb_push(output, (unsigned char)((v >> 8) & 0xFF));
@@ -2029,17 +2230,22 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
 
             if (pass_no == 2) {
                 OpcodeEntry *e = find_mnemonic(L->op);
-                if (!e || e->op[mode] == -1)
-                    asm_error(L->line_no, L->raw, "Invalid addressing mode for %s", L->op);
-                int opcode = e->op[mode];
+                int mode_ok = (e != NULL) && (e->op[mode] != -1);
+                int opcode = mode_ok ? e->op[mode] : 0x00;   /* BRK's opcode --
+                    an arbitrary but harmless placeholder; never actually
+                    written to the .prg, since a mode_ok failure here always
+                    means at least one error was recorded, and main() never
+                    writes output once any error exists */
+                if (!mode_ok)
+                    asm_error_recoverable(L->line_no, L->raw, "Invalid addressing mode for %s", L->op);
                 if (undef)
-                    asm_error(L->line_no, L->raw, "Undefined symbol in operand '%s'", L->operand);
+                    asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in operand '%s'", L->operand);
 
                 unsigned char bytes[3]; int nb = 0;
                 if (mode == M_REL) {
                     long offset = val - (entry_pc + 2);
                     if (offset < -128 || offset > 127)
-                        asm_error(L->line_no, L->raw,
+                        asm_error_recoverable(L->line_no, L->raw,
                                   "Branch target out of range (%+ld) for %s %s",
                                   offset, L->op, L->operand);
                     bytes[nb++] = (unsigned char)opcode;
@@ -2132,6 +2338,12 @@ int main(int argc, char **argv) {
     }
 
     init_opcodes();
+    reset_collected_errors();   /* must happen before load_source() --
+        split_line() (called during loading, via process_include_file())
+        can itself record recoverable errors (e.g. "Unknown mnemonic or
+        directive"), and those need to survive into the pass-1/pass-2
+        checks below rather than being wiped out by a reset that runs
+        after loading already recorded them */
     load_source(input_path);
 
     ByteBuf dummy; bb_init(&dummy);
@@ -2139,9 +2351,28 @@ int main(int argc, char **argv) {
     run_pass(1, &dummy, &origin1);   /* build symbol table */
     free(dummy.data);
 
+    if (any_errors_recorded()) {
+        /* Pass 1 already found at least one real problem -- don't even
+         * attempt pass 2. Pass 2 depends on pass 1 having produced a
+         * complete, trustworthy symbol table and a consistent set of
+         * addresses; running it anyway on top of a known-broken pass 1
+         * would likely just flood the output with secondary "undefined
+         * symbol" noise stemming from the original mistakes, not
+         * independent problems worth separately reporting. */
+        print_all_collected_errors_and_exit();
+    }
+
     ByteBuf output; bb_init(&output);
     long origin2;
     run_pass(2, &output, &origin2);  /* generate code */
+
+    if (any_errors_recorded()) {
+        /* Pass 2 found problems pass 1 couldn't see (an addressing mode
+         * an opcode doesn't support, a branch out of range, and so on).
+         * No .prg or listing gets written -- there is nothing correct
+         * to write once any error was recorded. */
+        print_all_collected_errors_and_exit();
+    }
 
     FILE *out = fopen(output_path, "wb");
     if (!out) { fprintf(stderr, "Cannot open output file '%s'\n", output_path); return 1; }

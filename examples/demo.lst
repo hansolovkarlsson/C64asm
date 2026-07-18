@@ -1,4 +1,4 @@
-; c64asm listing  (origin $0801, 767 bytes)
+; c64asm listing  (origin $0801, 766 bytes)
 
 080D  4C 91 09          .basic start   ; auto-emits `jmp start` right after the loader
 0810  85 FB             sta str_ptr
@@ -175,97 +175,103 @@
 099D  8D 03 DC          sta CIA1_DDRB
 09A0  A9 93             lda #$93
 09A2  20 D2 FF          jsr CHROUT
-09A5  A9 6D             lda #<welcome_msg
+09A5  A9 80             lda #<welcome_msg
 09A7  A0 0A             ldy #>welcome_msg
 09A9  20 10 08          jsr print_msg
-09AC  78                sei
-09AD  A9 FF             lda #%11111111
-09AF  8D 02 DC          sta CIA1_DDRA
-09B2  A9 FD             lda #%11111101
-09B4  8D 00 DC          sta CIA1_PRA
-09B7  AD 01 DC          lda CIA1_PRB
-09BA  58                cli
-09BB  49 FF             eor #$ff          
-09BD  29 02             and #%00000010
-09BF  F0 EB             beq wait_key
-09C1  AD 11 D0          lda VIC_CTRL1
-09C4  09 20             ora #%00100000        
-09C6  8D 11 D0          sta VIC_CTRL1
-09C9  AD 18 D0          lda VIC_MEMPTRS
-09CC  29 F0             and #%11110000        
-09CE  09 08             ora #((BITMAP) / 1024)   
-09D0  8D 18 D0          sta VIC_MEMPTRS
-09D3  A9 00             lda #<(BITMAP)
-09D5  85 FD             sta gfx_ptr
-09D7  A9 20             lda #>(BITMAP)
-09D9  85 FE             sta gfx_ptr+1
-09DB  A2 20             ldx #32
-09DD  A9 00             lda #$00
-09DF  A0 00             ldy #$00
-09E1  91 FD             sta (gfx_ptr),y
-09E3  C8                iny
-09E4  D0 FB             bne __local20_clear_byte
-09E6  E6 FE             inc gfx_ptr+1
-09E8  CA                dex
-09E9  D0 F4             bne __local20_clear_loop
-09EB  A9 00             lda #<SCREEN
-09ED  85 FD             sta gfx_ptr
-09EF  A9 04             lda #>SCREEN
-09F1  85 FE             sta gfx_ptr+1
-09F3  A2 04             ldx #4
-09F5  A9 10             lda #%00010000
-09F7  A0 00             ldy #$00
-09F9  91 FD             sta (gfx_ptr),y
-09FB  C8                iny
-09FC  D0 FB             bne __local21_fill_byte
-09FE  E6 FE             inc gfx_ptr+1
-0A00  CA                dex
-0A01  D0 F4             bne __local21_fill_loop
-0A03  A9 2B             lda #((sprite_data) / 64)
-0A05  8D F8 07          sta SPRITE_PTR0
-0A08  A9 01             lda #1
-0A0A  8D 27 D0          sta SPRITE0_COLOR
-0A0D  A9 64             lda #100
-0A0F  8D 00 D0          sta SPRITE0_X
-0A12  A9 64             lda #100
-0A14  8D 01 D0          sta SPRITE0_Y
-0A17  A9 01             lda #%00000001
-0A19  8D 15 D0          sta SPRITE_ENABLE
-0A1C  78                sei
-0A1D  A9 FF             lda #%11111111
-0A1F  8D 02 DC          sta CIA1_DDRA
-0A22  A9 FD             lda #%11111101
-0A24  8D 00 DC          sta CIA1_PRA
-0A27  AD 01 DC          lda CIA1_PRB
-0A2A  58                cli
-0A2B  49 FF             eor #$ff          
-0A2D  29 02             and #%00000010
-0A2F  D0 06             bne w_held
-0A31  20 83 09          jsr engine_sound_off
-0A34  4C 3A 0A          jmp check_restart
-0A37  20 61 09          jsr engine_sound_on
-0A3A  78                sei
-0A3B  A9 FF             lda #%11111111
-0A3D  8D 02 DC          sta CIA1_DDRA
-0A40  A9 FB             lda #%11111011
-0A42  8D 00 DC          sta CIA1_PRA
-0A45  AD 01 DC          lda CIA1_PRB
-0A48  58                cli
-0A49  49 FF             eor #$ff          
-0A4B  29 01             and #%00000001
-0A4D  D0 03             bne do_restart
-0A4F  4C 1C 0A          jmp main_loop
-0A52  AD 11 D0          lda VIC_CTRL1
-0A55  29 DF             and #%11011111         
-0A57  8D 11 D0          sta VIC_CTRL1
-0A5A  A9 14             lda #$14                
-0A5C  8D 18 D0          sta VIC_MEMPTRS
-0A5F  A9 93             lda #$93
-0A61  20 D2 FF          jsr CHROUT
-0A64  A9 9B             lda #<bye_msg
-0A66  A0 0A             ldy #>bye_msg
-0A68  20 10 08          jsr print_msg
-0A6B  60                rts
+09AC  AD 11 D0          lda VIC_CTRL1
+09AF  09 20             ora #%00100000        
+09B1  8D 11 D0          sta VIC_CTRL1
+09B4  AD 18 D0          lda VIC_MEMPTRS
+09B7  29 F0             and #%11110000        
+09B9  09 08             ora #((BITMAP) / 1024)   
+09BB  8D 18 D0          sta VIC_MEMPTRS
+09BE  A9 00             lda #<(BITMAP)
+09C0  85 FD             sta gfx_ptr
+09C2  A9 20             lda #>(BITMAP)
+09C4  85 FE             sta gfx_ptr+1
+09C6  A2 20             ldx #32
+09C8  A9 00             lda #$00
+09CA  A0 00             ldy #$00
+09CC  91 FD             sta (gfx_ptr),y
+09CE  C8                iny
+09CF  D0 FB             bne __local18_clear_byte
+09D1  E6 FE             inc gfx_ptr+1
+09D3  CA                dex
+09D4  D0 F4             bne __local18_clear_loop
+09D6  A9 00             lda #<SCREEN
+09D8  85 FD             sta gfx_ptr
+09DA  A9 04             lda #>SCREEN
+09DC  85 FE             sta gfx_ptr+1
+09DE  A2 04             ldx #4
+09E0  A9 10             lda #%00010000
+09E2  A0 00             ldy #$00
+09E4  91 FD             sta (gfx_ptr),y
+09E6  C8                iny
+09E7  D0 FB             bne __local19_fill_byte
+09E9  E6 FE             inc gfx_ptr+1
+09EB  CA                dex
+09EC  D0 F4             bne __local19_fill_loop
+09EE  A9 2B             lda #((sprite_data) / 64)
+09F0  8D F8 07          sta SPRITE_PTR0
+09F3  A9 01             lda #1
+09F5  8D 27 D0          sta SPRITE0_COLOR
+09F8  A9 64             lda #100
+09FA  8D 00 D0          sta SPRITE0_X
+09FD  A9 64             lda #100
+09FF  8D 01 D0          sta SPRITE0_Y
+0A02  A9 01             lda #%00000001
+0A04  8D 15 D0          sta SPRITE_ENABLE
+0A07  20 3A 08          jsr read_joy2
+0A0A  8D 7F 0A          sta joy_state
+0A0D  29 10             and #%00010000          ; fire button
+0A0F  F0 1E             beq no_fire
+0A11  A9 00             lda #$00
+0A13  8D 04 D4          sta VOICE1_CTRL
+0A16  A9 00             lda #$00
+0A18  8D 00 D4          sta VOICE1_FREQ_LO
+0A1B  A9 30             lda #$30
+0A1D  8D 01 D4          sta VOICE1_FREQ_HI
+0A20  A9 08             lda #$08
+0A22  8D 05 D4          sta VOICE1_AD
+0A25  A9 00             lda #$00
+0A27  8D 06 D4          sta VOICE1_SR
+0A2A  A9 81             lda #%10000001
+0A2C  8D 04 D4          sta VOICE1_CTRL
+0A2F  78                sei
+0A30  A9 FF             lda #%11111111
+0A32  8D 02 DC          sta CIA1_DDRA
+0A35  A9 FD             lda #%11111101
+0A37  8D 00 DC          sta CIA1_PRA
+0A3A  AD 01 DC          lda CIA1_PRB
+0A3D  58                cli
+0A3E  49 FF             eor #$ff          
+0A40  29 02             and #%00000010
+0A42  D0 06             bne w_held
+0A44  20 83 09          jsr engine_sound_off
+0A47  4C 4D 0A          jmp check_restart
+0A4A  20 61 09          jsr engine_sound_on
+0A4D  78                sei
+0A4E  A9 FF             lda #%11111111
+0A50  8D 02 DC          sta CIA1_DDRA
+0A53  A9 FB             lda #%11111011
+0A55  8D 00 DC          sta CIA1_PRA
+0A58  AD 01 DC          lda CIA1_PRB
+0A5B  58                cli
+0A5C  49 FF             eor #$ff          
+0A5E  29 01             and #%00000001
+0A60  D0 03             bne do_restart
+0A62  4C 07 0A          jmp main_loop
+0A65  AD 11 D0          lda VIC_CTRL1
+0A68  29 DF             and #%11011111         
+0A6A  8D 11 D0          sta VIC_CTRL1
+0A6D  A9 14             lda #$14                
+0A6F  8D 18 D0          sta VIC_MEMPTRS
+0A72  A9 93             lda #$93
+0A74  20 D2 FF          jsr CHROUT
+0A77  A9 95             lda #<bye_msg
+0A79  A0 0A             ldy #>bye_msg
+0A7B  20 10 08          jsr print_msg
+0A7E  60                rts
 
 Symbol table:
   BITMAP               = $2000
@@ -304,12 +310,12 @@ Symbol table:
   YMIN                 = $0032
   __local10_already_on = $0982
   __local11_already_off = $0990
+  __local18_clear_byte = $09CC
+  __local18_clear_loop = $09CA
+  __local19_fill_byte  = $09E4
+  __local19_fill_loop  = $09E2
   __local1_done        = $0820
   __local1_loop        = $0816
-  __local20_clear_byte = $09E1
-  __local20_clear_loop = $09DF
-  __local21_fill_byte  = $09F9
-  __local21_fill_loop  = $09F7
   __local2_loop        = $0827
   __local2_no          = $0834
   __local2_yes         = $0837
@@ -330,20 +336,20 @@ Symbol table:
   __local8_x_inc_done  = $08C4
   __local8_y_done      = $0916
   __local9_loop        = $0946
-  bye_msg              = $0A9B
-  check_restart        = $0A3A
+  bye_msg              = $0A95
+  check_restart        = $0A4D
   cmp_ptr              = $0002
-  do_restart           = $0A52
+  do_restart           = $0A65
   engine_playing       = $0009
   engine_sound_off     = $0983
   engine_sound_on      = $0961
   extract_word         = $0884
   gfx_ptr              = $00FD
   input_buf            = $0845
-  joy_state            = $0A6C
+  joy_state            = $0A7F
   kw_ptr               = $0004
-  main_loop            = $0A1C
-  no_fire              = $0A1C
+  main_loop            = $0A07
+  no_fire              = $0A2F
   print_msg            = $0810
   read_joy2            = $083A
   read_line            = $086D
@@ -353,10 +359,9 @@ Symbol table:
   start                = $0991
   str_equal            = $0821
   str_ptr              = $00FB
-  w_held               = $0A37
+  w_held               = $0A4A
   wait_frame           = $08AE
-  wait_key             = $09AC
-  welcome_msg          = $0A6D
+  welcome_msg          = $0A80
   word_dest_ptr        = $00FB
   xdir                 = $000C
   xpos                 = $0006

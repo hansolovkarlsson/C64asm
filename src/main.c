@@ -57,6 +57,7 @@
 #include "lineparser.h"
 #include "listing.h"
 #include "includes.h"
+#include "error.h"
 
 static void usage(const char *prog) {
     fprintf(stderr,
@@ -106,6 +107,12 @@ int main(int argc, char **argv) {
 
     includes_set_lib_dir(lib_dir);  /* NULL is fine -- disables the fallback */
     init_opcodes();          /* build the opcode table (opcodes.c) */
+    reset_collected_errors();   /* must happen before load_source() --
+        split_line() (called during loading) can itself record
+        recoverable errors (e.g. "Unknown mnemonic or directive"), and
+        those need to survive into the pass-1/pass-2 checks below rather
+        than being wiped out by a reset that runs after loading already
+        recorded them */
     load_source(input_path); /* read the whole file into g_lines (fileio.c) */
 
     /* Pass 1: walk the source once just to build the symbol table --
@@ -116,11 +123,31 @@ int main(int argc, char **argv) {
     run_pass(1, &dummy, &origin1);
     free(dummy.data);
 
+    if (any_errors_recorded()) {
+        /* Pass 1 (or loading, before it) already found at least one
+         * real problem -- don't even attempt pass 2. Pass 2 depends on
+         * pass 1 having produced a complete, trustworthy symbol table
+         * and a consistent set of addresses; running it anyway on top
+         * of a known-broken pass 1 would likely just flood the output
+         * with secondary "undefined symbol" noise stemming from the
+         * original mistakes, not independent problems worth separately
+         * reporting. */
+        print_all_collected_errors_and_exit();
+    }
+
     /* Pass 2: walk it again, now that every symbol is resolved, and
      * actually produce the machine code and listing entries. */
     ByteBuf output; bb_init(&output);
     long origin2;
     run_pass(2, &output, &origin2);
+
+    if (any_errors_recorded()) {
+        /* Pass 2 found problems pass 1 couldn't see (an addressing mode
+         * an opcode doesn't support, a branch out of range, and so on).
+         * No .prg or listing gets written -- there is nothing correct
+         * to write once any error was recorded. */
+        print_all_collected_errors_and_exit();
+    }
 
     FILE *out = fopen(output_path, "wb");
     if (!out) { fprintf(stderr, "Cannot open output file '%s'\n", output_path); return 1; }
