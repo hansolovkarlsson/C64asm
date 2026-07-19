@@ -78,6 +78,9 @@ a real C64 to run it.
 - **Local labels** (`@label`), scoped between global labels and per
   macro expansion, so loop/branch labels inside a subroutine or macro
   never collide with anything else in the file
+- **VICE monitor label export** (`--vice-labels`) — debug by name in
+  VICE (`break .main_loop` instead of `break $0a60`) instead of bare
+  hex addresses; see `c64asm-reference.md` §16
 - **`.include`**, with automatic include-once semantics (no manual
   include guards needed), relative path resolution, and circular-include
   detection
@@ -127,7 +130,7 @@ unzip c64asm-split-src.zip && make
 | `c64asm.c` | The assembler, single-file portable C99 implementation |
 | `c64asm-split-src.zip` | The same assembler split into one file per concern, heavily commented, with a `Makefile` — for reading, not a different implementation (see `ARCHITECTURE.md`) |
 | `ARCHITECTURE.md` | Guide to the split-source project's module layout |
-| `c64asm-reference.md` | **Assembler syntax reference** — labels, expressions, addressing-mode syntax, macros, local labels, `.include`, conditional assembly, every directive, error messages, CLI usage |
+| `c64asm-reference.md` | **Assembler syntax reference** — labels, expressions, addressing-mode syntax, macros, local labels, `.include`, conditional assembly, every directive, error messages, VICE label export, CLI usage |
 | `c64asm-opcode-reference.md` | **6502 opcode reference** — what every documented instruction does, which status flags it affects, and a worked example of each; a full write-up of all 13 addressing modes; and a section on the illegal/undocumented opcodes, clearly marked as non-standard |
 | `c64-memory-reference.md` | **C64 hardware reference** — screen/color RAM, VIC-II graphics modes, sprites, SID sound, joystick input, common KERNAL routines, all with tested example code |
 | `c64asm-stdlib.zip` | **Standard library** — `.include`-able text/input/graphics/sound routines, shared across the demos (see below) |
@@ -216,17 +219,16 @@ for worked regression suites built on it).
 ## Known limitations
 
 - **Zero-page sizing of a *forward-referenced* label** can, in rare
-  cases, differ between passes — see `c64asm-reference.md` §16 for when
+  cases, differ between passes — see `c64asm-reference.md` §18 for when
   this can matter and why it almost never does in practice
 - Macros, local labels, `.include`, and conditional assembly are all
   supported but intentionally simple: macros must be defined before
   use, `.if`/`.elif` conditions can't reference a forward-declared
   symbol, and `.if` can gate instructions/data but not which `.macro`
   gets defined or which file gets `.include`d (see `c64asm-reference.md`
-  §16 for the full list)
-- No undocumented/illegal 6502 opcodes
+  §18 for the full list)
 - Assembly can surface several independent errors from one run (see
-  `c64asm-reference.md` §16), though messages after the first can
+  `c64asm-reference.md` §17), though messages after the first can
   occasionally be downstream noise rather than genuinely separate
   problems; a handful of whole-file structural errors (missing/circular
   `.include`, a broken macro or conditional-assembly block) still stop

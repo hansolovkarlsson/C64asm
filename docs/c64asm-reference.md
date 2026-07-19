@@ -14,8 +14,8 @@ for the same source file. Use whichever suits your environment.
 ## 1. Command-line usage
 
 ```
-python3 c64asm.py <input.asm> -o <output.prg> [--listing <file.lst>] [--lib-dir <dir>]
-cc -O2 -o c64asm c64asm.c && ./c64asm <input.asm> -o <output.prg> [--listing <file.lst>] [--lib-dir <dir>]
+python3 c64asm.py <input.asm> -o <output.prg> [--listing <file.lst>] [--vice-labels <file>] [--lib-dir <dir>]
+cc -O2 -o c64asm c64asm.c && ./c64asm <input.asm> -o <output.prg> [--listing <file.lst>] [--vice-labels <file>] [--lib-dir <dir>]
 ```
 
 | Argument | Required | Description |
@@ -23,6 +23,7 @@ cc -O2 -o c64asm c64asm.c && ./c64asm <input.asm> -o <output.prg> [--listing <fi
 | `<input.asm>` | yes | Path to the assembly source file. |
 | `-o`, `--output <file>` | yes | Path to write the assembled `.prg` file. |
 | `--listing <file>` | no | Write a listing file: addresses, encoded bytes, source lines, and a final symbol table. |
+| `--vice-labels <file>` | no | Write a VICE monitor label file for debugging by name (§16). |
 | `--lib-dir <dir>` | no | Fallback search directory for `.include` (§10). See below. |
 | `-h`, `--help` | no | Print a short usage message. |
 
@@ -33,9 +34,11 @@ origin address:
 Assembled 60 bytes, origin=$0801 -> hello.prg
 ```
 
-On error, it prints a message to stderr identifying the line number and
-source text, and exits with a non-zero status. Assembly stops at the first
-error (there is no error-recovery / multi-error reporting).
+On error, it prints one or more messages to stderr identifying the line
+number and source text, and exits with a non-zero status. Most kinds of
+mistake are collected and reported together rather than stopping at the
+first one — see §17's "Multiple errors per run"; a handful of
+whole-file structural problems still stop assembly immediately.
 
 ```
 Assembly error: Undefined symbol in operand 'undefined_thing' (line 2: lda undefined_thing)
@@ -698,7 +701,7 @@ different directories) is still correctly recognized as one file.
   error.
 - Once `.include` is used **anywhere** in a program, every subsequent
   error message — including ones from the top-level file itself — names
-  which file it came from (see §16). A program that never uses
+  which file it came from (see §17). A program that never uses
   `.include` sees no change in its error output at all.
 
 ---
@@ -1026,7 +1029,53 @@ only real 6502 instructions appear there.
 
 ---
 
-## 16. Error messages
+## 16. VICE label export
+
+`--vice-labels <file>` writes a file of `add_label` commands — one per
+defined symbol, the same symbols `--listing`'s own "Symbol table:"
+section shows, just reformatted for VICE:
+
+```
+; c64asm VICE label export  (origin $0801, 60 bytes)
+; load in the VICE monitor with: ll "hello.vice"
+add_label $D020 .BORDER
+add_label $FFD2 .CHROUT
+add_label $0830 .message
+add_label $080D .start
+```
+
+Load it in the VICE monitor with `ll` (or the full name, `load_labels`):
+
+```
+(C:$0801) ll "hello.vice"
+```
+
+Once loaded, labels work anywhere the monitor accepts an address —
+breakpoints, memory dumps, disassembly — so debugging can use names
+instead of bare hex addresses:
+
+```
+(C:$0801) break .main_loop
+(C:$0801) d .move_left .move_left+10
+```
+
+Disassembly also shows label names in place of addresses it recognizes,
+including as the target of branches and jumps, which is often the more
+immediately useful effect day to day — `jmp .main_loop` reads a lot
+faster than `jmp $0a60`.
+
+Every symbol gets exported, including plain numeric constants that
+aren't really addresses at all (a bitmask, a loop count, a compile-time
+bound like `XMIN = 24`) — this assembler's symbol table doesn't
+distinguish "this is a real code/data address" from "this just happens
+to be a small number," so neither does this export. VICE doesn't mind
+either way — a label is just an optional name-to-address annotation,
+not something that changes behavior — and other assemblers targeting
+VICE (cc65, for one) export labels the same way for the same reason.
+
+---
+
+## 17. Error messages
 
 Each error is printed in the form:
 
@@ -1124,7 +1173,7 @@ Common errors:
 
 ---
 
-## 17. Known limitations
+## 18. Known limitations
 
 - **Zero-page sizing of forward-referenced labels.** The assembler picks
   zero-page vs. absolute addressing based on whether an operand's value is
@@ -1154,9 +1203,9 @@ Common errors:
   unstable or highly unstable even on real NMOS hardware, and none of
   them exist at all on non-NMOS 6502 variants.
 - **Multi-error reporting has a noise trade-off.** A single run can
-  surface several independent mistakes (see §16), but messages after
+  surface several independent mistakes (see §17), but messages after
   the first one can occasionally be downstream noise rather than
-  genuinely separate problems — see the note at the end of §16.
+  genuinely separate problems — see the note at the end of §17.
 - **`.charset lower` (§6) only controls assembled bytes, not the C64's
   actual runtime character set** — that's separate hardware state the
   assembler has no way to touch, so `.charset lower` text needs to be
@@ -1168,7 +1217,7 @@ Common errors:
 
 ---
 
-## 18. Complete example
+## 19. Complete example
 
 ```asm
 ; hello.asm - prints a message and cycles the border color

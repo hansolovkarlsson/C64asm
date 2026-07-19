@@ -1757,6 +1757,15 @@ def main():
     parser.add_argument('input', help="Input assembly source file")
     parser.add_argument('-o', '--output', required=True, help="Output .prg file")
     parser.add_argument('--listing', help="Optional assembly listing output file")
+    parser.add_argument('--vice-labels', metavar='FILE',
+                         help="Optional VICE monitor label file (add_label "
+                              "commands for every symbol, same content as "
+                              "--listing's own symbol table) -- load it in "
+                              "the VICE monitor with 'll \"FILE\"' (or "
+                              "load_labels) to debug by name: 'break "
+                              ".main_loop' instead of 'break $0a60'. See "
+                              "c64asm-reference.md's \"VICE label export\" "
+                              "section.")
     parser.add_argument('--lib-dir', metavar='DIR',
                          help="Fallback directory to also search when resolving "
                               ".include paths that aren't found relative to the "
@@ -1793,6 +1802,16 @@ def main():
             for name in sorted(symbols):
                 f.write(f"  {name:<20} = ${symbols[name]:04X}\n")
         print(f"Listing written to {args.listing}")
+
+    if args.vice_labels:
+        with open(args.vice_labels, 'w') as f:
+            f.write(f"; c64asm VICE label export  (origin ${origin:04X}, "
+                     f"{len(code)} bytes)\n")
+            f.write("; load in the VICE monitor with: ll \"" +
+                     args.vice_labels + "\"\n")
+            for name in sorted(symbols):
+                f.write(f"add_label ${symbols[name]:04X} .{name}\n")
+        print(f"VICE labels written to {args.vice_labels}")
 
 
 if __name__ == '__main__':

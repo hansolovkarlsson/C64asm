@@ -2526,13 +2526,17 @@ static void load_source(const char *path) {
 static void usage(const char *prog) {
     fprintf(stderr,
         "c64asm - a two-pass 6502/6510 assembler for the Commodore 64\n\n"
-        "Usage: %s <input.asm> -o <output.prg> [--listing <file.lst>] [--lib-dir <dir>]\n\n"
+        "Usage: %s <input.asm> -o <output.prg> [--listing <file.lst>]\n"
+        "       [--vice-labels <file>] [--lib-dir <dir>]\n\n"
         "  --lib-dir <dir>  Fallback directory to also search when resolving\n"
         "                   .include paths that aren't found relative to the\n"
         "                   including file (the default, unaffected if this\n"
         "                   isn't given). Lets a common library directory be\n"
         "                   shared across separate project directories instead\n"
-        "                   of each needing its own copy.\n",
+        "                   of each needing its own copy.\n"
+        "  --vice-labels <file>  Write a VICE monitor label file (add_label\n"
+        "                   commands for every symbol) -- load it with 'll\n"
+        "                   \"<file>\"' in the VICE monitor to debug by name.\n",
         prog);
 }
 
@@ -2540,6 +2544,7 @@ int main(int argc, char **argv) {
     const char *input_path = NULL;
     const char *output_path = NULL;
     const char *listing_path = NULL;
+    const char *vice_labels_path = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
@@ -2548,6 +2553,9 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--listing") == 0) {
             if (i + 1 >= argc) { usage(argv[0]); return 1; }
             listing_path = argv[++i];
+        } else if (strcmp(argv[i], "--vice-labels") == 0) {
+            if (i + 1 >= argc) { usage(argv[0]); return 1; }
+            vice_labels_path = argv[++i];
         } else if (strcmp(argv[i], "--lib-dir") == 0) {
             if (i + 1 >= argc) { usage(argv[0]); return 1; }
             g_lib_dir = argv[++i];
@@ -2614,6 +2622,21 @@ int main(int argc, char **argv) {
 
     printf("Assembled %zu bytes, origin=$%04lX -> %s\n", output.len, origin2, output_path);
 
+    /* Shared alphabetical symbol order for --listing's "Symbol table:"
+     * section and/or --vice-labels below -- simple insertion-sort-free
+     * selection sort (symbol counts are small for typical programs). */
+    int *order = NULL;
+    if (listing_path || vice_labels_path) {
+        order = malloc(sizeof(int) * symtab_count);
+        for (int i = 0; i < symtab_count; i++) order[i] = i;
+        for (int i = 0; i < symtab_count; i++) {
+            int min = i;
+            for (int j = i + 1; j < symtab_count; j++)
+                if (strcmp(symtab[order[j]].name, symtab[order[min]].name) < 0) min = j;
+            int t = order[i]; order[i] = order[min]; order[min] = t;
+        }
+    }
+
     if (listing_path) {
         FILE *lf = fopen(listing_path, "w");
         if (!lf) { fprintf(stderr, "Cannot open listing file '%s'\n", listing_path); return 1; }
@@ -2637,24 +2660,28 @@ int main(int argc, char **argv) {
             fprintf(lf, "%04lX  %-9s %s\n", le->addr, hexb, rawtrim);
         }
         fprintf(lf, "\nSymbol table:\n");
-        /* simple insertion-sort-free alphabetical print via naive selection sort
-         * (symbol counts are small for typical programs) */
-        int *order = malloc(sizeof(int) * symtab_count);
-        for (int i = 0; i < symtab_count; i++) order[i] = i;
-        for (int i = 0; i < symtab_count; i++) {
-            int min = i;
-            for (int j = i + 1; j < symtab_count; j++)
-                if (strcmp(symtab[order[j]].name, symtab[order[min]].name) < 0) min = j;
-            int t = order[i]; order[i] = order[min]; order[min] = t;
-        }
         for (int i = 0; i < symtab_count; i++) {
             Symbol *s = &symtab[order[i]];
             fprintf(lf, "  %-20s = $%04lX\n", s->name, s->value);
         }
-        free(order);
         fclose(lf);
         printf("Listing written to %s\n", listing_path);
     }
+
+    if (vice_labels_path) {
+        FILE *vf = fopen(vice_labels_path, "w");
+        if (!vf) { fprintf(stderr, "Cannot open VICE label file '%s'\n", vice_labels_path); return 1; }
+        fprintf(vf, "; c64asm VICE label export  (origin $%04lX, %zu bytes)\n", origin2, output.len);
+        fprintf(vf, "; load in the VICE monitor with: ll \"%s\"\n", vice_labels_path);
+        for (int i = 0; i < symtab_count; i++) {
+            Symbol *s = &symtab[order[i]];
+            fprintf(vf, "add_label $%04lX .%s\n", s->value, s->name);
+        }
+        fclose(vf);
+        printf("VICE labels written to %s\n", vice_labels_path);
+    }
+
+    free(order);
 
     free(output.data);
     free(g_lines);

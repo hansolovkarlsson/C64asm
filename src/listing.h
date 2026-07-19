@@ -50,4 +50,35 @@ void listing_add(long addr, const char *raw, const unsigned char *bytes, int nby
  */
 void write_listing_file(const char *path, long origin, size_t output_len);
 
+/*
+ * Writes a VICE monitor label file: one "add_label $ADDR .name" command
+ * per defined symbol, sorted alphabetically by name -- the exact same
+ * symbols --listing's own "Symbol table:" section shows, just
+ * reformatted for VICE's "ll" (load_labels) monitor command instead of
+ * plain text. Load it in the VICE monitor with:
+ *
+ *     ll "path/to/file"
+ *
+ * to debug by name -- "break .main_loop" instead of "break $0a60", and
+ * disassembly shows label names instead of bare addresses.
+ *
+ * Every symbol gets exported, including plain numeric constants that
+ * aren't really addresses at all (e.g. a compile-time bound like
+ * "XMIN = 24") -- this assembler's symbol table doesn't distinguish
+ * "this is a real code/data address" from "this just happens to be a
+ * small number," so neither does this export. VICE doesn't mind either
+ * way (a label is just an optional name-to-address annotation, not
+ * something that changes behavior), and other assemblers' own VICE
+ * label exports (cc65, for one) have the same characteristic.
+ *
+ * path:       output file path.
+ * origin:     the assembled program's load address, for the header line.
+ * output_len: the assembled program's total size in bytes, for the
+ *             header line.
+ *
+ * Exits the program via fprintf+exit if the file can't be opened for
+ * writing, the same as write_listing_file().
+ */
+void write_vice_labels_file(const char *path, long origin, size_t output_len);
+
 #endif

@@ -1,0 +1,12 @@
+; c64asm VICE label export  (origin $0801, 60 bytes)
+; load in the VICE monitor with: ll "examples/hello.vice"
+add_label $0000 .BLACK
+add_label $D020 .BORDER
+add_label $FFD2 .CHROUT
+add_label $0820 .color_loop
+add_label $0827 .delay_inner
+add_label $0825 .delay_outer
+add_label $081B .done_print
+add_label $0830 .message
+add_label $080F .print_loop
+add_label $080D .start

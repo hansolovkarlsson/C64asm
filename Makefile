@@ -53,10 +53,10 @@ single:$(SINGLE_TARGET)
 # Cleanup
 clean:
 	rm -f $(TARGET) $(SRC_DIR)/*.o $(SINGLE_TARGET)
-	rm -f $(EXA_PRG) $(EXA_DIR)/*.lst $(EXA_DIR)/vice.log 
+	rm -f $(EXA_PRG) $(EXA_DIR)/*.lst $(EXA_DIR)/vice.log ./vice.log
 
 cleanprg:
-	rm -f $(EXA_PRG) $(EXA_DIR)/*.lst $(EXA_DIR)/vice.log 
+	rm -f $(EXA_PRG) $(EXA_DIR)/*.lst $(EXA_DIR)/vice.log ./vice.log
 	
 
 # Assembly files to PRG
@@ -78,6 +78,6 @@ examples: $(TARGET) $(EXA_PRG)
 
 %.prg: %.asm
 	echo $(TARGET) $< -o $@
-	$(TARGET) $< -o $@ --lib-dir $(LIB_DIR) --listing $(<:.asm=.lst)
+	$(TARGET) $< -o $@ --lib-dir $(LIB_DIR) --listing $(<:.asm=.lst) --vice-labels $(<:.asm=.vice)
 
 

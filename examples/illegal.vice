@@ -1,0 +1,25 @@
+; c64asm VICE label export  (origin $0801, 271 bytes)
+; load in the VICE monitor with: ll "examples/illegal.vice"
+add_label $D021 .BACKGR
+add_label $D020 .BORDER
+add_label $FFD2 .CHROUT
+add_label $D800 .COLOR
+add_label $0400 .SCREEN
+add_label $0812 .__local2_row_loop
+add_label $0825 .__local3_row_loop
+add_label $0838 .__local4_row_loop
+add_label $084B .__local5_row_loop
+add_label $089E .__local7_done
+add_label $0892 .__local7_print_loop
+add_label $08A5 .__local8_dcp_loop
+add_label $08AE .__local9_inner
+add_label $08AC .__local9_outer
+add_label $00FB .counter
+add_label $089F .dcp_showcase
+add_label $0887 .flash_loop
+add_label $08B5 .intro_msg
+add_label $0900 .palette_tbl
+add_label $08F0 .pattern_tbl
+add_label $0890 .print_intro
+add_label $08AA .short_pause
+add_label $080D .start

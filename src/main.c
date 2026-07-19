@@ -62,13 +62,17 @@
 static void usage(const char *prog) {
     fprintf(stderr,
         "c64asm - a two-pass 6502/6510 assembler for the Commodore 64\n\n"
-        "Usage: %s <input.asm> -o <output.prg> [--listing <file.lst>] [--lib-dir <dir>]\n\n"
+        "Usage: %s <input.asm> -o <output.prg> [--listing <file.lst>]\n"
+        "       [--vice-labels <file>] [--lib-dir <dir>]\n\n"
         "  --lib-dir <dir>  Fallback directory to also search when resolving\n"
         "                   .include paths that aren't found relative to the\n"
         "                   including file (the default, unaffected if this\n"
         "                   isn't given). Lets a common library directory be\n"
         "                   shared across separate project directories instead\n"
-        "                   of each needing its own copy.\n",
+        "                   of each needing its own copy.\n"
+        "  --vice-labels <file>  Write a VICE monitor label file (add_label\n"
+        "                   commands for every symbol) -- load it with 'll\n"
+        "                   \"<file>\"' in the VICE monitor to debug by name.\n",
         prog);
 }
 
@@ -76,6 +80,7 @@ int main(int argc, char **argv) {
     const char *input_path = NULL;
     const char *output_path = NULL;
     const char *listing_path = NULL;
+    const char *vice_labels_path = NULL;
     const char *lib_dir = NULL;
 
     for (int i = 1; i < argc; i++) {
@@ -85,6 +90,9 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--listing") == 0) {
             if (i + 1 >= argc) { usage(argv[0]); return 1; }
             listing_path = argv[++i];
+        } else if (strcmp(argv[i], "--vice-labels") == 0) {
+            if (i + 1 >= argc) { usage(argv[0]); return 1; }
+            vice_labels_path = argv[++i];
         } else if (strcmp(argv[i], "--lib-dir") == 0) {
             if (i + 1 >= argc) { usage(argv[0]); return 1; }
             lib_dir = argv[++i];
@@ -163,6 +171,11 @@ int main(int argc, char **argv) {
     if (listing_path) {
         write_listing_file(listing_path, origin2, output.len);
         printf("Listing written to %s\n", listing_path);
+    }
+
+    if (vice_labels_path) {
+        write_vice_labels_file(vice_labels_path, origin2, output.len);
+        printf("VICE labels written to %s\n", vice_labels_path);
     }
 
     free(output.data);

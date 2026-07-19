@@ -74,3 +74,30 @@ void write_listing_file(const char *path, long origin, size_t output_len) {
     free(order);
     fclose(lf);
 }
+
+void write_vice_labels_file(const char *path, long origin, size_t output_len) {
+    FILE *vf = fopen(path, "w");
+    if (!vf) { fprintf(stderr, "Cannot open VICE label file '%s'\n", path); exit(1); }
+
+    fprintf(vf, "; c64asm VICE label export  (origin $%04lX, %zu bytes)\n", origin, output_len);
+    fprintf(vf, "; load in the VICE monitor with: ll \"%s\"\n", path);
+
+    /* Same sort as write_listing_file() above -- kept as its own copy
+     * rather than factored out, since symbol counts here are small
+     * enough that a second O(n^2) sort costs nothing worth avoiding,
+     * and it keeps this function fully self-contained. */
+    int *order = malloc(sizeof(int) * symtab_count);
+    for (int i = 0; i < symtab_count; i++) order[i] = i;
+    for (int i = 0; i < symtab_count; i++) {
+        int min = i;
+        for (int j = i + 1; j < symtab_count; j++)
+            if (strcmp(symtab[order[j]].name, symtab[order[min]].name) < 0) min = j;
+        int t = order[i]; order[i] = order[min]; order[min] = t;
+    }
+    for (int i = 0; i < symtab_count; i++) {
+        Symbol *s = &symtab[order[i]];
+        fprintf(vf, "add_label $%04lX .%s\n", s->value, s->name);
+    }
+    free(order);
+    fclose(vf);
+}
