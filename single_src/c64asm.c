@@ -378,6 +378,7 @@ static int is_directive(const char *tok) {
     static const char *dirs[] = {
         ".org", ".byte", ".db", ".word", ".dw", ".text", ".asc",
         ".fill", ".ds", ".res", ".basic", ".equ", ".align", ".cpu", ".charset",
+        ".error", ".warning",
         ".if", ".elif", ".else", ".endif", ".ifdef", ".ifndef", NULL
     };
     for (int i = 0; dirs[i]; i++)
@@ -421,20 +422,24 @@ static void set_error_file(const char *filename) {
     }
 }
 
-/* Builds the exact "Assembly error: ..." text asm_error() has always
- * printed, but into a caller-supplied buffer instead of straight to
- * stderr -- shared by the fatal path (asm_error, below) and the
- * recoverable path (asm_error_recoverable, further down) so the two
- * produce byte-for-byte identical formatting for the same inputs. */
+/* Builds the exact "<prefix>: ..." text asm_error() has always printed
+ * (prefix is always "Assembly error" there), but into a caller-
+ * supplied buffer instead of straight to stderr, and with the prefix
+ * itself now a parameter -- shared by the fatal path (asm_error,
+ * below), the recoverable path (asm_error_recoverable, further down),
+ * and asm_warning() (which passes "Warning" instead), so all three
+ * produce byte-for-byte identical location formatting for the same
+ * inputs. */
 static void format_error_message(char *buf, size_t bufsz, int line_no,
-                                  const char *raw, const char *msg) {
+                                  const char *raw, const char *msg,
+                                  const char *prefix) {
     if (line_no > 0) {
         char head[MAX_LINE_LEN + 256];
         if (g_multi_file_mode && g_current_error_file[0])
-            snprintf(head, sizeof(head), "Assembly error: %s (%s, line %d",
-                     msg, g_current_error_file, line_no);
+            snprintf(head, sizeof(head), "%s: %s (%s, line %d",
+                     prefix, msg, g_current_error_file, line_no);
         else
-            snprintf(head, sizeof(head), "Assembly error: %s (line %d", msg, line_no);
+            snprintf(head, sizeof(head), "%s: %s (line %d", prefix, msg, line_no);
         if (raw && raw[0]) {
             char trimmed[MAX_LINE_LEN];
             strncpy(trimmed, raw, sizeof(trimmed) - 1);
@@ -450,7 +455,7 @@ static void format_error_message(char *buf, size_t bufsz, int line_no,
             snprintf(buf, bufsz, "%s)", head);
         }
     } else {
-        snprintf(buf, bufsz, "Assembly error: %s", msg);
+        snprintf(buf, bufsz, "%s: %s", prefix, msg);
     }
 }
 
@@ -461,9 +466,28 @@ static void asm_error(int line_no, const char *raw, const char *fmt, ...) {
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
     char full[MAX_LINE_LEN + 1280];
-    format_error_message(full, sizeof(full), line_no, raw, msg);
+    format_error_message(full, sizeof(full), line_no, raw, msg, "Assembly error");
     fprintf(stderr, "%s\n", full);
     exit(1);
+}
+
+/* Prints a '.warning' directive's message (see that directive's
+ * handling in run_pass()), in the same "(line N: source text)" format
+ * asm_error()/asm_error_recoverable() use -- but, unlike either of
+ * those, this doesn't count toward the error total, doesn't stop pass
+ * 2 from running or output from being written, and doesn't affect the
+ * exit status. Nothing else in this assembler currently produces a
+ * warning; this exists purely for the '.warning' directive itself to
+ * call. */
+static void asm_warning(int line_no, const char *raw, const char *fmt, ...) {
+    char msg[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    char full[MAX_LINE_LEN + 1280];
+    format_error_message(full, sizeof(full), line_no, raw, msg, "Warning");
+    fprintf(stderr, "%s\n", full);
 }
 
 /* --------------------------------------------------------------------- */
@@ -542,7 +566,7 @@ static void asm_error_recoverable(int line_no, const char *raw, const char *fmt,
         size_t bufsz = MAX_LINE_LEN + 1280;
         char *buf = malloc(bufsz);
         if (!buf) { fprintf(stderr, "Out of memory\n"); exit(1); }
-        format_error_message(buf, bufsz, line_no, raw, msg);
+        format_error_message(buf, bufsz, line_no, raw, msg, "Assembly error");
         g_collected_errors[g_collected_count++] = buf;
         return;
     }
@@ -2244,6 +2268,51 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                 /* fallback: leave illegal_enabled exactly as it was -- an
                    unrecognized mode isn't a request to change anything,
                    just a mistake to report */
+            }
+            continue;
+        }
+
+        if (strcmp(L->op, ".error") == 0 || strcmp(L->op, ".warning") == 0) {
+            /* A source-author-placed diagnostic -- typically paired
+             * with .ifdef/.ifndef to check a precondition (a required
+             * zero-page symbol defined, say) and fail with a clear,
+             * specific message right at the point of the mistake,
+             * instead of a confusing "Undefined symbol" buried inside
+             * a macro expansion three files away:
+             *
+             *       .ifndef gfx_ptr
+             *       .error "graphics.inc requires gfx_ptr (2-byte zero page)"
+             *       .endif
+             *
+             * '.error' is recoverable, not fatal -- several
+             * independent '.error's (e.g. two different missing
+             * zero-page symbols in two different included files) can
+             * all be collected and reported together in one run.
+             * '.warning' never stops assembly or affects the exit
+             * status at all; it's only gated to pass 2 here so its
+             * message prints exactly once, not twice (once per pass).
+             */
+            char msg_text[MAX_LINE_LEN];
+            strncpy(msg_text, L->operand, sizeof(msg_text) - 1);
+            msg_text[sizeof(msg_text) - 1] = '\0';
+            trim(msg_text);
+            size_t mlen = strlen(msg_text);
+            int is_warning = (strcmp(L->op, ".warning") == 0);
+            if (mlen >= 2 && msg_text[0] == '"' && msg_text[mlen-1] == '"') {
+                msg_text[mlen-1] = '\0';
+                memmove(msg_text, msg_text + 1, mlen - 1);
+            } else {
+                asm_error_recoverable(L->line_no, L->raw,
+                    "%s requires a quoted message string, e.g. %s \"message\"",
+                    L->op, L->op);
+                /* fallback: nothing else to do with a malformed
+                   directive -- there's no message to act on */
+                continue;
+            }
+            if (is_warning) {
+                if (pass_no == 2) asm_warning(L->line_no, L->raw, "%s", msg_text);
+            } else {
+                asm_error_recoverable(L->line_no, L->raw, "%s", msg_text);
             }
             continue;
         }

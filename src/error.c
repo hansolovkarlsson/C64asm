@@ -46,19 +46,23 @@ void asm_error_note_include_used(void) {
     g_multi_file_mode = 1;
 }
 
-/* Builds the exact "Assembly error: ..." text into a caller-supplied
- * buffer instead of straight to stderr -- shared by the fatal path
- * (asm_error) and the recoverable path (asm_error_recoverable) so the
- * two produce byte-for-byte identical formatting for the same inputs. */
+/* Builds the exact "<prefix>: ..." text into a caller-supplied buffer
+ * instead of straight to stderr (prefix is always "Assembly error" for
+ * asm_error()/asm_error_recoverable()) -- shared by the fatal path
+ * (asm_error), the recoverable path (asm_error_recoverable), and
+ * asm_warning() (which passes "Warning" instead), so all three
+ * produce byte-for-byte identical location formatting for the same
+ * inputs. */
 static void format_error_message(char *buf, size_t bufsz, int line_no,
-                                  const char *raw, const char *msg) {
+                                  const char *raw, const char *msg,
+                                  const char *prefix) {
     if (line_no > 0) {
         char head[MAX_LINE_LEN + 256];
         if (g_multi_file_mode && g_current_error_file[0])
-            snprintf(head, sizeof(head), "Assembly error: %s (%s, line %d",
-                     msg, g_current_error_file, line_no);
+            snprintf(head, sizeof(head), "%s: %s (%s, line %d",
+                     prefix, msg, g_current_error_file, line_no);
         else
-            snprintf(head, sizeof(head), "Assembly error: %s (line %d", msg, line_no);
+            snprintf(head, sizeof(head), "%s: %s (line %d", prefix, msg, line_no);
         if (raw && raw[0]) {
             char trimmed[MAX_LINE_LEN];
             strncpy(trimmed, raw, sizeof(trimmed) - 1);
@@ -74,7 +78,7 @@ static void format_error_message(char *buf, size_t bufsz, int line_no,
             snprintf(buf, bufsz, "%s)", head);
         }
     } else {
-        snprintf(buf, bufsz, "Assembly error: %s", msg);
+        snprintf(buf, bufsz, "%s: %s", prefix, msg);
     }
 }
 
@@ -85,9 +89,28 @@ void asm_error(int line_no, const char *raw, const char *fmt, ...) {
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
     char full[MAX_LINE_LEN + 1280];
-    format_error_message(full, sizeof(full), line_no, raw, msg);
+    format_error_message(full, sizeof(full), line_no, raw, msg, "Assembly error");
     fprintf(stderr, "%s\n", full);
     exit(1);
+}
+
+/* Prints a '.warning' directive's message (see that directive's
+ * handling in assembler.c), in the same "(line N: source text)" format
+ * asm_error()/asm_error_recoverable() use -- but, unlike either of
+ * those, this doesn't count toward the error total, doesn't stop pass
+ * 2 from running or output from being written, and doesn't affect the
+ * exit status. Nothing else in this assembler currently produces a
+ * warning; this exists purely for the '.warning' directive itself to
+ * call. */
+void asm_warning(int line_no, const char *raw, const char *fmt, ...) {
+    char msg[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    char full[MAX_LINE_LEN + 1280];
+    format_error_message(full, sizeof(full), line_no, raw, msg, "Warning");
+    fprintf(stderr, "%s\n", full);
 }
 
 #define MAX_COLLECTED_ERRORS 20
@@ -132,7 +155,7 @@ void asm_error_recoverable(int line_no, const char *raw, const char *fmt, ...) {
         size_t bufsz = MAX_LINE_LEN + 1280;
         char *buf = malloc(bufsz);
         if (!buf) { fprintf(stderr, "Out of memory\n"); exit(1); }
-        format_error_message(buf, bufsz, line_no, raw, msg);
+        format_error_message(buf, bufsz, line_no, raw, msg, "Assembly error");
         g_collected_errors[g_collected_count++] = buf;
         return;
     }

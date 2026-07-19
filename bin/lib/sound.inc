@@ -37,6 +37,12 @@
 ; to it. A program that only wants SID_INIT/PLAY_SOUND still needs to
 ; define it, or assembly fails on an undefined symbol inside
 ; engine_sound_on/off's own bodies.
+;
+; The check right below turns that into one clear message instead.
+
+.ifndef engine_playing
+.error "sound.inc requires engine_playing (1 byte, anywhere in RAM) defined before this .include"
+.endif
 
 .include "hardware.inc"
 

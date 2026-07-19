@@ -63,6 +63,12 @@
 ; word_dest_ptr regardless of whether anything ever jsr's to it. A
 ; program that only wants read_joy2/READ_KEY still needs to define it,
 ; or assembly fails on an undefined symbol inside extract_word's body.
+;
+; The check right below turns that into one clear message instead.
+
+.ifndef word_dest_ptr
+.error "input.inc requires word_dest_ptr (2-byte zero page) defined before this .include"
+.endif
 
 .include "hardware.inc"
 

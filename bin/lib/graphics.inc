@@ -70,6 +70,40 @@
 ; shapes instead. This exact bug showed up more than once across this
 ; project's own demos before the pattern below (a comfortably-clear
 ; address like $0d00 or $0e00) became the standard.
+;
+; The nine checks right below turn an "undefined symbol somewhere
+; inside sprite0_bounce_step" failure into nine separate, specific
+; messages naming exactly what's missing -- and, since '.error' is
+; recoverable (c64asm-reference.md §16), all of them show up together
+; in one run if more than one is missing, not just the first.
+
+.ifndef gfx_ptr
+.error "graphics.inc requires gfx_ptr (2-byte zero page) defined before this .include"
+.endif
+.ifndef xpos
+.error "graphics.inc requires xpos (2 bytes: xpos, xpos+1) defined before this .include"
+.endif
+.ifndef ypos
+.error "graphics.inc requires ypos (1 byte) defined before this .include"
+.endif
+.ifndef xdir
+.error "graphics.inc requires xdir (1 byte) defined before this .include"
+.endif
+.ifndef ydir
+.error "graphics.inc requires ydir (1 byte) defined before this .include"
+.endif
+.ifndef XMIN
+.error "graphics.inc requires XMIN (a compile-time constant) defined before this .include"
+.endif
+.ifndef XMAX
+.error "graphics.inc requires XMAX (a compile-time constant) defined before this .include"
+.endif
+.ifndef YMIN
+.error "graphics.inc requires YMIN (a compile-time constant) defined before this .include"
+.endif
+.ifndef YMAX
+.error "graphics.inc requires YMAX (a compile-time constant) defined before this .include"
+.endif
 
 .include "hardware.inc"
 

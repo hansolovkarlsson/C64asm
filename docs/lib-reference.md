@@ -1,6 +1,6 @@
 # c64asm standard library
 
-Five `.include`-able files providing the register constants, text
+Six `.include`-able files providing the register constants, text
 output, input handling, graphics setup, and sound effects that this
 project's own demo programs (`hello.asm`, `bounce.asm`, `pong.asm`,
 `adventure.asm`, `lander.asm`) each implemented from scratch. Everything
@@ -57,7 +57,20 @@ soon as you `.include` that file — even if you never call the specific
 routine that uses it.** `.include` splices in a file's code
 unconditionally, the same as any other source; a routine's own body
 still references its zero-page location whether or not your program
-ever `jsr`s to it, so assembly fails on an undefined symbol otherwise.
+ever `jsr`s to it.
+
+Every library file below checks for its own required symbols right at
+the top, using `.ifdef`/`.error` (`c64asm-reference.md` §11), and
+fails with a specific message naming exactly what's missing:
+
+```
+Assembly error: text.inc requires str_ptr (2-byte zero page) defined before this .include (lib/text.inc, line 79: .error "text.inc requires str_ptr (2-byte zero page) defined before this .include")
+```
+
+rather than a generic `Undefined symbol` error surfacing later, from
+somewhere inside the routine that actually uses it. `.error` is
+recoverable, so forgetting more than one required symbol at once shows
+every missing one together, in a single run, not just the first.
 
 - **`text.inc`** needs THREE 2-byte zero-page locations: `str_ptr`
   (used by `print_msg`/`PRINT`), and `cmp_ptr`/`kw_ptr` (used by
@@ -112,6 +125,17 @@ YMAX = 229                     ; for a real, worked example
 `$02`–`$0F` and `$FB`–`$FE` are the community-documented zero-page
 range this project's own demos use for exactly this kind of scratch
 storage (see `c64-memory-reference.md`).
+
+Forgetting one (or several) now looks like this, rather than a single
+`Undefined symbol` error from deep inside a routine you never called
+directly:
+
+```
+$ python3 c64asm.py mygame.asm -o mygame.prg --lib-dir lib
+Assembly error: graphics.inc requires gfx_ptr (2-byte zero page) defined before this .include (lib/graphics.inc, line 81: .error "graphics.inc requires gfx_ptr (2-byte zero page) defined before this .include")
+Assembly error: graphics.inc requires XMAX (a compile-time constant) defined before this .include (lib/graphics.inc, line 99: .error "graphics.inc requires XMAX (a compile-time constant) defined before this .include")
+2 errors.
+```
 
 ### A `.basic` gotcha these libraries will expose
 

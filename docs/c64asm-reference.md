@@ -345,6 +345,8 @@ body_msg:
 | `.basic [start]` | — | optional label/expression | Emit a tokenized BASIC line `10 SYS <addr>` at `$0801`, where `<addr>` is automatically computed to point at the very next byte of assembled code — i.e. wherever the code following `.basic` ends up. Typing `LOAD"...",8,1` then `RUN` starts the machine code directly. Must appear before any code you want it to `SYS` into. With an operand, also emits `jmp start` immediately after the stub — see the example and gotcha below. |
 | `.cpu 6510` / `.cpu 6510x` | `.cpu 6502` (synonym for `6510`) | one mode name | Switches illegal/undocumented-opcode support (§13) off (`6510`, the default) or on (`6510x`) from this point in the file forward. |
 | `.charset upper` / `.charset lower` | — | one mode name | Switches how `.text`/`.asc`/`.byte` string literals encode letters (§6) from this point in the file forward: forced-uppercase (`upper`, the default) or case-preserving (`lower`). |
+| `.error "msg"` | — | one quoted string | Records a recoverable error with the given message (§11) — typically paired with `.ifdef`/`.ifndef` to check a precondition. |
+| `.warning "msg"` | — | one quoted string | Prints the given message but never affects whether assembly succeeds (§11). |
 | `label = expr` | `.equ` | one expression | Bind `label` to the value of `expr` (not to the current PC). See §2. |
 
 `.byte`/`.word`/`.text`/`.fill` all accept comma-separated argument lists,
@@ -784,6 +786,45 @@ already defined`. If you need genuinely different macro behavior,
 define one macro whose *body* contains the `.if`, the way the PAL/NTSC
 example above does with ordinary code.
 
+### `.error` and `.warning`
+
+```
+.error "message"
+.warning "message"
+```
+
+Paired with `.ifdef`/`.ifndef` above, `.error` turns a missing
+precondition into one clear, specific message right at the point of
+the mistake, instead of a confusing `Undefined symbol` buried inside a
+macro or library routine's own body several `.include`s away:
+
+```asm
+.ifndef gfx_ptr
+.error "graphics.inc requires gfx_ptr (2-byte zero page) defined before this .include"
+.endif
+```
+
+`.error`'s message is collected the same way any other recoverable
+error is (§17) — several independent `.error`s (two different missing
+zero-page symbols in two different included files, say) can all be
+reported together in one run, not just the first. It does not stop
+assembly by itself; whether assembly ultimately fails still depends on
+whether *any* error (from `.error` or anything else) was recorded by
+the time pass 1 finishes.
+
+`.warning` prints its message the same way but never affects whether
+assembly succeeds — no error is recorded, pass 2 still runs, and a
+`.prg` still gets written. Useful for a softer note ("this feature is
+experimental") that shouldn't block the build.
+
+Both require a single quoted string operand; anything else (a bare
+word, a numeric expression, more than one comma-separated argument) is
+itself a recoverable error naming which directive and what's expected.
+Neither directive PETSCII-encodes its message or does anything with
+the current `.charset` (§6) setting — this text is a diagnostic for
+whoever is assembling the program, not something that ends up in the
+assembled output.
+
 ### Rules and limitations
 
 - **`.if`/`.elif` conditions must not reference a forward-declared
@@ -1100,9 +1141,10 @@ existed.
 
 Most kinds of mistake — an undefined symbol, a malformed expression, an
 addressing mode a mnemonic doesn't support, a branch out of range, a
-redefined symbol, an unrecognized mnemonic or directive — don't stop
-assembly immediately. Instead, the assembler keeps going, collects up
-to 20 independent problems, and reports all of them together:
+redefined symbol, an unrecognized mnemonic or directive, a source-
+author-placed `.error` (§11) — don't stop assembly immediately.
+Instead, the assembler keeps going, collects up to 20 independent
+problems, and reports all of them together:
 
 ```
 Assembly error: Undefined symbol in operand 'undefined1' (line 2: lda undefined1)
@@ -1170,6 +1212,7 @@ Common errors:
 | `Illegal/undocumented opcode '...' used without '.cpu 6510x'` | An illegal/undocumented opcode (§13) was used before `.cpu 6510x` enabled them. |
 | `Unknown .cpu mode '...'` | `.cpu`'s operand (§13) was something other than `6510`, `6510x`, or `6502`. |
 | `Unknown .charset mode '...'` | `.charset`'s operand (§6) was something other than `upper` or `lower`. |
+| `.error requires a quoted message string, e.g. .error "message"` | `.error`'s (or `.warning`'s) operand (§11) wasn't a properly quoted string. |
 
 ---
 

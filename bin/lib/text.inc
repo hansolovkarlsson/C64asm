@@ -70,6 +70,20 @@
 ; assembler's own .text/.byte directives (which PETSCII-encode quoted
 ; strings automatically) to define the messages this prints, not raw
 ; ASCII from some other source.
+;
+; The three checks right below turn an "undefined symbol somewhere
+; inside str_equal" failure into one clear message naming exactly
+; what's missing, right where the mistake actually is.
+
+.ifndef str_ptr
+.error "text.inc requires str_ptr (2-byte zero page) defined before this .include"
+.endif
+.ifndef cmp_ptr
+.error "text.inc requires cmp_ptr (2-byte zero page) defined before this .include"
+.endif
+.ifndef kw_ptr
+.error "text.inc requires kw_ptr (2-byte zero page) defined before this .include"
+.endif
 
 .include "hardware.inc"
 

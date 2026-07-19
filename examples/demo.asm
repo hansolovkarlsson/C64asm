@@ -1,7 +1,7 @@
 ; demo.asm - exercises every library in lib/ together, including the
-; diamond dependency where text.inc, input.inc, graphics.inc, and
-; sound.inc all .include hardware.inc -- it should only be processed
-; once (see c64asm-reference.md, "Includes").
+; diamond dependency where text.inc, input.inc, keyboard.inc,
+; graphics.inc, and sound.inc all .include hardware.inc -- it should
+; only be processed once (see c64asm-reference.md, "Includes").
 
         .basic start   ; auto-emits `jmp start` right after the loader
                           ; stub. This matters here because the

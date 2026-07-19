@@ -54,6 +54,10 @@
 ; directly) and has no constants here; SHIFT LOCK is mechanically tied
 ; to LSHIFT's own matrix position, so KEY_LSHIFT covers both.
 
+.ifndef key_scratch
+.error "keyboard.inc requires key_scratch (1-byte zero page) defined before this .include"
+.endif
+
 .include "hardware.inc"
 
 ; --- column 0: %11111110 (DEL, RETURN, cursor keys, function keys) ---

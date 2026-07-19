@@ -286,6 +286,7 @@ int is_directive(const char *tok) {
     static const char *dirs[] = {
         ".org", ".byte", ".db", ".word", ".dw", ".text", ".asc",
         ".fill", ".ds", ".res", ".basic", ".equ", ".align", ".cpu", ".charset",
+        ".error", ".warning",
         ".if", ".elif", ".else", ".endif", ".ifdef", ".ifndef", NULL
     };
     for (int i = 0; dirs[i]; i++)

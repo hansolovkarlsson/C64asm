@@ -207,7 +207,7 @@ BRANCHES = {'BCC','BCS','BEQ','BMI','BNE','BPL','BVC','BVS'}
 
 DIRECTIVES = {'.org', '*=', '.byte', '.db', '.word', '.dw', '.text', '.asc',
               '.fill', '.ds', '.res', '.basic', '.equ', '.align', '.cpu',
-              '.charset',
+              '.charset', '.error', '.warning',
               '.if', '.elif', '.else', '.endif', '.ifdef', '.ifndef'}
 
 MAX_MACRO_EXPANSION_DEPTH = 16   # guards against runaway/infinite recursive macros
@@ -350,6 +350,20 @@ def record_error(message, line_no=None, raw=None):
     # an enormous, mostly-noise number of further messages on a
     # badly-broken or wrong-language source file.
     print_all_collected_errors_and_exit()
+
+
+def record_warning(message, line_no=None, raw=None):
+    """Prints a '.warning' directive's message (see that directive's
+    handling in _pass()), in the same '(line N: source text)' format
+    record_error() uses -- but, unlike record_error(), this doesn't
+    count toward the error total, doesn't stop pass 2 from running or
+    output from being written, and doesn't affect the exit status.
+    Nothing else in this assembler currently produces a warning; this
+    exists purely for the '.warning' directive itself to call."""
+    warn = AsmError(message, line_no, raw)  # reuse AsmError's own
+                                               # __str__ formatting,
+                                               # without raising it
+    print(f"Warning: {warn}", file=sys.stderr)
 
 
 
@@ -1462,6 +1476,44 @@ class Assembler:
                     # fallback: leave illegal_enabled exactly as it was --
                     # an unrecognized mode isn't a request to change
                     # anything, just a mistake to report
+                continue
+
+            if op == '.error' or op == '.warning':
+                # A source-author-placed diagnostic -- typically paired
+                # with .ifdef/.ifndef (§11) to check a precondition (a
+                # required zero-page symbol defined, say) and fail with
+                # a clear, specific message right at the point of the
+                # mistake, instead of a confusing "Undefined symbol"
+                # buried inside a macro expansion three files away:
+                #
+                #       .ifndef gfx_ptr
+                #       .error "graphics.inc requires gfx_ptr (2-byte zero page)"
+                #       .endif
+                #
+                # '.error' is recoverable, not fatal -- like any other
+                # entry in ILLEGAL_SLOTS-style checks, several
+                # independent '.error's (e.g. two different missing
+                # zero-page symbols in two different included files)
+                # can all be collected and reported together in one
+                # run. '.warning' never stops assembly or affects the
+                # exit status at all; it's only gated to pass 2 here so
+                # its message prints exactly once, not twice (once per
+                # pass) the way a fatal/recoverable error's own
+                # pass-independence doesn't need to worry about.
+                msg_text = operand.strip()
+                if len(msg_text) >= 2 and msg_text[0] == '"' and msg_text[-1] == '"':
+                    msg_text = msg_text[1:-1]
+                else:
+                    record_error(
+                        f"{op} requires a quoted message string, e.g. "
+                        f'{op} "message"', line_no, raw)
+                    # fallback: nothing else to do with a malformed
+                    # directive -- there's no message to act on
+                    continue
+                if op == '.error':
+                    record_error(msg_text, line_no, raw)
+                elif pass_no == 2:
+                    record_warning(msg_text, line_no, raw)
                 continue
 
             if op == '.charset':

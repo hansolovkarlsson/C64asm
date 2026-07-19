@@ -41,6 +41,17 @@
 void asm_error(int line_no, const char *raw, const char *fmt, ...);
 
 /*
+ * Prints a '.warning' directive's message, in the same
+ * "(line N: source text)" format asm_error()/asm_error_recoverable()
+ * use -- but doesn't count toward the error total, doesn't stop pass 2
+ * from running or output from being written, and doesn't affect the
+ * exit status. Nothing else in this assembler currently produces a
+ * warning; this exists purely for the '.warning' directive itself
+ * (see assembler.c) to call.
+ */
+void asm_warning(int line_no, const char *raw, const char *fmt, ...);
+
+/*
  * The recoverable counterpart to asm_error() -- see the note at the top
  * of error.c for the full design rationale. Records the message (in
  * asm_error()'s exact display format) and returns normally instead of

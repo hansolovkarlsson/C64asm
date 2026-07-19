@@ -241,6 +241,51 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
             continue;
         }
 
+        if (strcmp(L->op, ".error") == 0 || strcmp(L->op, ".warning") == 0) {
+            /* A source-author-placed diagnostic -- typically paired
+             * with .ifdef/.ifndef to check a precondition (a required
+             * zero-page symbol defined, say) and fail with a clear,
+             * specific message right at the point of the mistake,
+             * instead of a confusing "Undefined symbol" buried inside
+             * a macro expansion three files away:
+             *
+             *       .ifndef gfx_ptr
+             *       .error "graphics.inc requires gfx_ptr (2-byte zero page)"
+             *       .endif
+             *
+             * '.error' is recoverable, not fatal -- several
+             * independent '.error's (e.g. two different missing
+             * zero-page symbols in two different included files) can
+             * all be collected and reported together in one run.
+             * '.warning' never stops assembly or affects the exit
+             * status at all; it's only gated to pass 2 here so its
+             * message prints exactly once, not twice (once per pass).
+             */
+            char msg_text[MAX_LINE_LEN];
+            strncpy(msg_text, L->operand, sizeof(msg_text) - 1);
+            msg_text[sizeof(msg_text) - 1] = '\0';
+            trim(msg_text);
+            size_t mlen = strlen(msg_text);
+            int is_warning = (strcmp(L->op, ".warning") == 0);
+            if (mlen >= 2 && msg_text[0] == '"' && msg_text[mlen-1] == '"') {
+                msg_text[mlen-1] = '\0';
+                memmove(msg_text, msg_text + 1, mlen - 1);
+            } else {
+                asm_error_recoverable(L->line_no, L->raw,
+                    "%s requires a quoted message string, e.g. %s \"message\"",
+                    L->op, L->op);
+                /* fallback: nothing else to do with a malformed
+                   directive -- there's no message to act on */
+                continue;
+            }
+            if (is_warning) {
+                if (pass_no == 2) asm_warning(L->line_no, L->raw, "%s", msg_text);
+            } else {
+                asm_error_recoverable(L->line_no, L->raw, "%s", msg_text);
+            }
+            continue;
+        }
+
         if (strcmp(L->op, ".charset") == 0) {
             /* Switches how .text/.asc/.byte string literals encode
              * letters, from this point in the file forward (not

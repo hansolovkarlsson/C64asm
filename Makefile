@@ -51,12 +51,11 @@ single:$(SINGLE_TARGET)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Cleanup
-clean:
+clean: clean_examples
 	rm -f $(TARGET) $(SRC_DIR)/*.o $(SINGLE_TARGET)
-	rm -f $(EXA_PRG) $(EXA_DIR)/*.lst $(EXA_DIR)/vice.log ./vice.log
 
-cleanprg:
-	rm -f $(EXA_PRG) $(EXA_DIR)/*.lst $(EXA_DIR)/vice.log ./vice.log
+clean_examples:
+	rm -f $(EXA_PRG) $(EXA_DIR)/*.lst $(EXA_DIR)/*.vice $(EXA_DIR)/vice.log ./vice.log
 	
 
 # Assembly files to PRG

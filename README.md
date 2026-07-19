@@ -81,6 +81,11 @@ a real C64 to run it.
 - **VICE monitor label export** (`--vice-labels`) — debug by name in
   VICE (`break .main_loop` instead of `break $0a60`) instead of bare
   hex addresses; see `c64asm-reference.md` §16
+- **`.error`/`.warning` directives** — paired with `.ifdef`/`.ifndef`,
+  turn a missing precondition (a required zero-page symbol, say) into
+  one clear message right at the point of the mistake, instead of a
+  confusing `Undefined symbol` buried inside a macro or library
+  routine several `.include`s away; see `c64asm-reference.md` §11
 - **`.include`**, with automatic include-once semantics (no manual
   include guards needed), relative path resolution, and circular-include
   detection
@@ -180,7 +185,11 @@ read), bitmap graphics setup, and SID sound effects — extracted from
 and cross-checked against the demo programs that originally
 implemented each piece from scratch. Nothing in it is new, untested
 logic; it's existing, hardware-verified patterns pulled into reusable
-form. Five of the six programs above (`adventure.asm`,
+form. Every file checks its own required zero-page symbols with
+`.error` (see above) right at the top, so a missing one fails with a
+specific message naming exactly what to define, not a generic
+`Undefined symbol` from somewhere inside a routine you never called
+directly. Five of the six programs above (`adventure.asm`,
 `bounce.asm`, `pong.asm`, `lander.asm`, and the library-focused
 `demo.asm`) are built *on* the library rather than duplicating it —
 only `hello.asm` still has everything written out locally, since it's
