@@ -2,9 +2,12 @@
 
 This is a companion to `c64asm-reference.md`, which covers assembler
 syntax and lists every addressing mode's opcode byte. This document
-covers what each of the 56 instructions actually *does*: its operation,
-which processor status flags it changes, and a worked example of each in
-`c64asm` syntax.
+covers what each of the 56 documented instructions actually *does*: its
+operation, which processor status flags it changes, and a worked
+example of each in `c64asm` syntax. A final section also covers the
+illegal/undocumented opcodes `c64asm` can optionally assemble via
+`.cpu 6510x` — clearly marked as non-standard, since MOS never
+documented or supported them.
 
 ## Flag legend
 
@@ -849,3 +852,307 @@ irq_handler:
         pla
         rti             ; restores flags and returns to the interrupted code
 ```
+
+---
+
+## Illegal / Undocumented Opcodes
+
+> **These are not standard 6502 instructions.** Everything above this
+> line is part of the documented NMOS 6502/6510 instruction set that
+> MOS Technology specified and supported. Everything below is not: it's
+> a set of additional opcode bytes the NMOS 6502/6510 happens to
+> execute as a side effect of how its instruction decoder is wired, but
+> that MOS never documented, specified, or guaranteed. `c64asm` refuses
+> to assemble any of them unless the `.cpu 6510x` directive is used
+> first — see `c64asm-reference.md` §13 for the directive's syntax and
+> the full opcode/mode table. This section covers what each one
+> actually *does*, the same way the sections above do for the
+> documented set.
+>
+> A real C64/C128 uses an NMOS chip (6510/8500/8502), so every
+> instruction below works reliably there — but a few are marked
+> **unstable** or **highly unstable** even on NMOS hardware (see each
+> entry), and none of them exist at all on non-NMOS members of the 6502
+> family (65C02, etc.). Code using them is inherently less portable
+> than code using only the documented set above, and is worth flagging
+> with a comment at the point of use.
+
+### SLO — Shift Left, then OR
+**Operation:** `{adr} := {adr} << 1` (with the shifted-out bit 7 going
+into carry), then `A := A or {adr}` — an `ASL` immediately followed by
+an `ORA` using the same address, combined into one opcode.
+**Flags affected:** N, Z, C
+
+```asm
+        .cpu 6510x
+        slo $10         ; equivalent to: asl $10 : ora $10
+```
+
+### RLA — Rotate Left, then AND
+**Operation:** `{adr} := {adr} rol` (rotate left through carry), then
+`A := A and {adr}` — a `ROL` immediately followed by an `AND` using the
+same address.
+**Flags affected:** N, Z, C
+
+```asm
+        .cpu 6510x
+        rla $10         ; equivalent to: rol $10 : and $10
+```
+
+### SRE — Shift Right, then EOR
+**Operation:** `{adr} := {adr} >> 1` (with the shifted-out bit 0 going
+into carry), then `A := A xor {adr}` — an `LSR` immediately followed by
+an `EOR` using the same address.
+**Flags affected:** N, Z, C
+
+```asm
+        .cpu 6510x
+        sre $10         ; equivalent to: lsr $10 : eor $10
+```
+
+### RRA — Rotate Right, then ADC
+**Operation:** `{adr} := {adr} ror` (rotate right through carry), then
+`A := A + {adr} + C` — a `ROR` immediately followed by an `ADC` using
+the same address.
+**Flags affected:** N, V, Z, C
+
+```asm
+        .cpu 6510x
+        rra $10         ; equivalent to: ror $10 : adc $10
+```
+
+### SAX — Store A AND X
+**Operation:** `{adr} := A and X`. A pure store: the AND happens as a
+side effect of both registers being on the data bus at the same
+moment, and no flags are touched.
+**Flags affected:** none
+
+```asm
+        .cpu 6510x
+        sax $10         ; store (A and X) into $10, without disturbing A or X
+```
+
+### LAX — Load A and X
+**Operation:** `A, X := {adr}` — an `LDA` and `LDX` from the same
+address, combined into one opcode.
+**Flags affected:** N, Z
+
+```asm
+        .cpu 6510x
+        lax $10         ; equivalent to: lda $10 : ldx $10
+```
+
+*Unstable in immediate mode* (`LAX #imm`, opcode `$AB`): on some
+NMOS chips this loses bits, behaving closer to
+`ORA #$FF : AND #imm : TAX` than a clean load. Avoid `LAX #imm` in
+code meant to run reliably on real hardware; the memory-operand forms
+above don't have this problem.
+
+### DCP — Decrement, then Compare
+**Operation:** `{adr} := {adr} - 1`, then compare `A` against the
+decremented value — a `DEC` immediately followed by a `CMP` using the
+same address.
+**Flags affected:** N, Z, C
+
+```asm
+        .cpu 6510x
+        dcp $10         ; equivalent to: dec $10 : cmp $10
+```
+
+### ISC — Increment, then Subtract
+**Operation:** `{adr} := {adr} + 1`, then `A := A - {adr} - (1-C)` — an
+`INC` immediately followed by an `SBC` using the same address. Also
+written `ISB` in some other assemblers/references.
+**Flags affected:** N, V, Z, C
+
+```asm
+        .cpu 6510x
+        isc $10         ; equivalent to: inc $10 : sbc $10
+```
+
+### ANC — AND, then copy N into Carry
+**Operation:** `A := A and #imm`, exactly like a normal `AND`, but bit
+7 of the result is *also* copied into carry afterward, as if an
+`ASL`/`ROL` had run on the result (without actually shifting `A`).
+**Flags affected:** N, Z, C
+
+```asm
+        .cpu 6510x
+        anc #$80        ; A := A and #$80; carry := bit 7 of the result
+```
+
+### ALR — AND, then Shift Right
+**Operation:** `A := (A and #imm) >> 1` — an immediate `AND` followed
+by an `LSR` on the accumulator. Also written `ASR` in some other
+assemblers/references.
+**Flags affected:** N, Z, C
+
+```asm
+        .cpu 6510x
+        alr #$0F        ; equivalent to: and #$0F : lsr a
+```
+
+### ARR — AND, then Rotate Right (with ADC-like flags)
+**Operation:** `A := (A and #imm) >> 1`, with bit 7 filled from carry
+(a rotate, not a plain shift) — but unlike a plain `AND`+`ROR`, the V
+and C flags afterward are computed the way an `ADC` would set them
+from the AND'd value, not a simple rotate. See the
+[oxyron.de table](http://www.oxyron.de/html/opcodes02.html) for the
+precise bit-level flag derivation if you need it exactly.
+**Flags affected:** N, V, Z, C
+
+```asm
+        .cpu 6510x
+        arr #$0F        ; A := (A and #$0F) ror; V/C set ADC-style
+```
+
+### XAA — Transfer X to A, then AND
+**Operation:** nominally `A := X and #imm` (a `TXA` immediately
+followed by an immediate `AND`).
+**Flags affected:** N, Z
+
+```asm
+        .cpu 6510x
+        xaa #$0F        ; nominally: txa : and #$0F
+```
+
+**Highly unstable — do not use in code meant to run reliably.** Every
+major reference on this opcode (including oxyron.de, quoted almost
+verbatim here: "DO NOT USE!!! Highly unstable!!!") describes its actual
+result as depending on analog effects of the specific chip, its
+temperature, and the data present on the bus — not just the documented
+operation above. `c64asm` will assemble it once `.cpu 6510x` is
+enabled, but it's included mainly for completeness and deliberate
+experimentation, not for real programs.
+
+### AXS — (A AND X) minus immediate, into X
+**Operation:** `X := (A and X) - #imm`. Flags are set the way a `CMP`
+sets them (comparing `(A and X)` against `#imm`), not the way `SBC`
+would. Also written `SBX` in some other assemblers/references.
+**Flags affected:** N, Z, C
+
+```asm
+        .cpu 6510x
+        axs #$01        ; X := (A and X) - 1, flags set CMP-style
+```
+
+### USBC — Subtract with Carry (duplicate encoding)
+**Operation:** identical to the documented `SBC #imm` ($E9) — `A := A
+- #imm - (1-C)`. This is the same instruction under a different name,
+purely to avoid a naming collision with `SBC` in `c64asm`'s opcode
+table; there's no reason to prefer `USBC` over `SBC` in new code, since
+`SBC #imm` already assembles to the shorter, documented encoding.
+**Flags affected:** N, V, Z, C
+
+```asm
+        .cpu 6510x
+        usbc #$01       ; identical in effect to: sbc #$01
+```
+
+### AHX — Store A AND X AND (high byte + 1)
+**Operation:** `{adr} := A and X and (H+1)`, where `H` is the high byte
+of the target address. Also written `SHA` in some other
+assemblers/references.
+**Flags affected:** none
+
+```asm
+        .cpu 6510x
+        ahx $1000,y     ; store (A and X and $11) into $1000+Y
+```
+
+**Highly unstable.** The `and (H+1)` part of the operation doesn't
+reliably survive a page-boundary crossing on real hardware — the
+"page" the value is stored in may not match what the source implies.
+Avoid relying on the exact stored value in code meant to run reliably.
+
+### SHY — Store Y AND (high byte + 1)
+**Operation:** `{adr} := Y and (H+1)`, where `H` is the high byte of
+the target address. Also written `SYA` in some other
+assemblers/references.
+**Flags affected:** none
+
+```asm
+        .cpu 6510x
+        shy $1000,x     ; store (Y and $11) into $1000+X
+```
+
+**Unstable** in the same page-boundary-crossing sense as `AHX` above.
+
+### SHX — Store X AND (high byte + 1)
+**Operation:** `{adr} := X and (H+1)`, where `H` is the high byte of
+the target address.
+**Flags affected:** none
+
+```asm
+        .cpu 6510x
+        shx $1000,y     ; store (X and $11) into $1000+Y
+```
+
+**Unstable** in the same page-boundary-crossing sense as `AHX` above.
+
+### TAS — Transfer (A AND X) to Stack pointer, then store
+**Operation:** `S := A and X`, then `{adr} := S and (H+1)`, where `H`
+is the high byte of the target address — a combination of a stack
+pointer transfer and a store. Also written `SHS` in some other
+assemblers/references.
+**Flags affected:** none
+
+```asm
+        .cpu 6510x
+        tas $1000,y     ; S := A and X; store (S and $11) into $1000+Y
+```
+
+**Unstable** in the same page-boundary-crossing sense as `AHX` above,
+and additionally overwrites the stack pointer, which affects every
+subsequent `PHA`/`PLA`/`JSR`/`RTS` in ways that are easy to get wrong
+even setting stability aside.
+
+### LAS — Load A, X, and Stack pointer
+**Operation:** `A, X, S := {adr} and S` — the addressed byte is AND'd
+with the *current* stack pointer, and the result is loaded into `A`,
+`X`, *and* the stack pointer all at once.
+**Flags affected:** N, Z
+
+```asm
+        .cpu 6510x
+        las $1000,y     ; A, X, S := ($1000+Y) and (current S)
+```
+
+Like `TAS` above, this overwrites the stack pointer as a side effect,
+which affects every subsequent stack operation.
+
+### KIL — Halt
+**Operation:** stops the CPU dead. Nothing after this instruction ever
+executes; only a hardware reset recovers. Also written `JAM`, `HLT`,
+or `STP` in some other assemblers/references.
+**Flags affected:** none (the CPU isn't running anymore to change them)
+
+```asm
+        .cpu 6510x
+        kil             ; deliberately hang the CPU -- e.g. as a crude
+                         ; "should never get here" guard during development
+```
+
+11 other opcode bytes ($12, $22, $32, $42, $52, $62, $72, $92, $B2,
+$D2, $F2) do exactly the same thing; `c64asm` only ever assembles `$02`
+for `KIL`, since all 12 encodings are functionally identical and a
+disassembler, not this assembler, would be the tool that needs to
+distinguish which one appeared in a given binary.
+
+### NOP (extra addressing modes) — No Operation
+**Operation:** identical in spirit to the documented `NOP` above:
+fetches its operand, if the mode has one, and does nothing with it.
+The NMOS 6502/6510 executes several additional opcode bytes this way,
+across four addressing modes `NOP` doesn't documentedly support
+(immediate, zero page, zero page,X, absolute, and absolute,X) — these
+extend the same mnemonic's mode table rather than needing a distinct
+name.
+**Flags affected:** none
+
+```asm
+        .cpu 6510x
+        nop #$00        ; fetches and discards an immediate byte
+        nop $10         ; fetches and discards a zero-page byte
+        nop $1000,x     ; fetches and discards an absolute,X byte
+```
+

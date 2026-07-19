@@ -64,6 +64,10 @@ a real C64 to run it.
 
 - Full NMOS 6502/6510 instruction set — all 56 documented mnemonics,
   every addressing mode
+- Optional support for illegal/undocumented 6502/6510 opcodes (`LAX`,
+  `SAX`, `DCP`, and 17 others) via `.cpu 6510x` — off by default, since
+  they're not part of the documented instruction set; see
+  `c64asm-reference.md` §13
 - Two-pass assembly, so forward references to labels just work
 - Automatic zero-page vs. absolute addressing selection
 - A real expression evaluator: `+ - * /`, parentheses, `<`/`>` for
@@ -123,7 +127,7 @@ unzip c64asm-split-src.zip && make
 | `c64asm-split-src.zip` | The same assembler split into one file per concern, heavily commented, with a `Makefile` — for reading, not a different implementation (see `ARCHITECTURE.md`) |
 | `ARCHITECTURE.md` | Guide to the split-source project's module layout |
 | `c64asm-reference.md` | **Assembler syntax reference** — labels, expressions, addressing-mode syntax, macros, local labels, `.include`, conditional assembly, every directive, error messages, CLI usage |
-| `c64asm-opcode-reference.md` | **6502 opcode reference** — what every instruction does, which status flags it affects, and a worked example of each; plus a full write-up of all 13 addressing modes |
+| `c64asm-opcode-reference.md` | **6502 opcode reference** — what every documented instruction does, which status flags it affects, and a worked example of each; a full write-up of all 13 addressing modes; and a section on the illegal/undocumented opcodes, clearly marked as non-standard |
 | `c64-memory-reference.md` | **C64 hardware reference** — screen/color RAM, VIC-II graphics modes, sprites, SID sound, joystick input, common KERNAL routines, all with tested example code |
 | `c64asm-stdlib.zip` | **Standard library** — `.include`-able text/input/graphics/sound routines, shared across the demos (see below) |
 | `mini6502.zip` | **mini6502** — a from-scratch 6502/C64 emulator used to test-drive every demo and library routine below (see below) |

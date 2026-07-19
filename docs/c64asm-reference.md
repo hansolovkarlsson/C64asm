@@ -258,6 +258,7 @@ uppercase regardless of the case used in the source.
 | `.fill count, value` | `.ds`, `.res` | count, optional fill byte (default 0) | Emit `count` bytes of `value`. |
 | `.align n` | — | one expression | Pad with zero bytes, if necessary, until the program counter is a multiple of `n`. A no-op if it already is. `n` must evaluate to a positive value. A label on the same line (`sprite_data: .align 64`) is bound to the *aligned* address, matching how `.org`'s same-line label works. |
 | `.basic [start]` | — | optional label/expression | Emit a tokenized BASIC line `10 SYS <addr>` at `$0801`, where `<addr>` is automatically computed to point at the very next byte of assembled code — i.e. wherever the code following `.basic` ends up. Typing `LOAD"...",8,1` then `RUN` starts the machine code directly. Must appear before any code you want it to `SYS` into. With an operand, also emits `jmp start` immediately after the stub — see the example and gotcha below. |
+| `.cpu 6510` / `.cpu 6510x` | `.cpu 6502` (synonym for `6510`) | one mode name | Switches illegal/undocumented-opcode support (§13) off (`6510`, the default) or on (`6510x`) from this point in the file forward. |
 | `label = expr` | `.equ` | one expression | Bind `label` to the value of `expr` (not to the current PC). See §2. |
 
 `.byte`/`.word`/`.text`/`.fill` all accept comma-separated argument lists,
@@ -611,7 +612,7 @@ different directories) is still correctly recognized as one file.
   error.
 - Once `.include` is used **anywhere** in a program, every subsequent
   error message — including ones from the top-level file itself — names
-  which file it came from (see §15). A program that never uses
+  which file it came from (see §16). A program that never uses
   `.include` sees no change in its error output at all.
 
 ---
@@ -793,12 +794,105 @@ Note: `ASL`, `LSR`, `ROL`, and `ROR` accept either `A` (accumulator) or no
 operand at all — both encode identically, so `ASL` and `ASL A` are
 interchangeable.
 
-Undocumented/illegal 6502 opcodes (`LAX`, `SAX`, `DCP`, etc.) are **not**
-supported.
+The 6502/6510 also executes a further set of undocumented/illegal
+opcodes, not part of the documented instruction set above — see §13
+below.
 
 ---
 
-## 13. Output format
+## 13. Illegal opcodes
+
+> **These are not standard 6502 instructions.** MOS never documented or
+> supported any of the mnemonics on this page. They're real opcode
+> bytes the NMOS 6502/6510 happens to execute as a side effect of how
+> its instruction decoder is wired — nothing in the chip actually
+> "traps" an unused opcode the way an illegal instruction would on a
+> modern CPU — but their behavior was never a design guarantee, a few
+> of them are explicitly unstable (see the table below), and non-NMOS
+> variants of the 6502 family (65C02, and others) do **not** implement
+> them the same way, or at all. Real C64/C128 hardware uses an NMOS
+> chip (6510/8500/8502), so every opcode below is safe to rely on
+> there specifically — but code using them is inherently less portable
+> than code using only the documented instruction set, and is exactly
+> the kind of thing worth calling out with a comment at the point of
+> use.
+
+By default, `c64asm` refuses to assemble any of these — using one
+without first enabling them is an assembly error, the same as an
+unrecognized mnemonic:
+
+```
+Assembly error: Illegal/undocumented opcode 'LAX' used without '.cpu 6510x' -- see c64asm-reference.md's "Illegal opcodes" section (line 12: lax $10)
+```
+
+### The `.cpu` directive
+
+```asm
+        .cpu 6510x      ; enable illegal/undocumented opcodes
+        lax $fb         ; now assembles fine
+
+        .cpu 6510       ; back to standard-only (also the default; "6502"
+                         ; works identically as a synonym)
+        lax $fb         ; error again -- .cpu takes effect from this
+                         ; point in the file forward, not retroactively
+```
+
+`.cpu` takes exactly one operand, `6510` or `6510x` (case-insensitive;
+`6502` is accepted as a synonym for `6510`). Any other operand is an
+error. The setting is positional: it affects every instruction *after*
+the `.cpu` line until the next `.cpu` line changes it again, and the
+file starts in standard-only (`6510`) mode regardless of whether it
+uses `.include` — each included file doesn't get its own independent
+setting; there's just one setting, wherever the most recent `.cpu`
+line (in whichever file) left it.
+
+### Opcode table
+
+Mnemonics and opcode assignments follow the widely-used
+[oxyron.de table](http://www.oxyron.de/html/opcodes02.html), the
+standard reference for this in the C64 scene. A `*` marks an opcode
+noted as unstable or highly unstable — see the stability notes below
+the table.
+
+| Mnemonic | Supported modes (mode=opcode) | Effect |
+|---|---|---|
+| SLO | ZP=$07 ZPX=$17 INDX=$03 INDY=$13 ABS=$0F ABSX=$1F ABSY=$1B | `{adr} := {adr}*2; A := A or {adr}` (ASL + ORA) |
+| RLA | ZP=$27 ZPX=$37 INDX=$23 INDY=$33 ABS=$2F ABSX=$3F ABSY=$3B | `{adr} := {adr} rol; A := A and {adr}` (ROL + AND) |
+| SRE | ZP=$47 ZPX=$57 INDX=$43 INDY=$53 ABS=$4F ABSX=$5F ABSY=$5B | `{adr} := {adr}/2; A := A xor {adr}` (LSR + EOR) |
+| RRA | ZP=$67 ZPX=$77 INDX=$63 INDY=$73 ABS=$6F ABSX=$7F ABSY=$7B | `{adr} := {adr} ror; A := A + {adr} + C` (ROR + ADC) |
+| SAX | ZP=$87 ZPY=$97 INDX=$83 ABS=$8F | `{adr} := A and X` |
+| LAX | ZP=$A7 ZPY=$B7 INDX=$A3 INDY=$B3 ABS=$AF ABSY=$BF IMM=$AB\* | `A, X := {adr}` (LDA + LDX in one) |
+| DCP | ZP=$C7 ZPX=$D7 INDX=$C3 INDY=$D3 ABS=$CF ABSX=$DF ABSY=$DB | `{adr} := {adr}-1; compare A with {adr}` (DEC + CMP) |
+| ISC | ZP=$E7 ZPX=$F7 INDX=$E3 INDY=$F3 ABS=$EF ABSX=$FF ABSY=$FB | `{adr} := {adr}+1; A := A - {adr}` (INC + SBC); also written `ISB` elsewhere |
+| ANC | IMM=$0B | `A := A and #imm`, then bit 7 of the result is also copied into carry, as if an ASL/ROL had run |
+| ALR | IMM=$4B | `A := (A and #imm) / 2` (AND + LSR); also written `ASR` elsewhere |
+| ARR | IMM=$6B | `A := (A and #imm) / 2`, with carry/overflow set from an internal ADC-like mechanism — see the oxyron.de table for the exact flag behavior |
+| XAA | IMM=$8B\*\* | `A := X and #imm`; also written `ANE` elsewhere |
+| AXS | IMM=$CB | `X := (A and X) - #imm`, flags set like a compare, not like SBC; also written `SBX` elsewhere |
+| USBC | IMM=$EB | Functional duplicate of `SBC #imm` ($E9) — same operation, different opcode byte |
+| AHX | INDY=$93 ABSY=$9F\*\* | `{adr} := A and X and (high byte of address + 1)`; also written `SHA` elsewhere |
+| SHY | ABSX=$9C\* | `{adr} := Y and (high byte of address + 1)`; also written `SYA` elsewhere |
+| SHX | ABSY=$9E\* | `{adr} := X and (high byte of address + 1)` |
+| TAS | ABSY=$9B\* | `S := A and X; {adr} := S and (high byte of address + 1)`; also written `SHS` elsewhere |
+| LAS | ABSY=$BB | `A, X, S := {adr} and S` |
+| KIL | IMP=$02 | Halts the CPU until reset. Also written `JAM`, `HLT`, or `STP` elsewhere. 11 other opcode bytes ($12,$22,$32,$42,$52,$62,$72,$92,$B2,$D2,$F2) do the same thing — `c64asm` only ever assembles `$02` for `KIL`, since all 12 are functionally identical |
+| NOP | (in addition to the documented IMP=$EA) IMM=$80 ZP=$04 ZPX=$14 ABS=$0C ABSX=$1C | Fetches the operand, if any, and discards it — otherwise a true no-op, same as documented `NOP` |
+
+\* unstable: generally reliable on real NMOS hardware, but with known
+edge cases (e.g. page-boundary-crossing behavior that doesn't match
+the pattern of the equivalent documented instructions).
+
+\*\* highly unstable: results can depend on analog effects of the
+specific chip, its temperature, and even the exact data present on the
+bus at that moment — **do not use these in code meant to run reliably
+on real hardware**, even though `c64asm` will assemble them once
+`.cpu 6510x` is enabled. `XAA`/`ANE` in particular is singled out by
+essentially every reference on this topic as unpredictable enough to
+avoid entirely except for deliberate experimentation.
+
+---
+
+## 14. Output format
 
 The `.prg` file written is:
 
@@ -815,7 +909,7 @@ stub is the first thing written.
 
 ---
 
-## 14. Listing file format
+## 15. Listing file format
 
 When `--listing` is given, the assembler writes a text file with one line
 per assembled instruction or data-emitting directive:
@@ -846,7 +940,7 @@ only real 6502 instructions appear there.
 
 ---
 
-## 15. Error messages
+## 16. Error messages
 
 Each error is printed in the form:
 
@@ -935,10 +1029,12 @@ Common errors:
 | `unclosed '.if'/'.ifdef'/'.ifndef' at end of file` | A conditional block's `.endif` is missing; the message names the line the block started on. |
 | `conditional nesting too deep (max 16)` | More than 16 levels of nested `.if`/`.ifdef`/`.ifndef`. |
 | `Undefined symbol in .basic start operand '...'` | `.basic`'s optional start-label operand (§7) referenced a symbol never defined anywhere in the file. |
+| `Illegal/undocumented opcode '...' used without '.cpu 6510x'` | An illegal/undocumented opcode (§13) was used before `.cpu 6510x` enabled them. |
+| `Unknown .cpu mode '...'` | `.cpu`'s operand (§13) was something other than `6510`, `6510x`, or `6502`. |
 
 ---
 
-## 16. Known limitations
+## 17. Known limitations
 
 - **Zero-page sizing of forward-referenced labels.** The assembler picks
   zero-page vs. absolute addressing based on whether an operand's value is
@@ -961,16 +1057,21 @@ Common errors:
   `.include`d, since those are resolved before `.if` is evaluated
   (§11). `.include` doesn't need manual include guards even without
   conditional assembly backing them — see §10.
-- **No undocumented/illegal opcodes.**
+- **Illegal/undocumented opcodes (§13) are opt-in, and a few are
+  unstable even when enabled.** They're refused by default (an assembly
+  error, same as any other unrecognized mnemonic) until `.cpu 6510x`
+  turns them on; a handful of them are noted in §13's table as
+  unstable or highly unstable even on real NMOS hardware, and none of
+  them exist at all on non-NMOS 6502 variants.
 - **Multi-error reporting has a noise trade-off.** A single run can
-  surface several independent mistakes (see §15), but messages after
+  surface several independent mistakes (see §16), but messages after
   the first one can occasionally be downstream noise rather than
-  genuinely separate problems — see the note at the end of §15.
+  genuinely separate problems — see the note at the end of §16.
 - **PETSCII output is uppercase-only** (see §6).
 
 ---
 
-## 17. Complete example
+## 18. Complete example
 
 ```asm
 ; hello.asm - prints a message and cycles the border color

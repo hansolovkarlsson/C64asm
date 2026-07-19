@@ -80,7 +80,7 @@
 #define MAX_LINE_LEN   1024
 #define MAX_LINES      200000
 #define MAX_SYMBOLS    32768
-#define MAX_MNEMONICS  64
+#define MAX_MNEMONICS  96
 #define MAX_TOKENS     128
 #define MAX_ARGS       64
 #define MAX_IDENT      128
@@ -110,8 +110,14 @@ static const int MODE_SIZE[M_COUNT] = {
 /* --------------------------------------------------------------------- */
 
 typedef struct {
-    char mnemonic[4];
+    char mnemonic[5];   /* 4 chars max (USBC, an illegal-opcode mnemonic,
+                            is the only one longer than 3) + NUL */
     int  op[M_COUNT];   /* -1 = addressing mode not supported */
+    int  illegal[M_COUNT];   /* 1 = this (mnemonic, mode) slot is an
+                                 illegal/undocumented opcode that requires
+                                 '.cpu 6510x' -- see SETOP_ILLEGAL() and
+                                 the "Illegal opcodes" section of
+                                 c64asm-reference.md */
 } OpcodeEntry;
 
 static OpcodeEntry opcode_table[MAX_MNEMONICS];
@@ -128,15 +134,25 @@ static OpcodeEntry *get_or_add_mnemonic(const char *name) {
     OpcodeEntry *e = find_mnemonic(name);
     if (e) return e;
     e = &opcode_table[opcode_count++];
-    strncpy(e->mnemonic, name, 3);
-    e->mnemonic[3] = '\0';
-    for (int m = 0; m < M_COUNT; m++) e->op[m] = -1;
+    strncpy(e->mnemonic, name, 4);
+    e->mnemonic[4] = '\0';
+    for (int m = 0; m < M_COUNT; m++) { e->op[m] = -1; e->illegal[m] = 0; }
     return e;
 }
 
 static void SETOP(const char *name, Mode m, int opcode) {
     OpcodeEntry *e = get_or_add_mnemonic(name);
     e->op[m] = opcode;
+}
+
+/* Like SETOP(), but also marks this (mnemonic, mode) slot as an
+ * illegal/undocumented opcode -- see the "Illegal opcodes" section
+ * near the end of init_opcodes() below, and c64asm-reference.md, for
+ * the full explanation. */
+static void SETOP_ILLEGAL(const char *name, Mode m, int opcode) {
+    OpcodeEntry *e = get_or_add_mnemonic(name);
+    e->op[m] = opcode;
+    e->illegal[m] = 1;
 }
 
 static int is_branch_mnemonic(const char *name) {
@@ -258,6 +274,100 @@ static void init_opcodes(void) {
     SETOP("TXA",M_IMP,0x8A);
     SETOP("TXS",M_IMP,0x9A);
     SETOP("TYA",M_IMP,0x98);
+
+    /* ----------------------------------------------------------------- */
+    /* Illegal / undocumented opcodes -- see c64asm-reference.md's       */
+    /* "Illegal opcodes" section for the full user-facing explanation.   */
+    /* These are real instructions the NMOS 6502/6510 executes (nothing  */
+    /* in the silicon actually "traps" an unused opcode byte), but MOS   */
+    /* never documented or supported them, and a few of them behave      */
+    /* slightly differently between individual chips -- see the notes    */
+    /* below on which are considered unstable. Every slot registered     */
+    /* here via SETOP_ILLEGAL() (as opposed to plain SETOP()) requires   */
+    /* '.cpu 6510x' before it can actually be assembled -- see the gate  */
+    /* in run_pass()'s real-instruction handling.                        */
+    /*                                                                    */
+    /* Mnemonics and opcode assignments follow the widely-used oxyron.de */
+    /* table (http://www.oxyron.de/html/opcodes02.html), the standard    */
+    /* C64-scene reference for this. A few of these opcodes have more    */
+    /* than one valid encoding for the exact same mnemonic+mode (e.g.    */
+    /* ANC is both $0B and $2B) -- this assembler always emits the       */
+    /* lower/more common of the two, same as every other assembler of    */
+    /* this kind; a disassembler would need to preserve the distinction, */
+    /* but this is an assembler, not a disassembler.                     */
+    /*                                                                    */
+    /* $EB is a byte-for-byte functional duplicate of SBC #imm ($E9) --   */
+    /* to avoid a collision with the real, documented SBC mnemonic       */
+    /* above, it's given the distinct mnemonic USBC here, following the  */
+    /* same convention several other illegal-opcode assemblers use.      */
+    SETOP_ILLEGAL("SLO",M_ZP,0x07); SETOP_ILLEGAL("SLO",M_ZPX,0x17);
+    SETOP_ILLEGAL("SLO",M_INDX,0x03); SETOP_ILLEGAL("SLO",M_INDY,0x13);
+    SETOP_ILLEGAL("SLO",M_ABS,0x0F); SETOP_ILLEGAL("SLO",M_ABSX,0x1F);
+    SETOP_ILLEGAL("SLO",M_ABSY,0x1B);
+
+    SETOP_ILLEGAL("RLA",M_ZP,0x27); SETOP_ILLEGAL("RLA",M_ZPX,0x37);
+    SETOP_ILLEGAL("RLA",M_INDX,0x23); SETOP_ILLEGAL("RLA",M_INDY,0x33);
+    SETOP_ILLEGAL("RLA",M_ABS,0x2F); SETOP_ILLEGAL("RLA",M_ABSX,0x3F);
+    SETOP_ILLEGAL("RLA",M_ABSY,0x3B);
+
+    SETOP_ILLEGAL("SRE",M_ZP,0x47); SETOP_ILLEGAL("SRE",M_ZPX,0x57);
+    SETOP_ILLEGAL("SRE",M_INDX,0x43); SETOP_ILLEGAL("SRE",M_INDY,0x53);
+    SETOP_ILLEGAL("SRE",M_ABS,0x4F); SETOP_ILLEGAL("SRE",M_ABSX,0x5F);
+    SETOP_ILLEGAL("SRE",M_ABSY,0x5B);
+
+    SETOP_ILLEGAL("RRA",M_ZP,0x67); SETOP_ILLEGAL("RRA",M_ZPX,0x77);
+    SETOP_ILLEGAL("RRA",M_INDX,0x63); SETOP_ILLEGAL("RRA",M_INDY,0x73);
+    SETOP_ILLEGAL("RRA",M_ABS,0x6F); SETOP_ILLEGAL("RRA",M_ABSX,0x7F);
+    SETOP_ILLEGAL("RRA",M_ABSY,0x7B);
+
+    SETOP_ILLEGAL("SAX",M_ZP,0x87); SETOP_ILLEGAL("SAX",M_ZPY,0x97);
+    SETOP_ILLEGAL("SAX",M_INDX,0x83); SETOP_ILLEGAL("SAX",M_ABS,0x8F);
+
+    SETOP_ILLEGAL("LAX",M_ZP,0xA7); SETOP_ILLEGAL("LAX",M_ZPY,0xB7);
+    SETOP_ILLEGAL("LAX",M_INDX,0xA3); SETOP_ILLEGAL("LAX",M_INDY,0xB3);
+    SETOP_ILLEGAL("LAX",M_ABS,0xAF); SETOP_ILLEGAL("LAX",M_ABSY,0xBF);
+    SETOP_ILLEGAL("LAX",M_IMM,0xAB);   /* unstable -- see reference doc */
+
+    SETOP_ILLEGAL("DCP",M_ZP,0xC7); SETOP_ILLEGAL("DCP",M_ZPX,0xD7);
+    SETOP_ILLEGAL("DCP",M_INDX,0xC3); SETOP_ILLEGAL("DCP",M_INDY,0xD3);
+    SETOP_ILLEGAL("DCP",M_ABS,0xCF); SETOP_ILLEGAL("DCP",M_ABSX,0xDF);
+    SETOP_ILLEGAL("DCP",M_ABSY,0xDB);
+
+    SETOP_ILLEGAL("ISC",M_ZP,0xE7); SETOP_ILLEGAL("ISC",M_ZPX,0xF7);
+    SETOP_ILLEGAL("ISC",M_INDX,0xE3); SETOP_ILLEGAL("ISC",M_INDY,0xF3);
+    SETOP_ILLEGAL("ISC",M_ABS,0xEF); SETOP_ILLEGAL("ISC",M_ABSX,0xFF);
+    SETOP_ILLEGAL("ISC",M_ABSY,0xFB);
+
+    SETOP_ILLEGAL("ANC",M_IMM,0x0B);
+    SETOP_ILLEGAL("ALR",M_IMM,0x4B);
+    SETOP_ILLEGAL("ARR",M_IMM,0x6B);
+    SETOP_ILLEGAL("XAA",M_IMM,0x8B);    /* highly unstable -- see reference doc */
+    SETOP_ILLEGAL("AXS",M_IMM,0xCB);
+    SETOP_ILLEGAL("USBC",M_IMM,0xEB);   /* functional duplicate of SBC #imm */
+
+    SETOP_ILLEGAL("AHX",M_INDY,0x93); SETOP_ILLEGAL("AHX",M_ABSY,0x9F);   /* highly unstable */
+    SETOP_ILLEGAL("SHY",M_ABSX,0x9C);   /* unstable */
+    SETOP_ILLEGAL("SHX",M_ABSY,0x9E);   /* unstable */
+    SETOP_ILLEGAL("TAS",M_ABSY,0x9B);   /* unstable */
+    SETOP_ILLEGAL("LAS",M_ABSY,0xBB);
+
+    /* Halts the CPU until reset. 11 other opcode bytes ($12,$22,$32,
+     * $42,$52,$62,$72,$92,$B2,$D2,$F2) do exactly the same thing, but
+     * only one encoding is needed for assembling. */
+    SETOP_ILLEGAL("KIL",M_IMP,0x02);
+
+    /* NOP normally only has implied-mode addressing ($EA, set above).
+     * The NMOS 6502/6510 also executes several additional opcode bytes
+     * as NOP-with-an-ignored-operand, across four more addressing modes
+     * -- these extend the *same* mnemonic's mode table rather than
+     * needing a distinct name, since they behave exactly like NOP: the
+     * operand is fetched (costing the extra byte(s) and cycles) and
+     * then discarded. */
+    SETOP_ILLEGAL("NOP",M_IMM,0x80);
+    SETOP_ILLEGAL("NOP",M_ZP,0x04);
+    SETOP_ILLEGAL("NOP",M_ZPX,0x14);
+    SETOP_ILLEGAL("NOP",M_ABS,0x0C);
+    SETOP_ILLEGAL("NOP",M_ABSX,0x1C);
 }
 
 /* --------------------------------------------------------------------- */
@@ -267,7 +377,7 @@ static void init_opcodes(void) {
 static int is_directive(const char *tok) {
     static const char *dirs[] = {
         ".org", ".byte", ".db", ".word", ".dw", ".text", ".asc",
-        ".fill", ".ds", ".res", ".basic", ".equ", ".align",
+        ".fill", ".ds", ".res", ".basic", ".equ", ".align", ".cpu",
         ".if", ".elif", ".else", ".endif", ".ifdef", ".ifndef", NULL
     };
     for (int i = 0; dirs[i]; i++)
@@ -1927,6 +2037,8 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
     long origin = -1;
     CondFrame cond_stack[MAX_COND_DEPTH + 1];
     int cond_stack_top = 0;
+    int illegal_enabled = 0;   /* toggled by '.cpu 6510x'/'.cpu 6510' --
+                                   see that directive's handling below */
 
     for (int li = 0; li < g_line_count; li++) {
         SourceLine *L = &g_lines[li];
@@ -2056,6 +2168,38 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                     listing_add(pc, L->raw, jmp_bytes, 3);
                 }
                 pc += 3;
+            }
+            continue;
+        }
+
+        if (strcmp(L->op, ".cpu") == 0) {
+            /* Switches illegal/undocumented-opcode support on or off
+             * from this point in the file forward (not retroactively --
+             * a mnemonic used above this line is checked against
+             * whatever '.cpu' setting was active there, not this one).
+             * See init_opcodes()'s SETOP_ILLEGAL() calls and
+             * c64asm-reference.md's "Illegal opcodes" section for the
+             * full explanation. */
+            char mode_name[MAX_LINE_LEN];
+            strncpy(mode_name, L->operand, sizeof(mode_name) - 1);
+            mode_name[sizeof(mode_name) - 1] = '\0';
+            trim(mode_name);
+            char mode_upper[MAX_LINE_LEN];
+            strncpy(mode_upper, mode_name, sizeof(mode_upper) - 1);
+            mode_upper[sizeof(mode_upper) - 1] = '\0';
+            for (char *pc2 = mode_upper; *pc2; pc2++) *pc2 = (char)toupper((unsigned char)*pc2);
+            if (strcmp(mode_upper, "6510X") == 0) {
+                illegal_enabled = 1;
+            } else if (strcmp(mode_upper, "6510") == 0 || strcmp(mode_upper, "6502") == 0) {
+                illegal_enabled = 0;
+            } else {
+                asm_error_recoverable(L->line_no, L->raw,
+                    "Unknown .cpu mode '%s' -- expected '6510' (standard, the "
+                    "default) or '6510x' (enables illegal/undocumented opcodes)",
+                    mode_name);
+                /* fallback: leave illegal_enabled exactly as it was -- an
+                   unrecognized mode isn't a request to change anything,
+                   just a mistake to report */
             }
             continue;
         }
@@ -2231,13 +2375,20 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
             if (pass_no == 2) {
                 OpcodeEntry *e = find_mnemonic(L->op);
                 int mode_ok = (e != NULL) && (e->op[mode] != -1);
-                int opcode = mode_ok ? e->op[mode] : 0x00;   /* BRK's opcode --
-                    an arbitrary but harmless placeholder; never actually
-                    written to the .prg, since a mode_ok failure here always
-                    means at least one error was recorded, and main() never
-                    writes output once any error exists */
+                int illegal_slot = mode_ok && e->illegal[mode];
+                int illegal_blocked = illegal_slot && !illegal_enabled;
+                int opcode = (mode_ok && !illegal_blocked) ? e->op[mode] : 0x00;   /* BRK's
+                    opcode -- an arbitrary but harmless placeholder; never
+                    actually written to the .prg, since a mode_ok failure
+                    (or an illegal opcode used without '.cpu 6510x') here
+                    always means at least one error was recorded, and
+                    main() never writes output once any error exists */
                 if (!mode_ok)
                     asm_error_recoverable(L->line_no, L->raw, "Invalid addressing mode for %s", L->op);
+                else if (illegal_blocked)
+                    asm_error_recoverable(L->line_no, L->raw,
+                        "Illegal/undocumented opcode '%s' used without '.cpu 6510x' "
+                        "-- see c64asm-reference.md's \"Illegal opcodes\" section", L->op);
                 if (undef)
                     asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in operand '%s'", L->operand);
 

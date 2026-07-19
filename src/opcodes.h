@@ -55,16 +55,30 @@ extern const int MODE_SIZE[M_COUNT];
  * addressing mode it supports (or -1 if it doesn't support that mode
  * at all). For example ADC supports 8 different modes with 8 different
  * opcode bytes; BRK supports only M_IMP, with every other slot -1.
+ *
+ * illegal[] parallels op[]: illegal[mode] is 1 if that (mnemonic, mode)
+ * slot is an illegal/undocumented opcode -- one the NMOS 6502/6510
+ * executes, but MOS never documented or supported -- and therefore
+ * requires the '.cpu 6510x' directive before it can actually be
+ * assembled. See init_opcodes() in opcodes.c and c64asm-reference.md's
+ * "Illegal opcodes" section for the full explanation. Every entry from
+ * the 56 documented mnemonics has illegal[] all zero; NOP is the one
+ * mnemonic with a mix of both (M_IMP is a real, documented opcode;
+ * its four extra illegal-opcode modes are not).
  */
 typedef struct {
-    char mnemonic[4];
+    char mnemonic[5];   /* 4 chars max (USBC, an illegal-opcode mnemonic,
+                            is the only one longer than 3) + NUL */
     int  op[M_COUNT];
+    int  illegal[M_COUNT];
 } OpcodeEntry;
 
 /*
  * Populates the opcode table with all 56 documented NMOS 6502/6510
- * mnemonics. Must be called once, before anything else in this file (or
- * split_line/parse_operand elsewhere) is used -- the table starts empty.
+ * mnemonics, plus the illegal/undocumented ones (see the "Illegal
+ * opcodes" comment block in opcodes.c). Must be called once, before
+ * anything else in this file (or split_line/parse_operand elsewhere)
+ * is used -- the table starts empty.
  */
 void init_opcodes(void);
 
@@ -89,7 +103,7 @@ int is_branch_mnemonic(const char *name);
 
 /* True if tok (case-insensitively) is one of this assembler's
  * directives: .org, .byte, .db, .word, .dw, .text, .asc, .fill, .ds,
- * .res, .basic, .equ, .align, .if, .elif, .else, .endif, .ifdef,
+ * .res, .basic, .equ, .align, .cpu, .if, .elif, .else, .endif, .ifdef,
  * .ifndef. (The bare "*=" org form and "label = expr"
  * aren't matched here -- lineparser.c recognizes those directly by their
  * punctuation before a directive name would even come into it.) */

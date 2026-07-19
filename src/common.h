@@ -21,9 +21,9 @@
                                    operand text) this assembler will handle */
 #define MAX_LINES      200000  /* largest source file, in lines */
 #define MAX_SYMBOLS    32768   /* largest symbol table (labels + constants) */
-#define MAX_MNEMONICS  64      /* size of the opcode table -- there are only
-                                   56 real 6502 mnemonics, so this has room
-                                   to spare */
+#define MAX_MNEMONICS  96      /* size of the opcode table -- 56 documented
+                                   6502 mnemonics plus the illegal/undocumented
+                                   ones (see opcodes.c), with room to spare */
 #define MAX_TOKENS     128     /* longest expression, in tokens */
 #define MAX_ARGS       64      /* most comma-separated arguments a single
                                    .byte/.word/.text/.fill line can have */

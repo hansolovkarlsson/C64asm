@@ -4,6 +4,7 @@
 
 #include <string.h>
 #include <strings.h>
+#include <ctype.h>
 #include "assembler.h"
 #include "common.h"
 #include "error.h"
@@ -61,6 +62,8 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
     long origin = -1;     /* -1 means "not set yet" */
     CondFrame cond_stack[MAX_COND_DEPTH + 1];
     int cond_stack_top = 0;
+    int illegal_enabled = 0;   /* toggled by '.cpu 6510x'/'.cpu 6510' --
+                                   see that directive's handling below */
 
     for (int li = 0; li < g_line_count; li++) {
         SourceLine *L = &g_lines[li];
@@ -199,6 +202,38 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                     listing_add(pc, L->raw, jmp_bytes, 3);
                 }
                 pc += 3;
+            }
+            continue;
+        }
+
+        if (strcmp(L->op, ".cpu") == 0) {
+            /* Switches illegal/undocumented-opcode support on or off
+             * from this point in the file forward (not retroactively --
+             * a mnemonic used above this line is checked against
+             * whatever '.cpu' setting was active there, not this one).
+             * See opcodes.c's SETOP_ILLEGAL() calls and
+             * c64asm-reference.md's "Illegal opcodes" section for the
+             * full explanation. */
+            char mode_name[MAX_LINE_LEN];
+            strncpy(mode_name, L->operand, sizeof(mode_name) - 1);
+            mode_name[sizeof(mode_name) - 1] = '\0';
+            trim(mode_name);
+            char mode_upper[MAX_LINE_LEN];
+            strncpy(mode_upper, mode_name, sizeof(mode_upper) - 1);
+            mode_upper[sizeof(mode_upper) - 1] = '\0';
+            for (char *pc2 = mode_upper; *pc2; pc2++) *pc2 = (char)toupper((unsigned char)*pc2);
+            if (strcmp(mode_upper, "6510X") == 0) {
+                illegal_enabled = 1;
+            } else if (strcmp(mode_upper, "6510") == 0 || strcmp(mode_upper, "6502") == 0) {
+                illegal_enabled = 0;
+            } else {
+                asm_error_recoverable(L->line_no, L->raw,
+                    "Unknown .cpu mode '%s' -- expected '6510' (standard, the "
+                    "default) or '6510x' (enables illegal/undocumented opcodes)",
+                    mode_name);
+                /* fallback: leave illegal_enabled exactly as it was -- an
+                   unrecognized mode isn't a request to change anything,
+                   just a mistake to report */
             }
             continue;
         }
@@ -426,13 +461,20 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
             if (pass_no == 2) {
                 OpcodeEntry *e = find_mnemonic(L->op);
                 int mode_ok = (e != NULL) && (e->op[mode] != -1);
-                int opcode = mode_ok ? e->op[mode] : 0x00;   /* BRK's opcode --
-                    an arbitrary but harmless placeholder; never actually
-                    written to the .prg, since a mode_ok failure here always
-                    means at least one error was recorded, and main() never
-                    writes output once any error exists */
+                int illegal_slot = mode_ok && e->illegal[mode];
+                int illegal_blocked = illegal_slot && !illegal_enabled;
+                int opcode = (mode_ok && !illegal_blocked) ? e->op[mode] : 0x00;   /* BRK's
+                    opcode -- an arbitrary but harmless placeholder; never
+                    actually written to the .prg, since a mode_ok failure
+                    (or an illegal opcode used without '.cpu 6510x') here
+                    always means at least one error was recorded, and
+                    main() never writes output once any error exists */
                 if (!mode_ok)
                     asm_error_recoverable(L->line_no, L->raw, "Invalid addressing mode for %s", L->op);
+                else if (illegal_blocked)
+                    asm_error_recoverable(L->line_no, L->raw,
+                        "Illegal/undocumented opcode '%s' used without '.cpu 6510x' "
+                        "-- see c64asm-reference.md's \"Illegal opcodes\" section", L->op);
                 if (undef)
                     asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in operand '%s'", L->operand);
 

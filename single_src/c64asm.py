@@ -129,6 +129,76 @@ OPCODES = {
     'TYA': {'imp':0x98},
 }
 
+# ---------------------------------------------------------------------------
+# Illegal / undocumented opcodes -- see c64asm-reference.md's "Illegal
+# opcodes" section for the full user-facing explanation. These are real
+# instructions the NMOS 6502/6510 executes (nothing in the silicon
+# actually "traps" an unused opcode byte the way, say, an undefined
+# machine-code instruction on a modern CPU would), but MOS never
+# documented or supported them, and their exact behavior sometimes
+# differs subtly between individual chips -- see the notes below on
+# which of these are considered unstable.
+#
+# Mnemonics and opcode assignments follow the widely-used oxyron.de
+# table (http://www.oxyron.de/html/opcodes02.html), the standard
+# C64-scene reference for this. A few of these opcodes have more than
+# one valid encoding for the exact same mnemonic+mode (e.g. ANC is both
+# $0B and $2B) -- this assembler always emits the lower/more common one
+# of the two, which is what every other assembler of this kind does; a
+# disassembler would need to preserve the distinction, but this is an
+# assembler, not a disassembler, so only one encoding per mnemonic+mode
+# is ever needed.
+#
+# $EB is a byte-for-byte functional duplicate of SBC #imm ($E9) -- to
+# avoid a collision with the real, documented SBC mnemonic in the table
+# above, it's given the distinct mnemonic USBC here, following the same
+# convention several other illegal-opcode assemblers use.
+ILLEGAL_OPCODES = {
+    'SLO':  {'zp':0x07,'zpx':0x17,'indx':0x03,'indy':0x13,'abs':0x0F,'absx':0x1F,'absy':0x1B},
+    'RLA':  {'zp':0x27,'zpx':0x37,'indx':0x23,'indy':0x33,'abs':0x2F,'absx':0x3F,'absy':0x3B},
+    'SRE':  {'zp':0x47,'zpx':0x57,'indx':0x43,'indy':0x53,'abs':0x4F,'absx':0x5F,'absy':0x5B},
+    'RRA':  {'zp':0x67,'zpx':0x77,'indx':0x63,'indy':0x73,'abs':0x6F,'absx':0x7F,'absy':0x7B},
+    'SAX':  {'zp':0x87,'zpy':0x97,'indx':0x83,'abs':0x8F},
+    'LAX':  {'zp':0xA7,'zpy':0xB7,'indx':0xA3,'indy':0xB3,'abs':0xAF,'absy':0xBF,'imm':0xAB},
+    'DCP':  {'zp':0xC7,'zpx':0xD7,'indx':0xC3,'indy':0xD3,'abs':0xCF,'absx':0xDF,'absy':0xDB},
+    'ISC':  {'zp':0xE7,'zpx':0xF7,'indx':0xE3,'indy':0xF3,'abs':0xEF,'absx':0xFF,'absy':0xFB},
+    'ANC':  {'imm':0x0B},
+    'ALR':  {'imm':0x4B},
+    'ARR':  {'imm':0x6B},
+    'XAA':  {'imm':0x8B},   # highly unstable -- see reference doc
+    'AXS':  {'imm':0xCB},
+    'USBC': {'imm':0xEB},   # functional duplicate of SBC #imm
+    'AHX':  {'indy':0x93,'absy':0x9F},   # highly unstable
+    'SHY':  {'absx':0x9C},   # unstable
+    'SHX':  {'absy':0x9E},   # unstable
+    'TAS':  {'absy':0x9B},   # unstable
+    'LAS':  {'absy':0xBB},
+    'KIL':  {'imp':0x02},    # halts the CPU until reset; 11 other opcode
+                              # bytes ($12,$22,$32,$42,$52,$62,$72,$92,
+                              # $B2,$D2,$F2) do the same thing, but only
+                              # one encoding is needed for assembling
+}
+
+# NOP normally only has implied-mode addressing ($EA, in OPCODES above).
+# The NMOS 6502/6510 also executes several additional opcode bytes as
+# NOP-with-an-ignored-operand, across four more addressing modes --
+# these extend the *same* mnemonic's mode table rather than needing a
+# distinct name, since they behave exactly like NOP: the operand is
+# fetched (costing the extra byte(s) and cycles) and then discarded.
+ILLEGAL_NOP_MODES = {'imm':0x80,'zp':0x04,'zpx':0x14,'abs':0x0C,'absx':0x1C}
+
+for _mnem, _modes in ILLEGAL_OPCODES.items():
+    OPCODES[_mnem] = dict(_modes)
+OPCODES['NOP'] = dict(OPCODES['NOP'], **ILLEGAL_NOP_MODES)
+
+# Every (mnemonic, mode) pair that requires '.cpu 6510x' to assemble --
+# used by _pass() to gate illegal-opcode use behind that directive. Kept
+# as a set of pairs, rather than a set of mnemonics, specifically
+# because of NOP: 'imp' NOP ($EA) is perfectly legal and always
+# available, while its four extra illegal modes above are not.
+ILLEGAL_SLOTS = {(m, mode) for m, modes in ILLEGAL_OPCODES.items() for mode in modes}
+ILLEGAL_SLOTS |= {('NOP', mode) for mode in ILLEGAL_NOP_MODES}
+
 # Number of bytes an instruction occupies for each addressing mode.
 MODE_SIZE = {'imp':1,'acc':1,'imm':2,'zp':2,'zpx':2,'zpy':2,'rel':2,
              'abs':3,'absx':3,'absy':3,'ind':3,'indx':2,'indy':2}
@@ -136,7 +206,7 @@ MODE_SIZE = {'imp':1,'acc':1,'imm':2,'zp':2,'zpx':2,'zpy':2,'rel':2,
 BRANCHES = {'BCC','BCS','BEQ','BMI','BNE','BPL','BVC','BVS'}
 
 DIRECTIVES = {'.org', '*=', '.byte', '.db', '.word', '.dw', '.text', '.asc',
-              '.fill', '.ds', '.res', '.basic', '.equ', '.align',
+              '.fill', '.ds', '.res', '.basic', '.equ', '.align', '.cpu',
               '.if', '.elif', '.else', '.endif', '.ifdef', '.ifndef'}
 
 MAX_MACRO_EXPANSION_DEPTH = 16   # guards against runaway/infinite recursive macros
@@ -1218,6 +1288,8 @@ class Assembler:
         origin = None
         output = bytearray()
         cond_stack = []   # see the ".if"/".ifdef" handling below
+        illegal_enabled = False   # toggled by '.cpu 6510x'/'.cpu 6510' --
+                                     # see that directive's handling below
 
         def parent_active():
             return not cond_stack or cond_stack[-1].currently_active
@@ -1325,6 +1397,28 @@ class Assembler:
                         output.append(val & 0xFF)
                         output.append((val >> 8) & 0xFF)
                         self.listing.append((jmp_addr, raw, output[-3:]))
+                continue
+
+            if op == '.cpu':
+                # Switches illegal/undocumented-opcode support on or off
+                # from this point in the file forward (not retroactively
+                # -- a mnemonic used above this line is checked against
+                # whatever '.cpu' setting was active there, not this
+                # one). See ILLEGAL_SLOTS above and c64asm-reference.md's
+                # "Illegal opcodes" section for the full explanation.
+                mode_name = operand.strip().upper()
+                if mode_name == '6510X':
+                    illegal_enabled = True
+                elif mode_name in ('6510', '6502'):
+                    illegal_enabled = False
+                else:
+                    record_error(
+                        f"Unknown .cpu mode '{operand.strip()}' -- expected "
+                        f"'6510' (standard, the default) or '6510x' "
+                        f"(enables illegal/undocumented opcodes)", line_no, raw)
+                    # fallback: leave illegal_enabled exactly as it was --
+                    # an unrecognized mode isn't a request to change
+                    # anything, just a mistake to report
                 continue
 
             if op == '.org':
@@ -1473,14 +1567,22 @@ class Assembler:
 
             if pass_no == 2:
                 mode_ok = mnemonic in OPCODES and mode in OPCODES[mnemonic]
-                opcode = OPCODES[mnemonic][mode] if mode_ok else 0x00  # BRK's
+                illegal_slot = mode_ok and (mnemonic, mode) in ILLEGAL_SLOTS
+                illegal_blocked = illegal_slot and not illegal_enabled
+                opcode = OPCODES[mnemonic][mode] if (mode_ok and not illegal_blocked) else 0x00  # BRK's
                     # opcode -- an arbitrary but harmless placeholder;
                     # never written to the .prg, since a mode_ok failure
+                    # (or an illegal opcode used without '.cpu 6510x')
                     # here always means at least one error was recorded,
                     # and this build never writes output once any error
                     # exists (see main())
                 if not mode_ok:
                     record_error(f"Invalid addressing mode for {mnemonic}", line_no, raw)
+                elif illegal_blocked:
+                    record_error(
+                        f"Illegal/undocumented opcode '{mnemonic}' used without "
+                        f"'.cpu 6510x' -- see c64asm-reference.md's \"Illegal "
+                        f"opcodes\" section", line_no, raw)
                 if undef:
                     record_error(f"Undefined symbol in operand '{operand}'", line_no, raw)
 
