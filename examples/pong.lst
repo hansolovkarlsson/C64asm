@@ -1,0 +1,687 @@
+; c64asm listing  (origin $0801, 1407 bytes)
+
+080D  4C 67 09          .basic start   ; needed once library code (wait_frame,
+0810  AD 12 D0          lda VIC_RASTER
+0813  C9 FB             cmp #$fb
+0815  D0 F9             bne wait_frame
+0817  60                rts
+0818  A2 00             ldx #0                ; returned: did X bounce this frame?
+081A  A0 00             ldy #0                ; returned: did Y bounce this frame?
+081C  A5 05             lda xdir
+081E  F0 1B             beq __local2_move_left
+0820  E6 02             inc xpos              ; 16-bit increment: bump the low byte, and
+0822  D0 02             bne __local2_x_inc_done        ; only the high byte too if that wrapped
+0824  E6 03             inc xpos+1
+0826  A5 02             lda xpos              ; 16-bit compare against XMAX
+0828  C9 FF             cmp #<XMAX
+082A  D0 29             bne __local2_x_done
+082C  A5 03             lda xpos+1
+082E  C9 00             cmp #>XMAX
+0830  D0 23             bne __local2_x_done
+0832  A9 00             lda #0
+0834  85 05             sta xdir             ; hit the right edge -- reverse
+0836  A2 01             ldx #1
+0838  4C 55 08          jmp __local2_x_done
+083B  A5 02             lda xpos              ; 16-bit decrement: only borrow into the
+083D  D0 02             bne __local2_x_dec_done         ; high byte if the low byte was already 0
+083F  C6 03             dec xpos+1
+0841  C6 02             dec xpos
+0843  A5 02             lda xpos              ; 16-bit compare against XMIN (XMIN is
+0845  C9 00             cmp #<XMIN              ; ordinarily under 256, so xpos+1 will
+0847  D0 0C             bne __local2_x_done               ; ordinarily be checked against 0 here,
+0849  A5 03             lda xpos+1                  ; but this works for any XMIN value)
+084B  C9 00             cmp #>XMIN
+084D  D0 06             bne __local2_x_done
+084F  A9 01             lda #1
+0851  85 05             sta xdir             ; hit the left edge -- reverse
+0853  A2 01             ldx #1
+0855  A5 06             lda ydir
+0857  F0 11             beq __local2_move_up
+0859  E6 04             inc ypos
+085B  A5 04             lda ypos
+085D  C9 FF             cmp #YMAX
+085F  D0 17             bne __local2_y_done
+0861  A9 00             lda #0
+0863  85 06             sta ydir             ; hit the bottom edge -- reverse
+0865  A0 01             ldy #1
+0867  4C 78 08          jmp __local2_y_done
+086A  C6 04             dec ypos
+086C  A5 04             lda ypos
+086E  C9 00             cmp #YMIN
+0870  D0 06             bne __local2_y_done
+0872  A9 01             lda #1
+0874  85 06             sta ydir             ; hit the top edge -- reverse
+0876  A0 01             ldy #1
+0878  A5 02             lda xpos
+087A  8D 00 D0          sta SPRITE0_X
+087D  A5 03             lda xpos+1
+087F  F0 0B             beq __local2_msb_clear
+0881  AD 10 D0          lda SPRITE_X_MSB
+0884  09 01             ora #%00000001       ; set sprite 0's bit only -- other sprites'
+0886  8D 10 D0          sta SPRITE_X_MSB       ; MSB bits, if any, are left untouched
+0889  4C 94 08          jmp __local2_msb_done
+088C  AD 10 D0          lda SPRITE_X_MSB
+088F  29 FE             and #%11111110
+0891  8D 10 D0          sta SPRITE_X_MSB
+0894  A5 04             lda ypos
+0896  8D 01 D0          sta SPRITE0_Y
+0899  60                rts
+089A  85 FB             sta gfx_ptr
+089C  84 FC             sty gfx_ptr+1
+089E  A9 01             lda #%00000001
+08A0  8D 1D D0          sta SPRITE_X_EXPAND
+08A3  8D 17 D0          sta SPRITE_Y_EXPAND
+08A6  A0 00             ldy #$00
+08A8  B1 FB             lda (gfx_ptr),y
+08AA  8D 27 D0          sta SPRITE0_COLOR
+08AD  20 10 08          jsr wait_frame
+08B0  20 10 08          jsr wait_frame
+08B3  C8                iny
+08B4  CA                dex
+08B5  D0 F1             bne __local3_loop
+08B7  A9 00             lda #0
+08B9  8D 15 D0          sta SPRITE_ENABLE
+08BC  8D 1D D0          sta SPRITE_X_EXPAND
+08BF  8D 17 D0          sta SPRITE_Y_EXPAND
+08C2  60                rts
+08C3  A9 00             lda #%00000000
+08C5  8D 02 DC          sta CIA1_DDRA
+08C8  AD 00 DC          lda CIA1_PRA
+08CB  49 FF             eor #$ff
+08CD  60                rts
+08F6  A2 00             ldx #$00
+08F8  20 CF FF          jsr CHRIN
+08FB  C9 0D             cmp #$0d
+08FD  F0 08             beq __local6_done
+08FF  9D CE 08          sta input_buf,x
+0902  E8                inx
+0903  E0 27             cpx #MAX_INPUT_LEN-1
+0905  D0 F1             bne __local6_loop
+0907  A9 00             lda #$00
+0909  9D CE 08          sta input_buf,x
+090C  60                rts
+090D  85 FB             sta word_dest_ptr
+090F  84 FC             sty word_dest_ptr+1
+0911  BD CE 08          lda input_buf,x
+0914  C9 20             cmp #$20
+0916  D0 04             bne __local7_start
+0918  E8                inx
+0919  4C 11 09          jmp __local7_skip_spaces
+091C  A0 00             ldy #$00
+091E  BD CE 08          lda input_buf,x
+0921  F0 0F             beq __local7_end
+0923  C9 20             cmp #$20
+0925  F0 0A             beq __local7_space
+0927  91 FB             sta (word_dest_ptr),y
+0929  E8                inx
+092A  C8                iny
+092B  C0 0E             cpy #MAX_WORD_LEN-1
+092D  D0 EF             bne __local7_loop
+092F  F0 01             beq __local7_terminate
+0931  E8                inx
+0932  A9 00             lda #$00
+0934  91 FB             sta (word_dest_ptr),y
+0936  60                rts
+0937  A5 09             lda engine_playing
+0939  D0 1D             bne __local8_already_on
+093B  A9 00             lda #$00
+093D  8D 00 D4          sta VOICE1_FREQ_LO
+0940  A9 08             lda #$08
+0942  8D 01 D4          sta VOICE1_FREQ_HI
+0945  A9 00             lda #$00
+0947  8D 05 D4          sta VOICE1_AD
+094A  A9 F8             lda #$f8
+094C  8D 06 D4          sta VOICE1_SR
+094F  A9 81             lda #%10000001          ; noise waveform, gate on
+0951  8D 04 D4          sta VOICE1_CTRL
+0954  A9 01             lda #1
+0956  85 09             sta engine_playing
+0958  60                rts
+0959  A5 09             lda engine_playing
+095B  F0 09             beq __local9_already_off
+095D  A9 80             lda #%10000000          ; noise waveform, gate off
+095F  8D 04 D4          sta VOICE1_CTRL
+0962  A9 00             lda #0
+0964  85 09             sta engine_playing
+0966  60                rts
+0967  A9 00             lda #%00000000
+0969  8D 03 DC          sta CIA1_DDRB
+096C  A9 00             lda #<SCREEN
+096E  85 FB             sta ptr
+0970  A9 04             lda #>SCREEN
+0972  85 FC             sta ptr+1
+0974  A2 04             ldx #4
+0976  A9 20             lda #$20              ; space
+0978  A0 00             ldy #$00
+097A  91 FB             sta (ptr),y
+097C  C8                iny
+097D  D0 FB             bne clear_screen_byte
+097F  E6 FC             inc ptr+1
+0981  CA                dex
+0982  D0 F4             bne clear_screen
+0984  A9 00             lda #<COLOR
+0986  85 FB             sta ptr
+0988  A9 D8             lda #>COLOR
+098A  85 FC             sta ptr+1
+098C  A2 04             ldx #4
+098E  A9 00             lda #$00              ; color doesn't matter for space characters,
+0990  A0 00             ldy #$00
+0992  91 FB             sta (ptr),y
+0994  C8                iny
+0995  D0 FB             bne clear_color_byte
+0997  E6 FC             inc ptr+1
+0999  CA                dex
+099A  D0 F4             bne clear_color
+099C  A9 00             lda #0
+099E  8D 20 D0          sta VIC_BORDER
+09A1  8D 21 D0          sta VIC_BG0
+09A4  A9 0F             lda #$0f
+09A6  8D 18 D4          sta SID_VOLUME
+09A9  A9 00             lda #$00
+09AB  8D 04 D4          sta VOICE1_CTRL
+09AE  A9 14             lda #<(SCREEN+20)
+09B0  85 FB             sta ptr
+09B2  A9 04             lda #>(SCREEN+20)
+09B4  85 FC             sta ptr+1
+09B6  A2 0D             ldx #13
+09B8  A0 00             ldy #$00
+09BA  A9 2A             lda #$2a              ; screen code '*' (same value as PETSCII here)
+09BC  91 FB             sta (ptr),y
+09BE  18                clc
+09BF  A5 FB             lda ptr
+09C1  69 50             adc #80                ; skip a row (draws every other row => dashed)
+09C3  85 FB             sta ptr
+09C5  A5 FC             lda ptr+1
+09C7  69 00             adc #0
+09C9  85 FC             sta ptr+1
+09CB  CA                dex
+09CC  D0 EA             bne draw_net_screen
+09CE  A9 14             lda #<(COLOR+20)
+09D0  85 FB             sta ptr
+09D2  A9 D8             lda #>(COLOR+20)
+09D4  85 FC             sta ptr+1
+09D6  A2 0D             ldx #13
+09D8  A0 00             ldy #$00
+09DA  A9 01             lda #1                 ; white
+09DC  91 FB             sta (ptr),y
+09DE  18                clc
+09DF  A5 FB             lda ptr
+09E1  69 50             adc #80
+09E3  85 FB             sta ptr
+09E5  A5 FC             lda ptr+1
+09E7  69 00             adc #0
+09E9  85 FC             sta ptr+1
+09EB  CA                dex
+09EC  D0 EA             bne draw_net_color
+09EE  A9 34             lda #((ball_data) / 64)
+09F0  8D F8 07          sta SPRITE_PTR0
+09F3  A9 01             lda #1
+09F5  8D 27 D0          sta SPRITE0_COLOR
+09F8  A9 22             lda #BALL_XMIN
+09FA  8D 00 D0          sta SPRITE0_X
+09FD  A9 6C             lda #108
+09FF  8D 01 D0          sta SPRITE0_Y
+0A02  A9 01             lda #%00000001
+0A04  8D 15 D0          sta SPRITE_ENABLE
+0A07  AD 10 D0          lda SPRITE_X_MSB
+0A0A  29 FE             and #%11111110       ; ball starts under 256 (BALL_XMIN=34), so
+0A0C  8D 10 D0          sta SPRITE_X_MSB       ; its MSB bit should start cleared too
+0A0F  A9 35             lda #(paddle_data / 64)
+0A11  8D F9 07          sta SPRITE_PTR1
+0A14  A9 35             lda #(paddle_data / 64)
+0A16  8D FA 07          sta SPRITE_PTR2
+0A19  A9 03             lda #3                 ; left paddle: cyan
+0A1B  8D 28 D0          sta $d028
+0A1E  A9 07             lda #7                 ; right paddle: yellow
+0A20  8D 29 D0          sta $d029
+0A23  A9 18             lda #LEFT_PADDLE_X
+0A25  8D 02 D0          sta $d002
+0A28  A9 64             lda #100
+0A2A  8D 03 D0          sta $d003              ; = initial p1_y, set below
+0A2D  A9 40             lda #<RIGHT_PADDLE_X
+0A2F  8D 04 D0          sta $d004
+0A32  AD 10 D0          lda SPRITE_X_MSB
+0A35  09 04             ora #%00000100         ; sprite 2's X-MSB bit -- RIGHT_PADDLE_X
+0A37  8D 10 D0          sta SPRITE_X_MSB         ; is past 255; see the paddle-X comment
+0A3A  A9 64             lda #100
+0A3C  8D 05 D0          sta $d005              ; = initial p2_y, set below
+0A3F  AD 15 D0          lda SPRITE_ENABLE
+0A42  09 06             ora #%00000110         ; also enable sprites 1 and 2 (the ball,
+0A44  8D 15 D0          sta SPRITE_ENABLE         ; sprite 0, was already enabled by
+0A47  A9 01             lda #1                  ; white
+0A49  8D 05 D8          sta P1_SCORE_COLOR
+0A4C  8D 20 D8          sta P2_SCORE_COLOR
+0A4F  A9 00             lda #0
+0A51  85 0B             sta p1_score
+0A53  85 0C             sta p2_score
+0A55  20 BD 0C          jsr draw_p1_score
+0A58  20 C6 0C          jsr draw_p2_score
+0A5B  A9 64             lda #100
+0A5D  85 07             sta p1_y
+0A5F  85 08             sta p2_y
+0A61  A9 22             lda #<BALL_XMIN
+0A63  85 02             sta ball_x
+0A65  A9 00             lda #>BALL_XMIN
+0A67  85 03             sta ball_x+1
+0A69  A9 6C             lda #108
+0A6B  85 04             sta ball_y
+0A6D  A9 01             lda #1
+0A6F  85 05             sta ball_xdir             ; serve toward the computer paddle
+0A71  85 06             sta ball_ydir
+0A73  A9 02             lda #AI_SPEED
+0A75  85 09             sta ai_delay
+0A77  20 10 08          jsr wait_frame
+0A7A  20 89 0A          jsr read_joystick
+0A7D  20 D5 0A          jsr move_ai
+0A80  20 F9 0A          jsr move_ball
+0A83  20 91 0C          jsr update_sprites
+0A86  4C 77 0A          jmp main_loop
+0A89  20 C3 08          jsr read_joy2
+0A8C  85 0A             sta joy_state           ; active-HIGH (1=pressed) -- read_joy2's
+0A8E  A5 0A             lda joy_state
+0A90  29 01             and #%00000001         ; joystick up
+0A92  D0 15             bne do_up
+0A94  78                sei
+0A95  A9 FF             lda #%11111111
+0A97  8D 02 DC          sta CIA1_DDRA
+0A9A  A9 FD             lda #%11111101
+0A9C  8D 00 DC          sta CIA1_PRA
+0A9F  AD 01 DC          lda CIA1_PRB
+0AA2  58                cli
+0AA3  49 FF             eor #$ff
+0AA5  29 02             and #%00000010
+0AA7  F0 08             beq no_up
+0AA9  A5 07             lda p1_y
+0AAB  C9 32             cmp #PADDLE_YMIN
+0AAD  F0 02             beq no_up
+0AAF  C6 07             dec p1_y
+0AB1  A5 0A             lda joy_state
+0AB3  29 02             and #%00000010         ; joystick down
+0AB5  D0 15             bne do_down
+0AB7  78                sei
+0AB8  A9 FF             lda #%11111111
+0ABA  8D 02 DC          sta CIA1_DDRA
+0ABD  A9 FD             lda #%11111101
+0ABF  8D 00 DC          sta CIA1_PRA
+0AC2  AD 01 DC          lda CIA1_PRB
+0AC5  58                cli
+0AC6  49 FF             eor #$ff
+0AC8  29 20             and #%00100000
+0ACA  F0 08             beq no_down
+0ACC  A5 07             lda p1_y
+0ACE  C9 E5             cmp #PADDLE_YMAX
+0AD0  F0 02             beq no_down
+0AD2  E6 07             inc p1_y
+0AD4  60                rts
+0AD5  C6 09             dec ai_delay
+0AD7  D0 1F             bne ai_done
+0AD9  A9 02             lda #AI_SPEED
+0ADB  85 09             sta ai_delay
+0ADD  A5 08             lda p2_y
+0ADF  C5 04             cmp ball_y
+0AE1  F0 15             beq ai_done
+0AE3  90 0B             bcc ai_need_down       ; p2_y < ball_y -> move down
+0AE5  A5 08             lda p2_y
+0AE7  C9 32             cmp #PADDLE_YMIN
+0AE9  F0 0D             beq ai_done
+0AEB  C6 08             dec p2_y
+0AED  4C F8 0A          jmp ai_done
+0AF0  A5 08             lda p2_y
+0AF2  C9 E5             cmp #PADDLE_YMAX
+0AF4  F0 02             beq ai_done
+0AF6  E6 08             inc p2_y
+0AF8  60                rts
+0AF9  A5 06             lda ball_ydir
+0AFB  F0 2D             beq ball_move_up
+0AFD  E6 04             inc ball_y
+0AFF  A5 04             lda ball_y
+0B01  C9 E5             cmp #YMAX_WALL
+0B03  D0 4F             bne ball_y_done
+0B05  A9 00             lda #0
+0B07  85 06             sta ball_ydir
+0B09  A9 00             lda #$00
+0B0B  8D 04 D4          sta VOICE1_CTRL
+0B0E  A9 00             lda #$00
+0B10  8D 00 D4          sta VOICE1_FREQ_LO
+0B13  A9 18             lda #$18
+0B15  8D 01 D4          sta VOICE1_FREQ_HI
+0B18  A9 06             lda #$06
+0B1A  8D 05 D4          sta VOICE1_AD
+0B1D  A9 00             lda #$00
+0B1F  8D 06 D4          sta VOICE1_SR
+0B22  A9 11             lda #%00010001
+0B24  8D 04 D4          sta VOICE1_CTRL
+0B27  4C 54 0B          jmp ball_y_done
+0B2A  C6 04             dec ball_y
+0B2C  A5 04             lda ball_y
+0B2E  C9 32             cmp #YMIN_WALL
+0B30  D0 22             bne ball_y_done
+0B32  A9 01             lda #1
+0B34  85 06             sta ball_ydir
+0B36  A9 00             lda #$00
+0B38  8D 04 D4          sta VOICE1_CTRL
+0B3B  A9 00             lda #$00
+0B3D  8D 00 D4          sta VOICE1_FREQ_LO
+0B40  A9 18             lda #$18
+0B42  8D 01 D4          sta VOICE1_FREQ_HI
+0B45  A9 06             lda #$06
+0B47  8D 05 D4          sta VOICE1_AD
+0B4A  A9 00             lda #$00
+0B4C  8D 06 D4          sta VOICE1_SR
+0B4F  A9 11             lda #%00010001
+0B51  8D 04 D4          sta VOICE1_CTRL
+0B54  A5 05             lda ball_xdir
+0B56  F0 18             beq ball_move_left
+0B58  E6 02             inc ball_x              ; 16-bit increment: bump the low byte, and
+0B5A  D0 02             bne ball_x_inc_done       ; only the high byte too if that wrapped
+0B5C  E6 03             inc ball_x+1
+0B5E  A5 02             lda ball_x               ; 16-bit compare against BALL_XMAX
+0B60  C9 36             cmp #<BALL_XMAX
+0B62  D0 23             bne ball_x_done
+0B64  A5 03             lda ball_x+1
+0B66  C9 01             cmp #>BALL_XMAX
+0B68  D0 1D             bne ball_x_done
+0B6A  20 88 0B          jsr test_right_paddle
+0B6D  4C 87 0B          jmp ball_x_done
+0B70  A5 02             lda ball_x               ; 16-bit decrement: only borrow into the
+0B72  D0 02             bne ball_x_dec_done        ; high byte if the low byte was already 0
+0B74  C6 03             dec ball_x+1
+0B76  C6 02             dec ball_x
+0B78  A5 02             lda ball_x                ; 16-bit compare against BALL_XMIN (which
+0B7A  C9 22             cmp #<BALL_XMIN              ; is ordinarily under 256, so ball_x+1
+0B7C  D0 09             bne ball_x_done                ; will ordinarily be checked against 0)
+0B7E  A5 03             lda ball_x+1
+0B80  C9 00             cmp #>BALL_XMIN
+0B82  D0 03             bne ball_x_done
+0B84  20 03 0C          jsr test_left_paddle
+0B87  60                rts
+0B88  A5 04             lda ball_y
+0B8A  18                clc
+0B8B  69 18             adc #PADDLE_RANGE
+0B8D  C5 08             cmp p2_y
+0B8F  90 2C             bcc right_miss          ; ball_y+RANGE < p2_y -> ball is above the paddle
+0B91  A5 08             lda p2_y
+0B93  18                clc
+0B94  69 18             adc #PADDLE_RANGE
+0B96  C5 04             cmp ball_y
+0B98  90 23             bcc right_miss          ; p2_y+RANGE < ball_y -> ball is below the paddle
+0B9A  A9 00             lda #0
+0B9C  85 05             sta ball_xdir            ; hit -- bounce back left
+0B9E  A9 00             lda #$00
+0BA0  8D 04 D4          sta VOICE1_CTRL
+0BA3  A9 00             lda #$00
+0BA5  8D 00 D4          sta VOICE1_FREQ_LO
+0BA8  A9 30             lda #$30
+0BAA  8D 01 D4          sta VOICE1_FREQ_HI
+0BAD  A9 08             lda #$08
+0BAF  8D 05 D4          sta VOICE1_AD
+0BB2  A9 00             lda #$00
+0BB4  8D 06 D4          sta VOICE1_SR
+0BB7  A9 11             lda #%00010001
+0BB9  8D 04 D4          sta VOICE1_CTRL
+0BBC  60                rts
+0BBD  20 7E 0C          jsr flash_border
+0BC0  A9 00             lda #$00
+0BC2  8D 04 D4          sta VOICE1_CTRL
+0BC5  A9 00             lda #$00
+0BC7  8D 00 D4          sta VOICE1_FREQ_LO
+0BCA  A9 08             lda #$08
+0BCC  8D 01 D4          sta VOICE1_FREQ_HI
+0BCF  A9 0F             lda #$0f
+0BD1  8D 05 D4          sta VOICE1_AD
+0BD4  A9 00             lda #$00
+0BD6  8D 06 D4          sta VOICE1_SR
+0BD9  A9 11             lda #%00010001
+0BDB  8D 04 D4          sta VOICE1_CTRL
+0BDE  E6 0B             inc p1_score
+0BE0  A5 0B             lda p1_score
+0BE2  C9 0A             cmp #10
+0BE4  D0 04             bne p1_score_ok
+0BE6  A9 00             lda #0
+0BE8  85 0B             sta p1_score
+0BEA  20 BD 0C          jsr draw_p1_score
+0BED  A9 22             lda #<BALL_XMIN
+0BEF  85 02             sta ball_x
+0BF1  A9 00             lda #>BALL_XMIN
+0BF3  85 03             sta ball_x+1
+0BF5  A5 07             lda p1_y
+0BF7  18                clc
+0BF8  69 08             adc #8                  ; roughly paddle-center height -- clamped
+0BFA  C9 E5             cmp #YMAX_WALL             ; below to stay STRICTLY less than
+0BFC  90 02             bcc serve_right_y_ok         ; YMAX_WALL, not just <= it: p1_y can
+0BFE  A9 E4             lda #YMAX_WALL-1               ; now reach values (e.g. 221) where
+0C00  85 04             sta ball_y                         ; and if ball_ydir is still "down"
+0C02  60                rts                                   ; at that moment, move_ball's
+0C03  A5 04             lda ball_y
+0C05  18                clc
+0C06  69 18             adc #PADDLE_RANGE
+0C08  C5 07             cmp p1_y
+0C0A  90 2C             bcc left_miss
+0C0C  A5 07             lda p1_y
+0C0E  18                clc
+0C0F  69 18             adc #PADDLE_RANGE
+0C11  C5 04             cmp ball_y
+0C13  90 23             bcc left_miss
+0C15  A9 01             lda #1
+0C17  85 05             sta ball_xdir             ; hit -- bounce back right
+0C19  A9 00             lda #$00
+0C1B  8D 04 D4          sta VOICE1_CTRL
+0C1E  A9 00             lda #$00
+0C20  8D 00 D4          sta VOICE1_FREQ_LO
+0C23  A9 30             lda #$30
+0C25  8D 01 D4          sta VOICE1_FREQ_HI
+0C28  A9 08             lda #$08
+0C2A  8D 05 D4          sta VOICE1_AD
+0C2D  A9 00             lda #$00
+0C2F  8D 06 D4          sta VOICE1_SR
+0C32  A9 11             lda #%00010001
+0C34  8D 04 D4          sta VOICE1_CTRL
+0C37  60                rts
+0C38  20 7E 0C          jsr flash_border
+0C3B  A9 00             lda #$00
+0C3D  8D 04 D4          sta VOICE1_CTRL
+0C40  A9 00             lda #$00
+0C42  8D 00 D4          sta VOICE1_FREQ_LO
+0C45  A9 08             lda #$08
+0C47  8D 01 D4          sta VOICE1_FREQ_HI
+0C4A  A9 0F             lda #$0f
+0C4C  8D 05 D4          sta VOICE1_AD
+0C4F  A9 00             lda #$00
+0C51  8D 06 D4          sta VOICE1_SR
+0C54  A9 11             lda #%00010001
+0C56  8D 04 D4          sta VOICE1_CTRL
+0C59  E6 0C             inc p2_score
+0C5B  A5 0C             lda p2_score
+0C5D  C9 0A             cmp #10
+0C5F  D0 04             bne p2_score_ok
+0C61  A9 00             lda #0
+0C63  85 0C             sta p2_score
+0C65  20 C6 0C          jsr draw_p2_score
+0C68  A9 36             lda #<BALL_XMAX
+0C6A  85 02             sta ball_x
+0C6C  A9 01             lda #>BALL_XMAX
+0C6E  85 03             sta ball_x+1
+0C70  A5 08             lda p2_y
+0C72  18                clc
+0C73  69 08             adc #8                  ; roughly paddle-center height -- clamped
+0C75  C9 E5             cmp #YMAX_WALL             ; the same way right_miss's own serve is,
+0C77  90 02             bcc serve_left_y_ok          ; and for the identical reason -- see
+0C79  A9 E4             lda #YMAX_WALL-1               ; that comment above
+0C7B  85 04             sta ball_y
+0C7D  60                rts
+0C7E  A9 02             lda #2                  ; red
+0C80  8D 20 D0          sta VIC_BORDER
+0C83  A2 08             ldx #8
+0C85  20 10 08          jsr wait_frame
+0C88  CA                dex
+0C89  D0 FA             bne flash_delay
+0C8B  A9 00             lda #0
+0C8D  8D 20 D0          sta VIC_BORDER
+0C90  60                rts
+0C91  A5 02             lda ball_x
+0C93  8D 00 D0          sta SPRITE0_X
+0C96  A5 03             lda ball_x+1
+0C98  F0 0B             beq ball_msb_clear
+0C9A  AD 10 D0          lda SPRITE_X_MSB
+0C9D  09 01             ora #%00000001       ; sprite 0's bit only -- sprite 2's own MSB
+0C9F  8D 10 D0          sta SPRITE_X_MSB       ; bit (set once at startup) is untouched
+0CA2  4C AD 0C          jmp ball_msb_done
+0CA5  AD 10 D0          lda SPRITE_X_MSB
+0CA8  29 FE             and #%11111110
+0CAA  8D 10 D0          sta SPRITE_X_MSB
+0CAD  A5 04             lda ball_y
+0CAF  8D 01 D0          sta SPRITE0_Y
+0CB2  A5 07             lda p1_y
+0CB4  8D 03 D0          sta $d003
+0CB7  A5 08             lda p2_y
+0CB9  8D 05 D0          sta $d005
+0CBC  60                rts
+0CBD  A5 0B             lda p1_score
+0CBF  18                clc
+0CC0  69 30             adc #$30
+0CC2  8D 05 04          sta P1_SCORE_POS
+0CC5  60                rts
+0CC6  A5 0C             lda p2_score
+0CC8  18                clc
+0CC9  69 30             adc #$30
+0CCB  8D 20 04          sta P2_SCORE_POS
+0CCE  60                rts
+
+Symbol table:
+  AI_SPEED             = $0002
+  BALL_XMAX            = $0136
+  BALL_XMIN            = $0022
+  BITMAP               = $2000
+  CHRIN                = $FFCF
+  CHROUT               = $FFD2
+  CIA1_DDRA            = $DC02
+  CIA1_DDRB            = $DC03
+  CIA1_PRA             = $DC00
+  CIA1_PRB             = $DC01
+  COLOR                = $D800
+  LEFT_PADDLE_X        = $0018
+  MAX_INPUT_LEN        = $0028
+  MAX_WORD_LEN         = $000F
+  P1_SCORE_COLOR       = $D805
+  P1_SCORE_POS         = $0405
+  P2_SCORE_COLOR       = $D820
+  P2_SCORE_POS         = $0420
+  PADDLE_RANGE         = $0018
+  PADDLE_YMAX          = $00E5
+  PADDLE_YMIN          = $0032
+  RIGHT_PADDLE_X       = $0140
+  SCREEN               = $0400
+  SID_VOLUME           = $D418
+  SPRITE0_COLOR        = $D027
+  SPRITE0_X            = $D000
+  SPRITE0_Y            = $D001
+  SPRITE_ENABLE        = $D015
+  SPRITE_PTR0          = $07F8
+  SPRITE_PTR1          = $07F9
+  SPRITE_PTR2          = $07FA
+  SPRITE_X_EXPAND      = $D01D
+  SPRITE_X_MSB         = $D010
+  SPRITE_Y_EXPAND      = $D017
+  VIC_BG0              = $D021
+  VIC_BORDER           = $D020
+  VIC_CTRL1            = $D011
+  VIC_CTRL2            = $D016
+  VIC_MEMPTRS          = $D018
+  VIC_RASTER           = $D012
+  VOICE1_AD            = $D405
+  VOICE1_CTRL          = $D404
+  VOICE1_FREQ_HI       = $D401
+  VOICE1_FREQ_LO       = $D400
+  VOICE1_SR            = $D406
+  XMAX                 = $00FF
+  XMIN                 = $0000
+  YMAX                 = $00FF
+  YMAX_WALL            = $00E5
+  YMIN                 = $0000
+  YMIN_WALL            = $0032
+  __local2_move_left   = $083B
+  __local2_move_up     = $086A
+  __local2_msb_clear   = $088C
+  __local2_msb_done    = $0894
+  __local2_x_dec_done  = $0841
+  __local2_x_done      = $0855
+  __local2_x_inc_done  = $0826
+  __local2_y_done      = $0878
+  __local3_loop        = $08A8
+  __local6_done        = $0907
+  __local6_loop        = $08F8
+  __local7_end         = $0932
+  __local7_loop        = $091E
+  __local7_skip_spaces = $0911
+  __local7_space       = $0931
+  __local7_start       = $091C
+  __local7_terminate   = $0932
+  __local8_already_on  = $0958
+  __local9_already_off = $0966
+  ai_delay             = $0009
+  ai_done              = $0AF8
+  ai_need_down         = $0AF0
+  ball_data            = $0D00
+  ball_move_left       = $0B70
+  ball_move_up         = $0B2A
+  ball_msb_clear       = $0CA5
+  ball_msb_done        = $0CAD
+  ball_x               = $0002
+  ball_x_dec_done      = $0B76
+  ball_x_done          = $0B87
+  ball_x_inc_done      = $0B5E
+  ball_xdir            = $0005
+  ball_y               = $0004
+  ball_y_done          = $0B54
+  ball_ydir            = $0006
+  clear_color          = $0990
+  clear_color_byte     = $0992
+  clear_screen         = $0978
+  clear_screen_byte    = $097A
+  do_down              = $0ACC
+  do_up                = $0AA9
+  draw_net_color       = $09D8
+  draw_net_screen      = $09B8
+  draw_p1_score        = $0CBD
+  draw_p2_score        = $0CC6
+  engine_playing       = $0009
+  engine_sound_off     = $0959
+  engine_sound_on      = $0937
+  extract_word         = $090D
+  flash_border         = $0C7E
+  flash_delay          = $0C85
+  gfx_ptr              = $00FB
+  input_buf            = $08CE
+  joy_state            = $000A
+  left_miss            = $0C38
+  main_loop            = $0A77
+  move_ai              = $0AD5
+  move_ball            = $0AF9
+  no_down              = $0AD4
+  no_up                = $0AB1
+  p1_score             = $000B
+  p1_score_ok          = $0BEA
+  p1_y                 = $0007
+  p2_score             = $000C
+  p2_score_ok          = $0C65
+  p2_y                 = $0008
+  paddle_data          = $0D40
+  ptr                  = $00FB
+  read_joy2            = $08C3
+  read_joystick        = $0A89
+  read_line            = $08F6
+  right_miss           = $0BBD
+  serve_left_y_ok      = $0C7B
+  serve_right_y_ok     = $0C00
+  sprite0_bounce_step  = $0818
+  sprite0_explode      = $089A
+  start                = $0967
+  test_left_paddle     = $0C03
+  test_right_paddle    = $0B88
+  update_sprites       = $0C91
+  wait_frame           = $0810
+  word_dest_ptr        = $00FB
+  xdir                 = $0005
+  xpos                 = $0002
+  ydir                 = $0006
+  ypos                 = $0004

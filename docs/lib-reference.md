@@ -324,6 +324,13 @@ works" (any single wrong key still toggles based on *some* real key,
 just not the one the comment says), where a named constant would
 either be right or fail to assemble at all.
 
+(A later version of `demo.asm` replaced Y with Q for exiting
+altogether, once Y stopped being the only other key in use besides
+W — see "Worked example" below for the current control scheme. The
+`KEY_Y_COL`/`KEY_Y_ROW` mistake and fix described above is still
+accurate history, just no longer matches `demo.asm`'s present-day
+source.)
+
 ### Using `keyboard.inc`
 
 ```asm
@@ -354,23 +361,34 @@ completely until *some* key is pressed is genuinely what's wanted.
 
 ## Worked example
 
-`demo.asm` (alongside this file) uses all five libraries together —
-text, input, graphics, and sound — in one small program. It's a genuine
+`demo.asm` (alongside this file) uses all six libraries together —
+text, input, keyboard, graphics, and sound (plus hardware, which the
+others all pull in themselves) — in one small program. It's a genuine
 integration test, not just a usage sample: it was assembled and its
 output cross-checked byte-for-byte across all three implementations
 (Python, single-file C, split multi-file C), the same way every other
 feature in this project has been validated — and, since this project
 added `mini6502.py` (see below), it's also been *executed*, not just
-assembled: welcome text, the fire-button sound effect, the W-key engine
-sound, the Y-key exit path, the bitmap/screen memory contents, and
-`joy_state` staying correctly zero with nothing held were each
-confirmed by actually running the program and inspecting the results,
-not just by reading the listing. That's how all three bugs described
-above — the `.basic`/`.include` entry-point bug, the
-uncleared-bitmap-mode bug, and the DDRA/joystick-corruption bug — were
-actually found; none was visible from the assembled bytes or a careful
-listing read alone. `test_demo.py` (alongside `demo.asm`) is a
-permanent regression test for all three.
+assembled: welcome text, the fire-button sound effect, W/A/S/D moving
+the star with a short sound on each successful move, the border stop
+at each edge, Q exiting cleanly, the bitmap/screen memory contents,
+`joy_state` staying correctly zero with nothing held, and bitmap mode
+genuinely not starting until a key is pressed — giving a player time
+to actually read the welcome/instruction text `wait_any_key` pauses
+on — were each confirmed by actually running the program and
+inspecting the results, not just by reading the listing. That's how
+all three bugs described above — the `.basic`/`.include` entry-point
+bug, the uncleared-bitmap-mode bug, and the DDRA/joystick-corruption
+bug — were actually found; none was visible from the assembled bytes
+or a careful listing read alone. `test_demo.py` (alongside `demo.asm`)
+is a permanent regression test for all of it, including a technique
+worth knowing about if you write your own frame-stepped tests against
+`wait_frame`-based code: mini6502 doesn't simulate the VIC-II's raster
+line advancing on its own, so `test_demo.py` (like `test_bounce.py`
+and `test_pong.py` before it) steps the CPU one instruction at a time
+and pokes `$d012` to the value `wait_frame` polls for whenever
+execution reaches it, advancing one simulated "frame" per `main_loop`
+iteration instead of hanging forever on the busy-wait.
 
 `bounce.asm` is a smaller, more focused example of the same idea:
 `graphics.inc` (bitmap/sprite setup, `wait_frame`, `sprite0_bounce_step`)

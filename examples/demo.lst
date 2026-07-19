@@ -1,0 +1,722 @@
+; c64asm listing  (origin $0801, 1150 bytes)
+
+080D  4C CD 09          .basic start   ; auto-emits `jmp start` right after the loader
+0810  85 FB             sta str_ptr
+0812  84 FC             sty str_ptr+1
+0814  A0 00             ldy #$00
+0816  B1 FB             lda (str_ptr),y
+0818  F0 06             beq __local1_done
+081A  20 D2 FF          jsr CHROUT
+081D  C8                iny
+081E  D0 F6             bne __local1_loop
+0820  60                rts
+0821  85 04             sta kw_ptr
+0823  84 05             sty kw_ptr+1
+0825  A0 00             ldy #$00
+0827  B1 02             lda (cmp_ptr),y
+0829  D1 04             cmp (kw_ptr),y
+082B  D0 07             bne __local2_no
+082D  C9 00             cmp #$00
+082F  F0 06             beq __local2_yes
+0831  C8                iny
+0832  D0 F3             bne __local2_loop
+0834  A9 00             lda #$00
+0836  60                rts
+0837  A9 01             lda #$01
+0839  60                rts
+083A  A9 00             lda #%00000000
+083C  8D 02 DC          sta CIA1_DDRA
+083F  AD 00 DC          lda CIA1_PRA
+0842  49 FF             eor #$ff
+0844  60                rts
+086D  A2 00             ldx #$00
+086F  20 CF FF          jsr CHRIN
+0872  C9 0D             cmp #$0d
+0874  F0 08             beq __local5_done
+0876  9D 45 08          sta input_buf,x
+0879  E8                inx
+087A  E0 27             cpx #MAX_INPUT_LEN-1
+087C  D0 F1             bne __local5_loop
+087E  A9 00             lda #$00
+0880  9D 45 08          sta input_buf,x
+0883  60                rts
+0884  85 FB             sta word_dest_ptr
+0886  84 FC             sty word_dest_ptr+1
+0888  BD 45 08          lda input_buf,x
+088B  C9 20             cmp #$20
+088D  D0 04             bne __local6_start
+088F  E8                inx
+0890  4C 88 08          jmp __local6_skip_spaces
+0893  A0 00             ldy #$00
+0895  BD 45 08          lda input_buf,x
+0898  F0 0F             beq __local6_end
+089A  C9 20             cmp #$20
+089C  F0 0A             beq __local6_space
+089E  91 FB             sta (word_dest_ptr),y
+08A0  E8                inx
+08A1  C8                iny
+08A2  C0 0E             cpy #MAX_WORD_LEN-1
+08A4  D0 EF             bne __local6_loop
+08A6  F0 01             beq __local6_terminate
+08A8  E8                inx
+08A9  A9 00             lda #$00
+08AB  91 FB             sta (word_dest_ptr),y
+08AD  60                rts
+08B6  A2 00             ldx #$00
+08B8  78                sei
+08B9  A9 FF             lda #%11111111
+08BB  8D 02 DC          sta CIA1_DDRA
+08BE  BD AE 08          lda key_col_table,x
+08C1  8D 00 DC          sta CIA1_PRA
+08C4  AD 01 DC          lda CIA1_PRB
+08C7  58                cli
+08C8  49 FF             eor #$ff             ; active-HIGH: bit=1 means that key is held
+08CA  F0 09             beq __local8_next_col
+08CC  A0 00             ldy #$00
+08CE  4A                lsr a
+08CF  B0 0E             bcs __local8_found
+08D1  C8                iny
+08D2  4C CE 08          jmp __local8_row_loop
+08D5  E8                inx
+08D6  E0 08             cpx #$08
+08D8  D0 DE             bne __local8_col_loop
+08DA  A2 00             ldx #$00
+08DC  4C B8 08          jmp __local8_col_loop
+08DF  8A                txa
+08E0  0A                asl a
+08E1  0A                asl a
+08E2  0A                asl a                 ; A = column_index * 8
+08E3  85 0A             sta key_scratch
+08E5  98                tya
+08E6  18                clc
+08E7  65 0A             adc key_scratch        ; A = column_index*8 + row_index
+08E9  60                rts
+08EA  AD 12 D0          lda VIC_RASTER
+08ED  C9 FB             cmp #$fb
+08EF  D0 F9             bne wait_frame
+08F1  60                rts
+08F2  A2 00             ldx #0                ; returned: did X bounce this frame?
+08F4  A0 00             ldy #0                ; returned: did Y bounce this frame?
+08F6  A5 0C             lda xdir
+08F8  F0 1B             beq __local10_move_left
+08FA  E6 06             inc xpos              ; 16-bit increment: bump the low byte, and
+08FC  D0 02             bne __local10_x_inc_done        ; only the high byte too if that wrapped
+08FE  E6 07             inc xpos+1
+0900  A5 06             lda xpos              ; 16-bit compare against XMAX
+0902  C9 40             cmp #<XMAX
+0904  D0 29             bne __local10_x_done
+0906  A5 07             lda xpos+1
+0908  C9 01             cmp #>XMAX
+090A  D0 23             bne __local10_x_done
+090C  A9 00             lda #0
+090E  85 0C             sta xdir             ; hit the right edge -- reverse
+0910  A2 01             ldx #1
+0912  4C 2F 09          jmp __local10_x_done
+0915  A5 06             lda xpos              ; 16-bit decrement: only borrow into the
+0917  D0 02             bne __local10_x_dec_done         ; high byte if the low byte was already 0
+0919  C6 07             dec xpos+1
+091B  C6 06             dec xpos
+091D  A5 06             lda xpos              ; 16-bit compare against XMIN (XMIN is
+091F  C9 18             cmp #<XMIN              ; ordinarily under 256, so xpos+1 will
+0921  D0 0C             bne __local10_x_done               ; ordinarily be checked against 0 here,
+0923  A5 07             lda xpos+1                  ; but this works for any XMIN value)
+0925  C9 00             cmp #>XMIN
+0927  D0 06             bne __local10_x_done
+0929  A9 01             lda #1
+092B  85 0C             sta xdir             ; hit the left edge -- reverse
+092D  A2 01             ldx #1
+092F  A5 0E             lda ydir
+0931  F0 11             beq __local10_move_up
+0933  E6 0B             inc ypos
+0935  A5 0B             lda ypos
+0937  C9 E5             cmp #YMAX
+0939  D0 17             bne __local10_y_done
+093B  A9 00             lda #0
+093D  85 0E             sta ydir             ; hit the bottom edge -- reverse
+093F  A0 01             ldy #1
+0941  4C 52 09          jmp __local10_y_done
+0944  C6 0B             dec ypos
+0946  A5 0B             lda ypos
+0948  C9 32             cmp #YMIN
+094A  D0 06             bne __local10_y_done
+094C  A9 01             lda #1
+094E  85 0E             sta ydir             ; hit the top edge -- reverse
+0950  A0 01             ldy #1
+0952  A5 06             lda xpos
+0954  8D 00 D0          sta SPRITE0_X
+0957  A5 07             lda xpos+1
+0959  F0 0B             beq __local10_msb_clear
+095B  AD 10 D0          lda SPRITE_X_MSB
+095E  09 01             ora #%00000001       ; set sprite 0's bit only -- other sprites'
+0960  8D 10 D0          sta SPRITE_X_MSB       ; MSB bits, if any, are left untouched
+0963  4C 6E 09          jmp __local10_msb_done
+0966  AD 10 D0          lda SPRITE_X_MSB
+0969  29 FE             and #%11111110
+096B  8D 10 D0          sta SPRITE_X_MSB
+096E  A5 0B             lda ypos
+0970  8D 01 D0          sta SPRITE0_Y
+0973  60                rts
+0974  85 FD             sta gfx_ptr
+0976  84 FE             sty gfx_ptr+1
+0978  A9 01             lda #%00000001
+097A  8D 1D D0          sta SPRITE_X_EXPAND
+097D  8D 17 D0          sta SPRITE_Y_EXPAND
+0980  A0 00             ldy #$00
+0982  B1 FD             lda (gfx_ptr),y
+0984  8D 27 D0          sta SPRITE0_COLOR
+0987  20 EA 08          jsr wait_frame
+098A  20 EA 08          jsr wait_frame
+098D  C8                iny
+098E  CA                dex
+098F  D0 F1             bne __local11_loop
+0991  A9 00             lda #0
+0993  8D 15 D0          sta SPRITE_ENABLE
+0996  8D 1D D0          sta SPRITE_X_EXPAND
+0999  8D 17 D0          sta SPRITE_Y_EXPAND
+099C  60                rts
+099D  A5 09             lda engine_playing
+099F  D0 1D             bne __local12_already_on
+09A1  A9 00             lda #$00
+09A3  8D 00 D4          sta VOICE1_FREQ_LO
+09A6  A9 08             lda #$08
+09A8  8D 01 D4          sta VOICE1_FREQ_HI
+09AB  A9 00             lda #$00
+09AD  8D 05 D4          sta VOICE1_AD
+09B0  A9 F8             lda #$f8
+09B2  8D 06 D4          sta VOICE1_SR
+09B5  A9 81             lda #%10000001          ; noise waveform, gate on
+09B7  8D 04 D4          sta VOICE1_CTRL
+09BA  A9 01             lda #1
+09BC  85 09             sta engine_playing
+09BE  60                rts
+09BF  A5 09             lda engine_playing
+09C1  F0 09             beq __local13_already_off
+09C3  A9 80             lda #%10000000          ; noise waveform, gate off
+09C5  8D 04 D4          sta VOICE1_CTRL
+09C8  A9 00             lda #0
+09CA  85 09             sta engine_playing
+09CC  60                rts
+09CD  A9 0F             lda #$0f
+09CF  8D 18 D4          sta SID_VOLUME
+09D2  A9 00             lda #$00
+09D4  8D 04 D4          sta VOICE1_CTRL
+09D7  A9 00             lda #%00000000
+09D9  8D 03 DC          sta CIA1_DDRB
+09DC  A9 93             lda #$93
+09DE  20 D2 FF          jsr CHROUT
+09E1  A9 B0             lda #<welcome_msg
+09E3  A0 0B             ldy #>welcome_msg
+09E5  20 10 08          jsr print_msg
+09E8  A9 C5             lda #<instructions_msg
+09EA  A0 0B             ldy #>instructions_msg
+09EC  20 10 08          jsr print_msg
+09EF  A9 F5             lda #<continue_msg
+09F1  A0 0B             ldy #>continue_msg
+09F3  20 10 08          jsr print_msg
+09F6  20 B6 08          jsr wait_any_key        ; without this, BITMAP_MODE_ON below wipes
+09F9  AD 11 D0          lda VIC_CTRL1
+09FC  09 20             ora #%00100000
+09FE  8D 11 D0          sta VIC_CTRL1
+0A01  AD 18 D0          lda VIC_MEMPTRS
+0A04  29 F0             and #%11110000
+0A06  09 08             ora #((BITMAP) / 1024)
+0A08  8D 18 D0          sta VIC_MEMPTRS
+0A0B  A9 00             lda #<(BITMAP)
+0A0D  85 FD             sta gfx_ptr
+0A0F  A9 20             lda #>(BITMAP)
+0A11  85 FE             sta gfx_ptr+1
+0A13  A2 20             ldx #32
+0A15  A9 00             lda #$00
+0A17  A0 00             ldy #$00
+0A19  91 FD             sta (gfx_ptr),y
+0A1B  C8                iny
+0A1C  D0 FB             bne __local22_clear_byte
+0A1E  E6 FE             inc gfx_ptr+1
+0A20  CA                dex
+0A21  D0 F4             bne __local22_clear_loop
+0A23  A9 00             lda #<SCREEN
+0A25  85 FD             sta gfx_ptr
+0A27  A9 04             lda #>SCREEN
+0A29  85 FE             sta gfx_ptr+1
+0A2B  A2 04             ldx #4
+0A2D  A9 10             lda #%00010000
+0A2F  A0 00             ldy #$00
+0A31  91 FD             sta (gfx_ptr),y
+0A33  C8                iny
+0A34  D0 FB             bne __local23_fill_byte
+0A36  E6 FE             inc gfx_ptr+1
+0A38  CA                dex
+0A39  D0 F4             bne __local23_fill_loop
+0A3B  A9 31             lda #((sprite_data) / 64)
+0A3D  8D F8 07          sta SPRITE_PTR0
+0A40  A9 01             lda #1
+0A42  8D 27 D0          sta SPRITE0_COLOR
+0A45  A9 AC             lda #172
+0A47  8D 00 D0          sta SPRITE0_X
+0A4A  A9 8C             lda #140
+0A4C  8D 01 D0          sta SPRITE0_Y
+0A4F  A9 01             lda #%00000001
+0A51  8D 15 D0          sta SPRITE_ENABLE
+0A54  A9 AC             lda #172                ; xpos/ypos need their own separate
+0A56  85 06             sta xpos                  ; initialization to match -- SPRITE_INIT
+0A58  A9 00             lda #0                     ; only sets the hardware registers
+0A5A  85 07             sta xpos+1                   ; directly, it doesn't know xpos/ypos
+0A5C  A9 8C             lda #140                       ; even exist
+0A5E  85 0B             sta ypos
+0A60  20 EA 08          jsr wait_frame            ; paces movement to the screen's own
+0A63  20 3A 08          jsr read_joy2
+0A66  8D AE 0B          sta joy_state
+0A69  29 10             and #%00010000          ; fire button
+0A6B  F0 1E             beq no_fire
+0A6D  A9 00             lda #$00
+0A6F  8D 04 D4          sta VOICE1_CTRL
+0A72  A9 00             lda #$00
+0A74  8D 00 D4          sta VOICE1_FREQ_LO
+0A77  A9 30             lda #$30
+0A79  8D 01 D4          sta VOICE1_FREQ_HI
+0A7C  A9 08             lda #$08
+0A7E  8D 05 D4          sta VOICE1_AD
+0A81  A9 00             lda #$00
+0A83  8D 06 D4          sta VOICE1_SR
+0A86  A9 81             lda #%10000001
+0A88  8D 04 D4          sta VOICE1_CTRL
+0A8B  A9 00             lda #0
+0A8D  8D AF 0B          sta moved_flag
+0A90  78                sei
+0A91  A9 FF             lda #%11111111
+0A93  8D 02 DC          sta CIA1_DDRA
+0A96  A9 FD             lda #KEY_W_COL
+0A98  8D 00 DC          sta CIA1_PRA
+0A9B  AD 01 DC          lda CIA1_PRB
+0A9E  58                cli
+0A9F  49 FF             eor #$ff
+0AA1  29 02             and #KEY_W_ROW
+0AA3  F0 0C             beq check_s
+0AA5  A5 0B             lda ypos
+0AA7  C9 32             cmp #YMIN
+0AA9  F0 06             beq check_s              ; already at the top edge -- stop here
+0AAB  20 A1 0B          jsr move_up
+0AAE  EE AF 0B          inc moved_flag
+0AB1  78                sei
+0AB2  A9 FF             lda #%11111111
+0AB4  8D 02 DC          sta CIA1_DDRA
+0AB7  A9 FD             lda #KEY_S_COL
+0AB9  8D 00 DC          sta CIA1_PRA
+0ABC  AD 01 DC          lda CIA1_PRB
+0ABF  58                cli
+0AC0  49 FF             eor #$ff
+0AC2  29 20             and #KEY_S_ROW
+0AC4  F0 0C             beq check_a
+0AC6  A5 0B             lda ypos
+0AC8  C9 E5             cmp #YMAX
+0ACA  F0 06             beq check_a              ; already at the bottom edge
+0ACC  20 A6 0B          jsr move_down
+0ACF  EE AF 0B          inc moved_flag
+0AD2  78                sei
+0AD3  A9 FF             lda #%11111111
+0AD5  8D 02 DC          sta CIA1_DDRA
+0AD8  A9 FD             lda #KEY_A_COL
+0ADA  8D 00 DC          sta CIA1_PRA
+0ADD  AD 01 DC          lda CIA1_PRB
+0AE0  58                cli
+0AE1  49 FF             eor #$ff
+0AE3  29 04             and #KEY_A_ROW
+0AE5  F0 12             beq check_d
+0AE7  A5 06             lda xpos                 ; 16-bit compare against XMIN (X needs
+0AE9  C9 18             cmp #<XMIN                 ; two bytes -- the visible screen's
+0AEB  D0 06             bne __local31_do_move                 ; right edge is itself past 255)
+0AED  A5 07             lda xpos+1
+0AEF  C9 00             cmp #>XMIN
+0AF1  F0 06             beq check_d               ; already at the left edge
+0AF3  20 75 0B          jsr move_left
+0AF6  EE AF 0B          inc moved_flag
+0AF9  78                sei
+0AFA  A9 FF             lda #%11111111
+0AFC  8D 02 DC          sta CIA1_DDRA
+0AFF  A9 FB             lda #KEY_D_COL
+0B01  8D 00 DC          sta CIA1_PRA
+0B04  AD 01 DC          lda CIA1_PRB
+0B07  58                cli
+0B08  49 FF             eor #$ff
+0B0A  29 04             and #KEY_D_ROW
+0B0C  F0 12             beq check_sound
+0B0E  A5 06             lda xpos
+0B10  C9 40             cmp #<XMAX
+0B12  D0 06             bne __local33_do_move
+0B14  A5 07             lda xpos+1
+0B16  C9 01             cmp #>XMAX
+0B18  F0 06             beq check_sound            ; already at the right edge
+0B1A  20 80 0B          jsr move_right
+0B1D  EE AF 0B          inc moved_flag
+0B20  AD AF 0B          lda moved_flag
+0B23  F0 1E             beq check_exit
+0B25  A9 00             lda #$00
+0B27  8D 04 D4          sta VOICE1_CTRL
+0B2A  A9 00             lda #$00
+0B2C  8D 00 D4          sta VOICE1_FREQ_LO
+0B2F  A9 60             lda #$60
+0B31  8D 01 D4          sta VOICE1_FREQ_HI
+0B34  A9 02             lda #$02
+0B36  8D 05 D4          sta VOICE1_AD
+0B39  A9 02             lda #$02
+0B3B  8D 06 D4          sta VOICE1_SR
+0B3E  A9 11             lda #%00010001
+0B40  8D 04 D4          sta VOICE1_CTRL
+0B43  78                sei
+0B44  A9 FF             lda #%11111111
+0B46  8D 02 DC          sta CIA1_DDRA
+0B49  A9 7F             lda #KEY_Q_COL
+0B4B  8D 00 DC          sta CIA1_PRA
+0B4E  AD 01 DC          lda CIA1_PRB
+0B51  58                cli
+0B52  49 FF             eor #$ff
+0B54  29 40             and #KEY_Q_ROW
+0B56  D0 03             bne do_restart
+0B58  4C 60 0A          jmp main_loop
+0B5B  AD 11 D0          lda VIC_CTRL1
+0B5E  29 DF             and #%11011111
+0B60  8D 11 D0          sta VIC_CTRL1
+0B63  A9 14             lda #$14
+0B65  8D 18 D0          sta VIC_MEMPTRS
+0B68  A9 93             lda #$93
+0B6A  20 D2 FF          jsr CHROUT
+0B6D  A9 13             lda #<bye_msg
+0B6F  A0 0C             ldy #>bye_msg
+0B71  20 10 08          jsr print_msg
+0B74  60                rts
+0B75  A5 06             lda xpos                 ; 16-bit decrement: only borrow into
+0B77  D0 02             bne __local43_dec_done               ; the high byte if the low byte was
+0B79  C6 07             dec xpos+1                    ; already 0
+0B7B  C6 06             dec xpos
+0B7D  4C 86 0B          jmp update_sprite_x
+0B80  E6 06             inc xpos                 ; 16-bit increment: bump the low byte,
+0B82  D0 02             bne update_sprite_x         ; and only the high byte too if that
+0B84  E6 07             inc xpos+1                    ; wrapped
+0B86  A5 06             lda xpos
+0B88  8D 00 D0          sta SPRITE0_X
+0B8B  A5 07             lda xpos+1
+0B8D  F0 09             beq __local45_msb_clear
+0B8F  AD 10 D0          lda SPRITE_X_MSB
+0B92  09 01             ora #%00000001           ; set sprite 0's bit only -- other
+0B94  8D 10 D0          sta SPRITE_X_MSB           ; sprites' MSB bits, if any, are left
+0B97  60                rts                          ; untouched
+0B98  AD 10 D0          lda SPRITE_X_MSB
+0B9B  29 FE             and #%11111110
+0B9D  8D 10 D0          sta SPRITE_X_MSB
+0BA0  60                rts
+0BA1  C6 0B             dec ypos
+0BA3  4C A8 0B          jmp update_sprite_y
+0BA6  E6 0B             inc ypos
+0BA8  A5 0B             lda ypos
+0BAA  8D 01 D0          sta SPRITE0_Y
+0BAD  60                rts
+
+Symbol table:
+  BITMAP               = $2000
+  CHRIN                = $FFCF
+  CHROUT               = $FFD2
+  CIA1_DDRA            = $DC02
+  CIA1_DDRB            = $DC03
+  CIA1_PRA             = $DC00
+  CIA1_PRB             = $DC01
+  KEY_0_CODE           = $0023
+  KEY_0_COL            = $00EF
+  KEY_0_ROW            = $0008
+  KEY_1_CODE           = $0038
+  KEY_1_COL            = $007F
+  KEY_1_ROW            = $0001
+  KEY_2_CODE           = $003B
+  KEY_2_COL            = $007F
+  KEY_2_ROW            = $0008
+  KEY_3_CODE           = $0008
+  KEY_3_COL            = $00FD
+  KEY_3_ROW            = $0001
+  KEY_4_CODE           = $000B
+  KEY_4_COL            = $00FD
+  KEY_4_ROW            = $0008
+  KEY_5_CODE           = $0010
+  KEY_5_COL            = $00FB
+  KEY_5_ROW            = $0001
+  KEY_6_CODE           = $0013
+  KEY_6_COL            = $00FB
+  KEY_6_ROW            = $0008
+  KEY_7_CODE           = $0018
+  KEY_7_COL            = $00F7
+  KEY_7_ROW            = $0001
+  KEY_8_CODE           = $001B
+  KEY_8_COL            = $00F7
+  KEY_8_ROW            = $0008
+  KEY_9_CODE           = $0020
+  KEY_9_COL            = $00EF
+  KEY_9_ROW            = $0001
+  KEY_ASTERISK_CODE    = $0031
+  KEY_ASTERISK_COL     = $00BF
+  KEY_ASTERISK_ROW     = $0002
+  KEY_AT_CODE          = $002E
+  KEY_AT_COL           = $00DF
+  KEY_AT_ROW           = $0040
+  KEY_A_CODE           = $000A
+  KEY_A_COL            = $00FD
+  KEY_A_ROW            = $0004
+  KEY_B_CODE           = $001C
+  KEY_B_COL            = $00F7
+  KEY_B_ROW            = $0010
+  KEY_COLON_CODE       = $002D
+  KEY_COLON_COL        = $00DF
+  KEY_COLON_ROW        = $0020
+  KEY_COMMA_CODE       = $002F
+  KEY_COMMA_COL        = $00DF
+  KEY_COMMA_ROW        = $0080
+  KEY_COMMODORE_CODE   = $003D
+  KEY_COMMODORE_COL    = $007F
+  KEY_COMMODORE_ROW    = $0020
+  KEY_CRSR_LR_CODE     = $0002
+  KEY_CRSR_LR_COL      = $00FE
+  KEY_CRSR_LR_ROW      = $0004
+  KEY_CRSR_UD_CODE     = $0007
+  KEY_CRSR_UD_COL      = $00FE
+  KEY_CRSR_UD_ROW      = $0080
+  KEY_CTRL_CODE        = $003A
+  KEY_CTRL_COL         = $007F
+  KEY_CTRL_ROW         = $0004
+  KEY_C_CODE           = $0014
+  KEY_C_COL            = $00FB
+  KEY_C_ROW            = $0010
+  KEY_DEL_CODE         = $0000
+  KEY_DEL_COL          = $00FE
+  KEY_DEL_ROW          = $0001
+  KEY_D_CODE           = $0012
+  KEY_D_COL            = $00FB
+  KEY_D_ROW            = $0004
+  KEY_EQUALS_CODE      = $0035
+  KEY_EQUALS_COL       = $00BF
+  KEY_EQUALS_ROW       = $0020
+  KEY_E_CODE           = $000E
+  KEY_E_COL            = $00FD
+  KEY_E_ROW            = $0040
+  KEY_F1_CODE          = $0004
+  KEY_F1_COL           = $00FE
+  KEY_F1_ROW           = $0010
+  KEY_F3_CODE          = $0005
+  KEY_F3_COL           = $00FE
+  KEY_F3_ROW           = $0020
+  KEY_F5_CODE          = $0006
+  KEY_F5_COL           = $00FE
+  KEY_F5_ROW           = $0040
+  KEY_F7_CODE          = $0003
+  KEY_F7_COL           = $00FE
+  KEY_F7_ROW           = $0008
+  KEY_F_CODE           = $0015
+  KEY_F_COL            = $00FB
+  KEY_F_ROW            = $0020
+  KEY_G_CODE           = $001A
+  KEY_G_COL            = $00F7
+  KEY_G_ROW            = $0004
+  KEY_HOME_CODE        = $0033
+  KEY_HOME_COL         = $00BF
+  KEY_HOME_ROW         = $0008
+  KEY_H_CODE           = $001D
+  KEY_H_COL            = $00F7
+  KEY_H_ROW            = $0020
+  KEY_I_CODE           = $0021
+  KEY_I_COL            = $00EF
+  KEY_I_ROW            = $0002
+  KEY_J_CODE           = $0022
+  KEY_J_COL            = $00EF
+  KEY_J_ROW            = $0004
+  KEY_K_CODE           = $0025
+  KEY_K_COL            = $00EF
+  KEY_K_ROW            = $0020
+  KEY_LEFTARROW_CODE   = $0039
+  KEY_LEFTARROW_COL    = $007F
+  KEY_LEFTARROW_ROW    = $0002
+  KEY_LSHIFT_CODE      = $000F
+  KEY_LSHIFT_COL       = $00FD
+  KEY_LSHIFT_ROW       = $0080
+  KEY_L_CODE           = $002A
+  KEY_L_COL            = $00DF
+  KEY_L_ROW            = $0004
+  KEY_MINUS_CODE       = $002B
+  KEY_MINUS_COL        = $00DF
+  KEY_MINUS_ROW        = $0008
+  KEY_M_CODE           = $0024
+  KEY_M_COL            = $00EF
+  KEY_M_ROW            = $0010
+  KEY_N_CODE           = $0027
+  KEY_N_COL            = $00EF
+  KEY_N_ROW            = $0080
+  KEY_O_CODE           = $0026
+  KEY_O_COL            = $00EF
+  KEY_O_ROW            = $0040
+  KEY_PERIOD_CODE      = $002C
+  KEY_PERIOD_COL       = $00DF
+  KEY_PERIOD_ROW       = $0010
+  KEY_PLUS_CODE        = $0028
+  KEY_PLUS_COL         = $00DF
+  KEY_PLUS_ROW         = $0001
+  KEY_POUND_CODE       = $0030
+  KEY_POUND_COL        = $00BF
+  KEY_POUND_ROW        = $0001
+  KEY_P_CODE           = $0029
+  KEY_P_COL            = $00DF
+  KEY_P_ROW            = $0002
+  KEY_Q_CODE           = $003E
+  KEY_Q_COL            = $007F
+  KEY_Q_ROW            = $0040
+  KEY_RETURN_CODE      = $0001
+  KEY_RETURN_COL       = $00FE
+  KEY_RETURN_ROW       = $0002
+  KEY_RSHIFT_CODE      = $0034
+  KEY_RSHIFT_COL       = $00BF
+  KEY_RSHIFT_ROW       = $0010
+  KEY_RUNSTOP_CODE     = $003F
+  KEY_RUNSTOP_COL      = $007F
+  KEY_RUNSTOP_ROW      = $0080
+  KEY_R_CODE           = $0011
+  KEY_R_COL            = $00FB
+  KEY_R_ROW            = $0002
+  KEY_SEMICOLON_CODE   = $0032
+  KEY_SEMICOLON_COL    = $00BF
+  KEY_SEMICOLON_ROW    = $0004
+  KEY_SLASH_CODE       = $0037
+  KEY_SLASH_COL        = $00BF
+  KEY_SLASH_ROW        = $0080
+  KEY_SPACE_CODE       = $003C
+  KEY_SPACE_COL        = $007F
+  KEY_SPACE_ROW        = $0010
+  KEY_S_CODE           = $000D
+  KEY_S_COL            = $00FD
+  KEY_S_ROW            = $0020
+  KEY_T_CODE           = $0016
+  KEY_T_COL            = $00FB
+  KEY_T_ROW            = $0040
+  KEY_UPARROW_CODE     = $0036
+  KEY_UPARROW_COL      = $00BF
+  KEY_UPARROW_ROW      = $0040
+  KEY_U_CODE           = $001E
+  KEY_U_COL            = $00F7
+  KEY_U_ROW            = $0040
+  KEY_V_CODE           = $001F
+  KEY_V_COL            = $00F7
+  KEY_V_ROW            = $0080
+  KEY_W_CODE           = $0009
+  KEY_W_COL            = $00FD
+  KEY_W_ROW            = $0002
+  KEY_X_CODE           = $0017
+  KEY_X_COL            = $00FB
+  KEY_X_ROW            = $0080
+  KEY_Y_CODE           = $0019
+  KEY_Y_COL            = $00F7
+  KEY_Y_ROW            = $0002
+  KEY_Z_CODE           = $000C
+  KEY_Z_COL            = $00FD
+  KEY_Z_ROW            = $0010
+  MAX_INPUT_LEN        = $0028
+  MAX_WORD_LEN         = $000F
+  SCREEN               = $0400
+  SID_VOLUME           = $D418
+  SPRITE0_COLOR        = $D027
+  SPRITE0_X            = $D000
+  SPRITE0_Y            = $D001
+  SPRITE_ENABLE        = $D015
+  SPRITE_PTR0          = $07F8
+  SPRITE_X_EXPAND      = $D01D
+  SPRITE_X_MSB         = $D010
+  SPRITE_Y_EXPAND      = $D017
+  VIC_BG0              = $D021
+  VIC_BORDER           = $D020
+  VIC_CTRL1            = $D011
+  VIC_CTRL2            = $D016
+  VIC_MEMPTRS          = $D018
+  VIC_RASTER           = $D012
+  VOICE1_AD            = $D405
+  VOICE1_CTRL          = $D404
+  VOICE1_FREQ_HI       = $D401
+  VOICE1_FREQ_LO       = $D400
+  VOICE1_SR            = $D406
+  XMAX                 = $0140
+  XMIN                 = $0018
+  YMAX                 = $00E5
+  YMIN                 = $0032
+  __local10_move_left  = $0915
+  __local10_move_up    = $0944
+  __local10_msb_clear  = $0966
+  __local10_msb_done   = $096E
+  __local10_x_dec_done = $091B
+  __local10_x_done     = $092F
+  __local10_x_inc_done = $0900
+  __local10_y_done     = $0952
+  __local11_loop       = $0982
+  __local12_already_on = $09BE
+  __local13_already_off = $09CC
+  __local1_done        = $0820
+  __local1_loop        = $0816
+  __local22_clear_byte = $0A19
+  __local22_clear_loop = $0A17
+  __local23_fill_byte  = $0A31
+  __local23_fill_loop  = $0A2F
+  __local2_loop        = $0827
+  __local2_no          = $0834
+  __local2_yes         = $0837
+  __local31_do_move    = $0AF3
+  __local33_do_move    = $0B1A
+  __local43_dec_done   = $0B7B
+  __local45_msb_clear  = $0B98
+  __local5_done        = $087E
+  __local5_loop        = $086F
+  __local6_end         = $08A9
+  __local6_loop        = $0895
+  __local6_skip_spaces = $0888
+  __local6_space       = $08A8
+  __local6_start       = $0893
+  __local6_terminate   = $08A9
+  __local8_col_loop    = $08B8
+  __local8_found       = $08DF
+  __local8_next_col    = $08D5
+  __local8_row_loop    = $08CE
+  bye_msg              = $0C13
+  check_a              = $0AD2
+  check_d              = $0AF9
+  check_exit           = $0B43
+  check_s              = $0AB1
+  check_sound          = $0B20
+  cmp_ptr              = $0002
+  continue_msg         = $0BF5
+  do_restart           = $0B5B
+  engine_playing       = $0009
+  engine_sound_off     = $09BF
+  engine_sound_on      = $099D
+  extract_word         = $0884
+  gfx_ptr              = $00FD
+  input_buf            = $0845
+  instructions_msg     = $0BC5
+  joy_state            = $0BAE
+  key_col_table        = $08AE
+  key_scratch          = $000A
+  kw_ptr               = $0004
+  main_loop            = $0A60
+  move_down            = $0BA6
+  move_left            = $0B75
+  move_right           = $0B80
+  move_up              = $0BA1
+  moved_flag           = $0BAF
+  no_fire              = $0A8B
+  print_msg            = $0810
+  read_joy2            = $083A
+  read_line            = $086D
+  sprite0_bounce_step  = $08F2
+  sprite0_explode      = $0974
+  sprite_data          = $0C40
+  start                = $09CD
+  str_equal            = $0821
+  str_ptr              = $00FB
+  update_sprite_x      = $0B86
+  update_sprite_y      = $0BA8
+  wait_any_key         = $08B6
+  wait_frame           = $08EA
+  welcome_msg          = $0BB0
+  word_dest_ptr        = $00FB
+  xdir                 = $000C
+  xpos                 = $0006
+  ydir                 = $000E
+  ypos                 = $000B
