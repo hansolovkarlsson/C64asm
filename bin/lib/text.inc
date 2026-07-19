@@ -5,7 +5,29 @@
 ;   PRINT msg   macro: convenience wrapper around print_msg
 ;   CLS         macro: clears the screen
 ;   NEWLINE     macro: moves the cursor to the start of the next line
+;   SET_LOWERCASE_CHARSET  macro: switches the C64's *runtime* character
+;               set to lowercase/uppercase, so text assembled with this
+;               assembler's '.charset lower' directive actually displays
+;               with real lowercase letters -- see the note below
+;   SET_UPPERCASE_CHARSET  macro: switches back to the default
+;               uppercase/graphics character set
+;   DISABLE_CHARSET_SWITCH / ENABLE_CHARSET_SWITCH  macros: stop/allow
+;               the user's own CBM+SHIFT keypress from changing the
+;               character set out from under a running program
 ;   str_equal   subroutine: compares two null-terminated PETSCII strings
+;
+; A note on '.charset' and these macros -- two different things with
+; similar names: this assembler's own '.charset upper'/'.charset lower'
+; directive (see c64asm-reference.md, "Text and PETSCII") is an
+; ASSEMBLY-TIME setting that only controls which PETSCII bytes .text/
+; .asc/.byte string literals turn into. It has no effect on the C64's
+; actual character set at runtime -- that's separate hardware state,
+; and switching it is what SET_LOWERCASE_CHARSET/SET_UPPERCASE_CHARSET
+; below actually do. Using '.charset lower' without ever calling
+; SET_LOWERCASE_CHARSET assembles perfectly correct bytes that just sit
+; there displaying as uppercase, same as before, because the character
+; ROM showing them was never switched -- the two need to be used
+; together, and the assembler has no way to enforce that automatically.
 ;
 ; Requires -- define ALL of these with `=` before this file's own
 ; .include line, even if your program only ever calls some of the
@@ -100,6 +122,51 @@ print_msg:
 ; regardless of exactly where the cursor was left after the read.
 .macro NEWLINE
         lda #$0d
+        jsr CHROUT
+.endmacro
+
+; SET_LOWERCASE_CHARSET -- switches the C64's runtime character set to
+; lowercase/uppercase, so PETSCII bytes produced by this assembler's
+; '.charset lower' directive display with real lowercase letters
+; instead of the default charset's graphics symbols. $0e is the
+; PETSCII "switch to lowercase/uppercase" control code; CHROUT
+; interprets it as a screen-editor command, exactly like CLS/NEWLINE
+; above, not a printable character.
+;
+; Text assembled under '.charset upper' (the default) still displays
+; correctly as uppercase after this -- '.charset upper' only stops
+; being reliable once you ALSO print something assembled under
+; '.charset lower' text in between; see this file's header note above.
+.macro SET_LOWERCASE_CHARSET
+        lda #$0e
+        jsr CHROUT
+.endmacro
+
+; SET_UPPERCASE_CHARSET -- switches back to the default
+; uppercase/graphics character set. $8e is the PETSCII "switch to
+; uppercase/graphics" control code -- note this is $0e's own value
+; with bit 7 set, not a coincidence: many PETSCII control-code pairs
+; that toggle a setting on/off work this way.
+.macro SET_UPPERCASE_CHARSET
+        lda #$8e
+        jsr CHROUT
+.endmacro
+
+; DISABLE_CHARSET_SWITCH -- stops the user's own CBM+SHIFT keypress
+; from changing the character set. Useful right after
+; SET_LOWERCASE_CHARSET in a program that wants to guarantee its
+; chosen character set stays put for the rest of the run, rather than
+; risk the player accidentally toggling it back with a keypress the
+; program never asked for.
+.macro DISABLE_CHARSET_SWITCH
+        lda #$08
+        jsr CHROUT
+.endmacro
+
+; ENABLE_CHARSET_SWITCH -- re-allows CBM+SHIFT to change the character
+; set, undoing DISABLE_CHARSET_SWITCH above.
+.macro ENABLE_CHARSET_SWITCH
+        lda #$09
         jsr CHROUT
 .endmacro
 

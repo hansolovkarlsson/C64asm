@@ -377,7 +377,7 @@ static void init_opcodes(void) {
 static int is_directive(const char *tok) {
     static const char *dirs[] = {
         ".org", ".byte", ".db", ".word", ".dw", ".text", ".asc",
-        ".fill", ".ds", ".res", ".basic", ".equ", ".align", ".cpu",
+        ".fill", ".ds", ".res", ".basic", ".equ", ".align", ".cpu", ".charset",
         ".if", ".elif", ".else", ".endif", ".ifdef", ".ifndef", NULL
     };
     for (int i = 0; dirs[i]; i++)
@@ -569,18 +569,59 @@ static int is_ident_start(char c) { return isalpha((unsigned char)c) || c == '_'
 static int is_ident_char(char c)  { return isalnum((unsigned char)c) || c == '_'; }
 
 /* ASCII (upper or lower) -> C64 PETSCII screen-appropriate bytes for
- * output via the KERNAL CHROUT routine. */
-static void ascii_to_petscii(const char *s, unsigned char *out, int *outlen) {
+ * output via the KERNAL CHROUT routine.
+ *
+ * lower_mode=0 (the default, and this assembler's overall default via
+ * '.charset upper' -- see below): every letter, whatever case it was
+ * written in, becomes a PETSCII byte in the $41-$5A range. That range
+ * displays as uppercase on the C64's default (power-on) character
+ * set, which is the only character set any program using this mode
+ * is expected to be running under -- see the caveat below.
+ *
+ * lower_mode=1 ('.charset lower'): letters keep their original case
+ * using PETSCII's actual encoding for it -- lowercase becomes $41-$5A
+ * (PETSCII's "unshifted" range, which the hardware displays as
+ * lowercase specifically on the *lowercase/uppercase* character set,
+ * not the default one) and uppercase becomes $C1-$DA ("shifted",
+ * which displays as uppercase on *either* character set). This is
+ * what actually produces mixed-case text on screen -- but only once
+ * the C64 has been switched to the lowercase/uppercase character set
+ * at runtime (e.g. via text.inc's SET_LOWERCASE_CHARSET macro); the
+ * assembler has no way to do that switch itself, since it's a runtime
+ * hardware state, not something that exists at assembly time.
+ *
+ * Caveat: text assembled under '.charset upper' is only guaranteed to
+ * display as uppercase while the default character set is still
+ * active. If a program ever switches to the lowercase/uppercase set
+ * for some '.charset lower' text, any '.charset upper' text printed
+ * afterward would display as lowercase too, since $41-$5A means
+ * something different on that character set. Once a program switches
+ * character sets at runtime, use '.charset lower' for everything it
+ * prints from that point on -- typed-in-uppercase source text still
+ * displays correctly as uppercase either way, since '.charset lower'
+ * encodes uppercase letters using the character-set-independent
+ * $C1-$DA range specifically so this works. See
+ * c64asm-reference.md's "Text and PETSCII" section. */
+static void ascii_to_petscii(const char *s, unsigned char *out, int *outlen, int lower_mode) {
     int n = 0;
     for (const char *p = s; *p; p++) {
         unsigned char ch = (unsigned char)*p;
-        if (ch >= 'a' && ch <= 'z')
-            out[n++] = (unsigned char)(ch - 'a' + 'A');   /* fold lower -> upper */
-        else
-            out[n++] = ch;   /* already correct PETSCII: uppercase A-Z ($41-$5A)
-                                 display as uppercase letters on the default C64
-                                 charset, exactly like plain ASCII, and so do
-                                 digits/punctuation. */
+        if (lower_mode) {
+            if (ch >= 'a' && ch <= 'z')
+                out[n++] = (unsigned char)(ch - 'a' + 0x41);
+            else if (ch >= 'A' && ch <= 'Z')
+                out[n++] = (unsigned char)(ch - 'A' + 0xC1);
+            else
+                out[n++] = ch;
+        } else {
+            if (ch >= 'a' && ch <= 'z')
+                out[n++] = (unsigned char)(ch - 'a' + 'A');   /* fold lower -> upper */
+            else
+                out[n++] = ch;   /* already correct PETSCII: uppercase A-Z ($41-$5A)
+                                     display as uppercase letters on the default C64
+                                     charset, exactly like plain ASCII, and so do
+                                     digits/punctuation. */
+        }
     }
     *outlen = n;
 }
@@ -2039,6 +2080,9 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
     int cond_stack_top = 0;
     int illegal_enabled = 0;   /* toggled by '.cpu 6510x'/'.cpu 6510' --
                                    see that directive's handling below */
+    int charset_lower = 0;     /* toggled by '.charset lower'/'.charset
+                                   upper' -- see that directive's handling
+                                   below */
 
     for (int li = 0; li < g_line_count; li++) {
         SourceLine *L = &g_lines[li];
@@ -2204,6 +2248,37 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
             continue;
         }
 
+        if (strcmp(L->op, ".charset") == 0) {
+            /* Switches how .text/.asc/.byte string literals encode
+             * letters, from this point in the file forward (not
+             * retroactively -- same positional behavior as '.cpu'
+             * above). See ascii_to_petscii() and c64asm-reference.md's
+             * "Text and PETSCII" section for the full explanation,
+             * including the important caveat about mixing '.charset
+             * upper' and '.charset lower' text in a program that
+             * switches its character set at runtime. */
+            char cs_mode[MAX_LINE_LEN];
+            strncpy(cs_mode, L->operand, sizeof(cs_mode) - 1);
+            cs_mode[sizeof(cs_mode) - 1] = '\0';
+            trim(cs_mode);
+            char cs_upper[MAX_LINE_LEN];
+            strncpy(cs_upper, cs_mode, sizeof(cs_upper) - 1);
+            cs_upper[sizeof(cs_upper) - 1] = '\0';
+            for (char *pc2 = cs_upper; *pc2; pc2++) *pc2 = (char)toupper((unsigned char)*pc2);
+            if (strcmp(cs_upper, "UPPER") == 0) {
+                charset_lower = 0;
+            } else if (strcmp(cs_upper, "LOWER") == 0) {
+                charset_lower = 1;
+            } else {
+                asm_error_recoverable(L->line_no, L->raw,
+                    "Unknown .charset mode '%s' -- expected 'upper' (the "
+                    "default) or 'lower'", cs_mode);
+                /* fallback: leave charset_lower exactly as it was --
+                   same reasoning as '.cpu''s fallback above */
+            }
+            continue;
+        }
+
         if (strcmp(L->op, ".org") == 0) {
             int undef = 0;
             long val = eval_expr(L->operand, pc, L->line_no, &undef);
@@ -2299,7 +2374,7 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                     size_t sl = (al >= 2 && a[al-1]=='"') ? al-2 : al-1;
                     memcpy(s, a+1, sl); s[sl]='\0';
                     unsigned char buf[MAX_LINE_LEN]; int blen=0;
-                    ascii_to_petscii(s, buf, &blen);
+                    ascii_to_petscii(s, buf, &blen, charset_lower);
                     if (pass_no == 2) bb_push_n(output, buf, blen);
                     pc += blen;
                 } else {
@@ -2344,7 +2419,7 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                     strncpy(s, a, sizeof(s)-1); s[sizeof(s)-1]='\0';
                 }
                 unsigned char buf[MAX_LINE_LEN]; int blen=0;
-                ascii_to_petscii(s, buf, &blen);
+                ascii_to_petscii(s, buf, &blen, charset_lower);
                 if (pass_no == 2) bb_push_n(output, buf, blen);
                 pc += blen;
             }

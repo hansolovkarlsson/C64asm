@@ -231,19 +231,84 @@ assembler reports an error naming the mnemonic and the unsupported mode.
 ## 6. Text and PETSCII
 
 `.text`, `.asc`, and quoted string arguments to `.byte`/`.db` are encoded
-as PETSCII bytes suitable for output through the KERNAL `CHROUT` routine
-on the **default** (uppercase/graphics) C64 character set:
+as PETSCII bytes suitable for output through the KERNAL `CHROUT` routine.
+How letters get encoded depends on the `.charset` directive:
 
-- Uppercase letters, digits, and punctuation are emitted unchanged — on
-  the default charset these PETSCII codes (`$41`–`$5A` for `A`–`Z`) display
+```asm
+        .charset upper      ; the default
+        .charset lower
+```
+
+### `.charset upper` (the default)
+
+Every letter, whatever case it was written in, becomes a PETSCII byte
+in the `$41`–`$5A` range:
+
+- Uppercase source letters are emitted unchanged — on the **default**
+  (uppercase/graphics) C64 character set, these PETSCII codes display
   exactly like ASCII.
-- Lowercase input letters are folded up to uppercase, since the default
-  charset has no separate lowercase glyphs at those codes.
+- Lowercase source letters are folded up to uppercase.
 
-There is currently no support for emitting true lowercase text (which
-requires switching the VIC-II character set with PETSCII control code
-`$0E` and using the `$C1`–`$DA` range) — all text output prints as
-uppercase regardless of the case used in the source.
+This mode assumes the program never switches the C64 away from its
+default (power-on) character set. That's true of every program that
+doesn't deliberately do otherwise, so this is a safe, predictable
+default — but see the caveat at the end of this section.
+
+### `.charset lower`
+
+Letters keep their original case, using PETSCII's actual encoding for
+it:
+
+- Lowercase source letters become PETSCII `$41`–`$5A` (the "unshifted"
+  range) — this displays as **lowercase** specifically on the C64's
+  *lowercase/uppercase* character set, not the default one.
+- Uppercase source letters become PETSCII `$C1`–`$DA` (the "shifted"
+  range) — this displays as uppercase on **either** character set.
+
+This is what actually produces mixed-case text on screen — but only
+once the C64 has been switched, **at runtime**, onto its
+lowercase/uppercase character set. `.charset lower` only controls
+which *bytes* get assembled; switching the actual hardware character
+set is a separate step your program has to do itself, typically via
+`lib/text.inc`'s `SET_LOWERCASE_CHARSET` macro (see
+`lib-reference.md`), or directly:
+
+```asm
+        lda #$0e        ; PETSCII "switch to lowercase/uppercase charset"
+        jsr CHROUT
+```
+
+Forgetting this step is an easy mistake to make, and an easy one to
+miss: the program assembles and runs fine, and the text just quietly
+displays in uppercase, same as it always did, with nothing pointing at
+a forgotten step.
+
+### The mixing caveat
+
+`.charset upper` text is only guaranteed to display as uppercase while
+the C64's *default* character set is still active. If a program ever
+switches to the lowercase/uppercase character set — for some
+`.charset lower` text elsewhere — any `.charset upper` text printed
+**after** that point displays as lowercase too, since `$41`–`$5A`
+means something different once the character set has changed.
+
+The fix is simple: once a program switches its character set at
+runtime, use `.charset lower` for everything it prints from that point
+on, even text you want to appear in all caps — just write that text in
+actual uppercase in the source. `.charset lower` already encodes
+uppercase letters using the `$C1`–`$DA` range specifically so this
+works correctly regardless of which character set happens to be
+active.
+
+```asm
+        .charset lower
+title_msg:
+        .text "ADVENTURE"      ; still displays in caps -- $C1-$DA is
+        .byte 13, 0              ; uppercase on either character set
+body_msg:
+        .text "You are standing in a small room."
+        .byte 13, 0
+```
 
 ---
 
@@ -259,6 +324,7 @@ uppercase regardless of the case used in the source.
 | `.align n` | — | one expression | Pad with zero bytes, if necessary, until the program counter is a multiple of `n`. A no-op if it already is. `n` must evaluate to a positive value. A label on the same line (`sprite_data: .align 64`) is bound to the *aligned* address, matching how `.org`'s same-line label works. |
 | `.basic [start]` | — | optional label/expression | Emit a tokenized BASIC line `10 SYS <addr>` at `$0801`, where `<addr>` is automatically computed to point at the very next byte of assembled code — i.e. wherever the code following `.basic` ends up. Typing `LOAD"...",8,1` then `RUN` starts the machine code directly. Must appear before any code you want it to `SYS` into. With an operand, also emits `jmp start` immediately after the stub — see the example and gotcha below. |
 | `.cpu 6510` / `.cpu 6510x` | `.cpu 6502` (synonym for `6510`) | one mode name | Switches illegal/undocumented-opcode support (§13) off (`6510`, the default) or on (`6510x`) from this point in the file forward. |
+| `.charset upper` / `.charset lower` | — | one mode name | Switches how `.text`/`.asc`/`.byte` string literals encode letters (§6) from this point in the file forward: forced-uppercase (`upper`, the default) or case-preserving (`lower`). |
 | `label = expr` | `.equ` | one expression | Bind `label` to the value of `expr` (not to the current PC). See §2. |
 
 `.byte`/`.word`/`.text`/`.fill` all accept comma-separated argument lists,
@@ -1031,6 +1097,7 @@ Common errors:
 | `Undefined symbol in .basic start operand '...'` | `.basic`'s optional start-label operand (§7) referenced a symbol never defined anywhere in the file. |
 | `Illegal/undocumented opcode '...' used without '.cpu 6510x'` | An illegal/undocumented opcode (§13) was used before `.cpu 6510x` enabled them. |
 | `Unknown .cpu mode '...'` | `.cpu`'s operand (§13) was something other than `6510`, `6510x`, or `6502`. |
+| `Unknown .charset mode '...'` | `.charset`'s operand (§6) was something other than `upper` or `lower`. |
 
 ---
 
@@ -1067,7 +1134,14 @@ Common errors:
   surface several independent mistakes (see §16), but messages after
   the first one can occasionally be downstream noise rather than
   genuinely separate problems — see the note at the end of §16.
-- **PETSCII output is uppercase-only** (see §6).
+- **`.charset lower` (§6) only controls assembled bytes, not the C64's
+  actual runtime character set** — that's separate hardware state the
+  assembler has no way to touch, so `.charset lower` text needs to be
+  paired with an explicit runtime switch (`lib/text.inc`'s
+  `SET_LOWERCASE_CHARSET`, or an equivalent manual `CHROUT`) or it
+  will still display in uppercase. See §6's mixing caveat too:
+  `.charset upper` text is only reliably uppercase before that switch
+  happens.
 
 ---
 

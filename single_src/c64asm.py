@@ -207,6 +207,7 @@ BRANCHES = {'BCC','BCS','BEQ','BMI','BNE','BPL','BVC','BVS'}
 
 DIRECTIVES = {'.org', '*=', '.byte', '.db', '.word', '.dw', '.text', '.asc',
               '.fill', '.ds', '.res', '.basic', '.equ', '.align', '.cpu',
+              '.charset',
               '.if', '.elif', '.else', '.endif', '.ifdef', '.ifndef'}
 
 MAX_MACRO_EXPANSION_DEPTH = 16   # guards against runaway/infinite recursive macros
@@ -356,18 +357,57 @@ def record_error(message, line_no=None, raw=None):
 # ASCII -> PETSCII mapping for .text / .asc
 # ---------------------------------------------------------------------------
 
-def ascii_to_petscii(s):
+def ascii_to_petscii(s, lower_mode=False):
     """Map an ASCII string to C64 PETSCII bytes suitable for use with
-    standard KERNAL CHROUT ($FFD2) output on the default (uppercase)
-    character set. Uppercase letters, digits, and punctuation are already
-    correct PETSCII values (identical to ASCII in that range); only
-    lowercase input needs folding up to display as uppercase."""
+    standard KERNAL CHROUT ($FFD2) output.
+
+    lower_mode=False (the default, and this assembler's overall
+    default via '.charset upper' -- see below): every letter, whatever
+    case it was written in, becomes a PETSCII byte in the $41-$5A
+    range. That range displays as uppercase on the C64's default
+    (power-on) character set, which is the only character set any
+    program using this mode is expected to be running under -- see the
+    caveat below.
+
+    lower_mode=True ('.charset lower'): letters keep their original
+    case using PETSCII's actual encoding for it -- lowercase becomes
+    $41-$5A (PETSCII's "unshifted" range, which the hardware displays
+    as lowercase specifically on the *lowercase/uppercase* character
+    set, not the default one) and uppercase becomes $C1-$DA
+    ("shifted", which displays as uppercase on *either* character
+    set). This is what actually produces mixed-case text on screen --
+    but only once the C64 has been switched to the lowercase/uppercase
+    character set at runtime (e.g. via text.inc's
+    SET_LOWERCASE_CHARSET macro); the assembler has no way to do that
+    switch itself, since it's a runtime hardware state, not something
+    that exists at assembly time.
+
+    Caveat: text assembled under '.charset upper' is only guaranteed
+    to display as uppercase while the default character set is still
+    active. If a program ever switches to the lowercase/uppercase set
+    for some '.charset lower' text, any '.charset upper' text printed
+    afterward would display as lowercase too, since $41-$5A means
+    something different on that character set. Once a program switches
+    character sets at runtime, use '.charset lower' for everything it
+    prints from that point on -- typed-in-uppercase source text still
+    displays correctly as uppercase either way, since '.charset
+    lower' encodes uppercase letters using the character-set-independent
+    $C1-$DA range specifically so this works.
+    """
     out = bytearray()
     for ch in s:
-        if 'a' <= ch <= 'z':
-            out.append(ord(ch) - ord('a') + ord('A'))
+        if lower_mode:
+            if 'a' <= ch <= 'z':
+                out.append(ord(ch) - ord('a') + 0x41)
+            elif 'A' <= ch <= 'Z':
+                out.append(ord(ch) - ord('A') + 0xC1)
+            else:
+                out.append(ord(ch) & 0xFF)
         else:
-            out.append(ord(ch) & 0xFF)
+            if 'a' <= ch <= 'z':
+                out.append(ord(ch) - ord('a') + ord('A'))
+            else:
+                out.append(ord(ch) & 0xFF)
     return bytes(out)
 
 
@@ -1290,6 +1330,9 @@ class Assembler:
         cond_stack = []   # see the ".if"/".ifdef" handling below
         illegal_enabled = False   # toggled by '.cpu 6510x'/'.cpu 6510' --
                                      # see that directive's handling below
+        charset_lower = False     # toggled by '.charset lower'/'.charset
+                                     # upper' -- see that directive's
+                                     # handling below
 
         def parent_active():
             return not cond_stack or cond_stack[-1].currently_active
@@ -1421,6 +1464,29 @@ class Assembler:
                     # anything, just a mistake to report
                 continue
 
+            if op == '.charset':
+                # Switches how .text/.asc/.byte string literals encode
+                # letters, from this point in the file forward (not
+                # retroactively -- same positional behavior as '.cpu'
+                # above). See ascii_to_petscii() above and
+                # c64asm-reference.md's "Text and PETSCII" section for
+                # the full explanation, including the important caveat
+                # about mixing '.charset upper' and '.charset lower'
+                # text in a program that switches its character set at
+                # runtime.
+                mode_name = operand.strip().upper()
+                if mode_name == 'UPPER':
+                    charset_lower = False
+                elif mode_name == 'LOWER':
+                    charset_lower = True
+                else:
+                    record_error(
+                        f"Unknown .charset mode '{operand.strip()}' -- expected "
+                        f"'upper' (the default) or 'lower'", line_no, raw)
+                    # fallback: leave charset_lower exactly as it was --
+                    # same reasoning as '.cpu''s fallback above
+                continue
+
             if op == '.org':
                 val, undef = eval_expr(operand, self.symbols, pc, line_no)
                 if undef and pass_no == 2:
@@ -1515,7 +1581,7 @@ class Assembler:
                 for a in split_args(operand):
                     if a.startswith('"'):
                         s = a[1:-1] if a.endswith('"') else a[1:]
-                        b = ascii_to_petscii(s)
+                        b = ascii_to_petscii(s, charset_lower)
                         if pass_no == 2:
                             output.extend(b)
                         pc += len(b)
@@ -1542,7 +1608,7 @@ class Assembler:
             if op in ('.text', '.asc'):
                 for a in split_args(operand):
                     s = a[1:-1] if a.startswith('"') and a.endswith('"') else a
-                    b = ascii_to_petscii(s)
+                    b = ascii_to_petscii(s, charset_lower)
                     if pass_no == 2:
                         output.extend(b)
                     pc += len(b)

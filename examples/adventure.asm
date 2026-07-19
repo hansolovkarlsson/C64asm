@@ -6,6 +6,16 @@
 ; echo are all handled by well-tested KERNAL code, unlike the manual CIA
 ; register scanning used for the Pong demo (which had real, subtle bugs).
 ;
+; All room descriptions and other printed messages use real mixed-case
+; text (via '.charset lower' and text.inc's SET_LOWERCASE_CHARSET --
+; see c64asm-reference.md's "Text and PETSCII" section) rather than the
+; all-caps PETSCII most C64 programs default to. The player-typed verb
+; and noun keywords this reads back against stay uppercase, since
+; that's what CHRIN naturally returns from an unshifted keyboard
+; regardless of which character set is active -- see this file's own
+; comment right before the "printed strings" section below for why
+; that split matters.
+;
 ; The room/item/puzzle state machine below was validated in a Python
 ; simulation before being written here: the solution path (forest ->
 ; cave entrance -> back for the key -> cottage -> chest -> key -> cave
@@ -70,6 +80,19 @@ LOC_NONE = 255   ; not present anywhere yet (the key, inside the unopened chest)
 LOC_INV  = 254   ; carried in the player's inventory
 
 start:
+        SET_LOWERCASE_CHARSET     ; switch the C64's actual character set
+                                     ; to lowercase/uppercase -- without
+                                     ; this, every message below (assembled
+                                     ; under .charset lower, further down
+                                     ; this file) would still display in
+                                     ; uppercase, since .charset only
+                                     ; controls assembled bytes, not this
+                                     ; runtime hardware state; see
+                                     ; c64asm-reference.md's "Text and
+                                     ; PETSCII" section
+        DISABLE_CHARSET_SWITCH     ; and don't let CBM+SHIFT undo that --
+                                     ; this program has one consistent
+                                     ; character set for its whole run
         lda #<msg_welcome1
         ldy #>msg_welcome1
         jsr print_msg
@@ -628,98 +651,113 @@ kw_door:      .text "DOOR"
         .byte 0
 
 ; --- printed strings ---
+; Everything below is assembled under .charset lower: uppercase source
+; letters still display correctly as uppercase regardless of which
+; character set is active (see the mixing caveat in
+; c64asm-reference.md's "Text and PETSCII" section), while lowercase
+; source letters display as genuine lowercase now that start: has
+; switched the runtime character set -- see SET_LOWERCASE_CHARSET
+; above. The keyword strings above this point stay under the default
+; .charset upper, unchanged: they're compared against typed keyboard
+; input, not printed, and keyboard input's PETSCII bytes don't depend
+; on which character set happens to be active (only which physical key
+; and shift state do) -- see the "keyboard PETSCII matches .text
+; PETSCII" check near the top of test_adventure.py for why that
+; comparison staying correct matters.
+        .charset lower
+
 prompt_str:            .text "> "
         .byte 0
 
-msg_welcome1:  .text "=== THE FORGOTTEN COTTAGE ==="
+msg_welcome1:  .text "=== The Forgotten Cottage ==="
         .byte $0d,0
-msg_welcome2:  .text "A SHORT TEXT ADVENTURE. TYPE HELP FOR COMMANDS."
-        .byte $0d,0
-
-room0_desc: .text "YOU ARE STANDING IN A SUNNY CLEARING. A PATH LEADS NORTH INTO A FOREST, AND A SMALL COTTAGE LIES TO THE EAST."
-        .byte $0d,0
-room1_desc: .text "YOU ARE IN A DARK FOREST. TALL TREES SURROUND YOU. THE CLEARING IS SOUTH, AND A ROCKY PATH LEADS EAST."
-        .byte $0d,0
-room2_desc: .text "YOU ARE INSIDE A SMALL, DUSTY COTTAGE. THE CLEARING IS WEST."
-        .byte $0d,0
-room3_desc: .text "YOU STAND BEFORE THE MOUTH OF A DARK CAVE. THE FOREST IS WEST."
-        .byte $0d,0
-room4_desc: .text "YOU ARE IN A DAMP, DARK CAVE. SOMETHING GLINTS IN THE SHADOWS."
+msg_welcome2:  .text "A short text adventure. Type HELP for commands."
         .byte $0d,0
 
-rock_here_msg:     .text "THERE IS A ROCK HERE."
+room0_desc: .text "You are standing in a sunny clearing. A path leads north into a forest, and a small cottage lies to the east."
         .byte $0d,0
-key_here_msg:      .text "THERE IS A KEY HERE."
+room1_desc: .text "You are in a dark forest. Tall trees surround you. The clearing is south, and a rocky path leads east."
         .byte $0d,0
-treasure_here_msg: .text "SOMETHING GLITTERS HERE - IT'S A TREASURE!"
+room2_desc: .text "You are inside a small, dusty cottage. The clearing is west."
         .byte $0d,0
-
-rock_take_msg:     .text "YOU PICK UP THE ROCK."
+room3_desc: .text "You stand before the mouth of a dark cave. The forest is west."
         .byte $0d,0
-key_take_msg:      .text "YOU TAKE THE KEY."
-        .byte $0d,0
-treasure_take_msg: .text "YOU TAKE THE TREASURE. SUNLIGHT GLINTS OFF THE GOLD - YOU WIN!"
+room4_desc: .text "You are in a damp, dark cave. Something glints in the shadows."
         .byte $0d,0
 
-rock_name_msg:     .text "A ROCK"
+rock_here_msg:     .text "There is a rock here."
         .byte $0d,0
-key_name_msg:      .text "A KEY"
+key_here_msg:      .text "There is a key here."
         .byte $0d,0
-treasure_name_msg: .text "THE TREASURE"
-        .byte $0d,0
-
-chest_closed_msg:     .text "THERE IS A CLOSED WOODEN CHEST HERE."
-        .byte $0d,0
-chest_open_empty_msg: .text "THE WOODEN CHEST IS OPEN AND EMPTY."
-        .byte $0d,0
-msg_chest_already_open: .text "IT'S ALREADY OPEN."
-        .byte $0d,0
-msg_chest_opened:        .text "YOU OPEN THE CHEST. INSIDE IS A KEY!"
-        .byte $0d,0
-msg_no_chest_here:       .text "THERE IS NO CHEST HERE."
+treasure_here_msg: .text "Something glitters here - it's a treasure!"
         .byte $0d,0
 
-door_locked_msg:   .text "A LOCKED WOODEN DOOR BLOCKS THE WAY NORTH."
+rock_take_msg:     .text "You pick up the rock."
         .byte $0d,0
-door_unlocked_msg: .text "AN OPEN DOOR LEADS NORTH INTO DARKNESS."
+key_take_msg:      .text "You take the key."
         .byte $0d,0
-msg_door_already_open:    .text "THE DOOR IS ALREADY OPEN."
-        .byte $0d,0
-msg_door_locked_need_key: .text "IT'S LOCKED. YOU NEED A KEY."
-        .byte $0d,0
-msg_door_unlocked:        .text "YOU UNLOCK THE DOOR. IT SWINGS OPEN."
-        .byte $0d,0
-msg_no_door_here:         .text "THERE IS NO DOOR HERE."
+treasure_take_msg: .text "You take the treasure. Sunlight glints off the gold - you win!"
         .byte $0d,0
 
-msg_take_fail:        .text "YOU DON'T SEE THAT HERE."
+rock_name_msg:     .text "A rock"
         .byte $0d,0
-msg_take_what:         .text "TAKE WHAT?"
+key_name_msg:      .text "A key"
         .byte $0d,0
-msg_open_nothing:       .text "YOU CAN'T OPEN THAT."
-        .byte $0d,0
-msg_open_what:            .text "OPEN WHAT?"
-        .byte $0d,0
-msg_dont_understand:       .text "I DON'T UNDERSTAND THAT."
-        .byte $0d,0
-msg_cant_go:                 .text "YOU CAN'T GO THAT WAY."
-        .byte $0d,0
-msg_bad_direction:             .text "GO WHERE?"
-        .byte $0d,0
-msg_inventory_empty:             .text "YOU AREN'T CARRYING ANYTHING."
-        .byte $0d,0
-msg_inventory_header:              .text "YOU ARE CARRYING:"
+treasure_name_msg: .text "The treasure"
         .byte $0d,0
 
-msg_help1: .text "COMMANDS:"
+chest_closed_msg:     .text "There is a closed wooden chest here."
         .byte $0d,0
-msg_help2: .text "LOOK - DESCRIBE YOUR SURROUNDINGS"
+chest_open_empty_msg: .text "The wooden chest is open and empty."
         .byte $0d,0
-msg_help3: .text "GO <DIRECTION>, OR JUST N/S/E/W"
+msg_chest_already_open: .text "It's already open."
         .byte $0d,0
-msg_help4: .text "TAKE <ITEM>"
+msg_chest_opened:        .text "You open the chest. Inside is a key!"
         .byte $0d,0
-msg_help5: .text "OPEN <CHEST/DOOR>"
+msg_no_chest_here:       .text "There is no chest here."
         .byte $0d,0
-msg_help6: .text "INVENTORY (OR I), HELP"
+
+door_locked_msg:   .text "A locked wooden door blocks the way north."
+        .byte $0d,0
+door_unlocked_msg: .text "An open door leads north into darkness."
+        .byte $0d,0
+msg_door_already_open:    .text "The door is already open."
+        .byte $0d,0
+msg_door_locked_need_key: .text "It's locked. You need a key."
+        .byte $0d,0
+msg_door_unlocked:        .text "You unlock the door. It swings open."
+        .byte $0d,0
+msg_no_door_here:         .text "There is no door here."
+        .byte $0d,0
+
+msg_take_fail:        .text "You don't see that here."
+        .byte $0d,0
+msg_take_what:         .text "Take what?"
+        .byte $0d,0
+msg_open_nothing:       .text "You can't open that."
+        .byte $0d,0
+msg_open_what:            .text "Open what?"
+        .byte $0d,0
+msg_dont_understand:       .text "I don't understand that."
+        .byte $0d,0
+msg_cant_go:                 .text "You can't go that way."
+        .byte $0d,0
+msg_bad_direction:             .text "Go where?"
+        .byte $0d,0
+msg_inventory_empty:             .text "You aren't carrying anything."
+        .byte $0d,0
+msg_inventory_header:              .text "You are carrying:"
+        .byte $0d,0
+
+msg_help1: .text "Commands:"
+        .byte $0d,0
+msg_help2: .text "LOOK - describe your surroundings"
+        .byte $0d,0
+msg_help3: .text "GO <direction>, or just N/S/E/W"
+        .byte $0d,0
+msg_help4: .text "TAKE <item>"
+        .byte $0d,0
+msg_help5: .text "OPEN <chest/door>"
+        .byte $0d,0
+msg_help6: .text "INVENTORY (or I), HELP"
         .byte $0d,0

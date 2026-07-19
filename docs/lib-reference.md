@@ -33,7 +33,7 @@ for the full behavior.
 | File | Provides |
 |---|---|
 | `lib/hardware.inc` | VIC-II, SID, CIA, and KERNAL register constants. No code — always safe to `.include`. |
-| `lib/text.inc` | `PRINT msg`, `CLS`, `NEWLINE`, the `print_msg` subroutine they're built on, and `str_equal` for comparing typed input against known keywords. |
+| `lib/text.inc` | `PRINT msg`, `CLS`, `NEWLINE`, the `print_msg` subroutine they're built on, `str_equal` for comparing typed input against known keywords, and `SET_LOWERCASE_CHARSET`/`SET_UPPERCASE_CHARSET`/`DISABLE_CHARSET_SWITCH`/`ENABLE_CHARSET_SWITCH` for the runtime character-set switch this assembler's `.charset lower` directive needs paired with it — see `c64asm-reference.md` §6. |
 | `lib/input.inc` | `CIA_KEYBOARD_SETUP`, `read_joy2`, `READ_KEY column, mask` for joystick/keyboard-matrix input; `read_line` and `extract_word` for reading and tokenizing a typed line via `CHRIN`. |
 | `lib/graphics.inc` | `BITMAP_MODE_ON addr`, `BITMAP_MODE_OFF`, `CLEAR_BITMAP addr`, `SET_SCREEN_COLOR value`, `SPRITE_INIT data, color, x, y` for bitmap/sprite setup; `wait_frame` for raster-synced timing; `sprite0_bounce_step` for animating a sprite bouncing within a rectangular area; `sprite0_explode` for a caller-colored expand-flash-hide effect (an explosion, a hit, anything that needs a sprite to visibly go away). |
 | `lib/sound.inc` | `SID_INIT`, `PLAY_SOUND freq_hi, ad, sr, waveform`, `engine_sound_on`/`engine_sound_off`. |
@@ -179,6 +179,42 @@ became, without the fix:
 If your program reads typed input at all, call `NEWLINE` right after
 the read, before the first thing you print in response — the same
 place `adventure.asm` calls it.
+
+### Lowercase text needs two things, not one
+
+Writing `.charset lower` before a `.text`/`.asc`/`.byte` line (see
+`c64asm-reference.md` §6, "Text and PETSCII") changes which PETSCII
+bytes get assembled, but by itself that's not enough to actually
+*see* lowercase letters on screen — the C64 also needs to be
+switched, at **runtime**, onto its lowercase/uppercase character set,
+which is a completely separate piece of hardware state the assembler
+has no way to touch. Forgetting the second part is an easy mistake:
+the program assembles fine, runs fine, and the text just silently
+comes out looking exactly like it always did (uppercase), with
+nothing about that pointing at "you forgot a step."
+
+The fix is to call `SET_LOWERCASE_CHARSET` before printing anything
+assembled under `.charset lower`:
+
+```asm
+        .charset lower
+hello_msg:
+        .text "Hello, World!"
+        .byte 13, 0
+
+start:
+        SET_LOWERCASE_CHARSET     ; switch the actual hardware character
+                                     ; set -- without this line, hello_msg
+                                     ; still displays in uppercase
+        PRINT hello_msg
+```
+
+`SET_UPPERCASE_CHARSET` switches back. `DISABLE_CHARSET_SWITCH` /
+`ENABLE_CHARSET_SWITCH` stop/allow the player's own CBM+SHIFT keypress
+from changing it back unexpectedly mid-program — call
+`DISABLE_CHARSET_SWITCH` right after `SET_LOWERCASE_CHARSET` if your
+program wants to guarantee the character set stays put for the rest
+of the run.
 
 ### A `graphics.inc` gotcha this library will also expose
 

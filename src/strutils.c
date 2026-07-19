@@ -17,17 +17,26 @@ void trim(char *s) {
 int is_ident_start(char c) { return isalpha((unsigned char)c) || c == '_'; }
 int is_ident_char(char c)  { return isalnum((unsigned char)c) || c == '_'; }
 
-void ascii_to_petscii(const char *s, unsigned char *out, int *outlen) {
+void ascii_to_petscii(const char *s, unsigned char *out, int *outlen, int lower_mode) {
     int n = 0;
     for (const char *p = s; *p; p++) {
         unsigned char ch = (unsigned char)*p;
-        if (ch >= 'a' && ch <= 'z')
-            out[n++] = (unsigned char)(ch - 'a' + 'A');   /* fold lower -> upper */
-        else
-            out[n++] = ch;   /* already correct PETSCII: uppercase A-Z ($41-$5A)
-                                 display as uppercase letters on the default C64
-                                 charset, exactly like plain ASCII, and so do
-                                 digits/punctuation. */
+        if (lower_mode) {
+            if (ch >= 'a' && ch <= 'z')
+                out[n++] = (unsigned char)(ch - 'a' + 0x41);
+            else if (ch >= 'A' && ch <= 'Z')
+                out[n++] = (unsigned char)(ch - 'A' + 0xC1);
+            else
+                out[n++] = ch;
+        } else {
+            if (ch >= 'a' && ch <= 'z')
+                out[n++] = (unsigned char)(ch - 'a' + 'A');   /* fold lower -> upper */
+            else
+                out[n++] = ch;   /* already correct PETSCII: uppercase A-Z ($41-$5A)
+                                     display as uppercase letters on the default C64
+                                     charset, exactly like plain ASCII, and so do
+                                     digits/punctuation. */
+        }
     }
     *outlen = n;
 }

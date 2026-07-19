@@ -83,10 +83,11 @@ a real C64 to run it.
   detection
 - **Conditional assembly** (`.if`/`.elif`/`.else`/`.endif`,
   `.ifdef`/`.ifndef`) for things like PAL/NTSC timing variants
-- Directives for raw bytes/words, text (with ASCII→PETSCII conversion),
-  memory fills, byte alignment (`.align`), symbol/constant definitions,
-  and a `.basic` directive that auto-generates a correct `10 SYS xxxx`
-  BASIC loader stub
+- Directives for raw bytes/words, text (with ASCII→PETSCII conversion,
+  including a `.charset upper`/`.charset lower` switch for true
+  lowercase output), memory fills, byte alignment (`.align`),
+  symbol/constant definitions, and a `.basic` directive that
+  auto-generates a correct `10 SYS xxxx` BASIC loader stub
 - Clear, line-and-filename-aware error messages — undefined symbols,
   out-of-range branches, invalid addressing modes, and more, all caught
   before you waste time in an emulator
@@ -223,13 +224,17 @@ for worked regression suites built on it).
   §16 for the full list)
 - No undocumented/illegal 6502 opcodes
 - Assembly can surface several independent errors from one run (see
-  `c64asm-reference.md` §15), though messages after the first can
+  `c64asm-reference.md` §16), though messages after the first can
   occasionally be downstream noise rather than genuinely separate
   problems; a handful of whole-file structural errors (missing/circular
   `.include`, a broken macro or conditional-assembly block) still stop
   assembly immediately
-- `.text`/`.asc`/quoted `.byte` output uppercase-only PETSCII (no
-  charset-switch support for true lowercase)
+- `.charset lower` (§6) produces real mixed-case PETSCII bytes, but
+  pairing it with `lib/text.inc`'s `SET_LOWERCASE_CHARSET` macro (or
+  an equivalent manual runtime switch) is required to actually see
+  lowercase on screen — the assembler can't do that part itself, since
+  it's runtime hardware state, not something that exists at assembly
+  time
 - A library file's code is assembled unconditionally once `.include`d,
   even for routines you never call — meaning, for example, any program
   including `lib/text.inc` needs `cmp_ptr`/`kw_ptr` defined even if it

@@ -64,6 +64,9 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
     int cond_stack_top = 0;
     int illegal_enabled = 0;   /* toggled by '.cpu 6510x'/'.cpu 6510' --
                                    see that directive's handling below */
+    int charset_lower = 0;     /* toggled by '.charset lower'/'.charset
+                                   upper' -- see that directive's handling
+                                   below */
 
     for (int li = 0; li < g_line_count; li++) {
         SourceLine *L = &g_lines[li];
@@ -238,6 +241,38 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
             continue;
         }
 
+        if (strcmp(L->op, ".charset") == 0) {
+            /* Switches how .text/.asc/.byte string literals encode
+             * letters, from this point in the file forward (not
+             * retroactively -- same positional behavior as '.cpu'
+             * above). See strutils.c's ascii_to_petscii() and
+             * c64asm-reference.md's "Text and PETSCII" section for
+             * the full explanation, including the important caveat
+             * about mixing '.charset upper' and '.charset lower'
+             * text in a program that switches its character set at
+             * runtime. */
+            char cs_mode[MAX_LINE_LEN];
+            strncpy(cs_mode, L->operand, sizeof(cs_mode) - 1);
+            cs_mode[sizeof(cs_mode) - 1] = '\0';
+            trim(cs_mode);
+            char cs_upper[MAX_LINE_LEN];
+            strncpy(cs_upper, cs_mode, sizeof(cs_upper) - 1);
+            cs_upper[sizeof(cs_upper) - 1] = '\0';
+            for (char *pc2 = cs_upper; *pc2; pc2++) *pc2 = (char)toupper((unsigned char)*pc2);
+            if (strcmp(cs_upper, "UPPER") == 0) {
+                charset_lower = 0;
+            } else if (strcmp(cs_upper, "LOWER") == 0) {
+                charset_lower = 1;
+            } else {
+                asm_error_recoverable(L->line_no, L->raw,
+                    "Unknown .charset mode '%s' -- expected 'upper' (the "
+                    "default) or 'lower'", cs_mode);
+                /* fallback: leave charset_lower exactly as it was --
+                   same reasoning as '.cpu''s fallback above */
+            }
+            continue;
+        }
+
         if (strcmp(L->op, ".org") == 0) {
             int undef = 0;
             long val = eval_expr(L->operand, pc, L->line_no, &undef);
@@ -363,7 +398,7 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                     size_t sl = (al >= 2 && a[al-1]=='"') ? al-2 : al-1;
                     memcpy(s, a+1, sl); s[sl]='\0';
                     unsigned char buf[MAX_LINE_LEN]; int blen=0;
-                    ascii_to_petscii(s, buf, &blen);
+                    ascii_to_petscii(s, buf, &blen, charset_lower);
                     if (pass_no == 2) bb_push_n(output, buf, blen);
                     pc += blen;
                 } else {
@@ -413,7 +448,7 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                     strncpy(s, a, sizeof(s)-1); s[sizeof(s)-1]='\0';
                 }
                 unsigned char buf[MAX_LINE_LEN]; int blen=0;
-                ascii_to_petscii(s, buf, &blen);
+                ascii_to_petscii(s, buf, &blen, charset_lower);
                 if (pass_no == 2) bb_push_n(output, buf, blen);
                 pc += blen;
             }

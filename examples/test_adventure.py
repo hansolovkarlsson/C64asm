@@ -117,8 +117,8 @@ def play(commands):
 
 print("=== keyboard PETSCII matches .text PETSCII (the bug this test was built to catch) ===")
 text_1cmd = play(['LOOK'])
-check("a single recognized command is NOT met with 'I DON'T UNDERSTAND'",
-      "I DON'T UNDERSTAND" not in text_1cmd,
+check("a single recognized command is NOT met with \"I don't understand\"",
+      "I don't understand" not in text_1cmd,
       f"text was {text_1cmd!r}")
 
 print("=== response starts on its own line, not glued to the prompt ===")
@@ -133,21 +133,21 @@ solution = [
     'OPEN DOOR', 'GO NORTH', 'TAKE TREASURE',
 ]
 text = play(solution)
-check("welcome message printed", 'THE FORGOTTEN COTTAGE' in text)
-check("chest opens correctly", 'INSIDE IS A KEY' in text)
-check("key can be taken", 'YOU TAKE THE KEY' in text)
-check("door unlocks with the key", 'YOU UNLOCK THE DOOR' in text)
-check("reaches the win condition", 'YOU WIN' in text, f"full text: {text!r}")
-dont_understand_count = text.count("I DON'T UNDERSTAND")
-check("no unexpected 'I DON'T UNDERSTAND' along the solution path",
+check("welcome message printed", 'The Forgotten Cottage' in text)
+check("chest opens correctly", 'Inside is a key' in text)
+check("key can be taken", 'You take the key' in text)
+check("door unlocks with the key", 'You unlock the door' in text)
+check("reaches the win condition", 'you win' in text, f"full text: {text!r}")
+dont_understand_count = text.count("I don't understand")
+check("no unexpected 'I don't understand' along the solution path",
       dont_understand_count == 0,
       f"count={dont_understand_count}")
 
 print("=== a locked door correctly blocks without the key ===")
 text2 = play(['GO NORTH', 'GO EAST', 'OPEN DOOR', 'GO NORTH'])
-check("door starts locked", 'LOCKED WOODEN DOOR' in text2)
+check("door starts locked", 'locked wooden door' in text2)
 check("open door without key fails with the right message",
-      "IT'S LOCKED. YOU NEED A KEY" in text2 or "NEED A KEY" in text2,
+      "It's locked. You need a key" in text2 or "need a key" in text2,
       f"text: {text2!r}")
 
 print()
