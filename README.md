@@ -171,11 +171,13 @@ addressing-mode rules.
 
 `c64asm-stdlib.zip` unpacks to a `lib/` directory of `.include`-able
 files — register constants, PETSCII text output and string comparison,
-joystick/keyboard/typed-line input, bitmap graphics setup, and SID sound
-effects — extracted from and cross-checked against the demo programs
-that originally implemented each piece from scratch. Nothing in it is
-new, untested logic; it's existing, hardware-verified patterns pulled
-into reusable form. Five of the six programs above (`adventure.asm`,
+joystick/keyboard/typed-line input (including named constants for
+every key on the keyboard matrix, and a blocking "wait for any key"
+read), bitmap graphics setup, and SID sound effects — extracted from
+and cross-checked against the demo programs that originally
+implemented each piece from scratch. Nothing in it is new, untested
+logic; it's existing, hardware-verified patterns pulled into reusable
+form. Five of the six programs above (`adventure.asm`,
 `bounce.asm`, `pong.asm`, `lander.asm`, and the library-focused
 `demo.asm`) are built *on* the library rather than duplicating it —
 only `hello.asm` still has everything written out locally, since it's

@@ -1607,11 +1607,19 @@ class Assembler:
 
             if op in ('.text', '.asc'):
                 for a in split_args(operand):
-                    s = a[1:-1] if a.startswith('"') and a.endswith('"') else a
-                    b = ascii_to_petscii(s, charset_lower)
-                    if pass_no == 2:
-                        output.extend(b)
-                    pc += len(b)
+                    if a.startswith('"'):
+                        s = a[1:-1] if a.endswith('"') else a[1:]
+                        b = ascii_to_petscii(s, charset_lower)
+                        if pass_no == 2:
+                            output.extend(b)
+                        pc += len(b)
+                    else:
+                        val, undef = eval_expr(a, self.symbols, pc, line_no)
+                        if undef and pass_no == 2:
+                            record_error(f"Undefined symbol in .text '{a}'", line_no, raw)
+                        if pass_no == 2:
+                            output.append(val & 0xFF)
+                        pc += 1
                 continue
 
             if op in ('.fill', '.ds', '.res'):

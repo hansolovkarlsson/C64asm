@@ -86,7 +86,17 @@ w_held:
         jsr engine_sound_on
 
 check_restart:
-        READ_KEY %11111011, %00000001    ; Y (restart)
+        ; This previously read %11111011, %00000001 -- verified against
+        ; the C64 keyboard matrix (see lib/keyboard.inc, and
+        ; https://sta.c64.org/cbm64kbdlay.html) that's actually the "5"
+        ; key's matrix position, not Y at all. Y is column 3
+        ; (%11110111), row bit 1 (%00000010) -- confirmed correct
+        ; against lander.asm's own Y-key check, which used the right
+        ; values already. Found while building lib/keyboard.inc's named
+        ; constants, which is exactly the kind of mistake they're meant
+        ; to make impossible going forward -- see that file's header
+        ; comment.
+        READ_KEY %11110111, %00000010    ; Y (restart)
         bne do_restart
         jmp main_loop
 do_restart:

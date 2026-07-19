@@ -110,7 +110,7 @@ check("welcome message actually printed", 'WELCOME TO THE DEMO' in text,
 
 print("=== bitmap mode: must be cleared, not left as garbage ===")
 m2, target = fresh()
-m2.press_key(0b11111011, 0b00000001)  # hold Y so it exits promptly
+m2.press_key(0b11110111, 0b00000010)  # hold Y so it exits promptly
 reason2 = m2.run_until_return(target, max_instructions=BUDGET)
 check("program returns cleanly", reason2 is None, f"reason={reason2}")
 check("GOODBYE printed on exit", 'GOODBYE' in ''.join(m2.output_text))
@@ -145,7 +145,7 @@ check("no spurious sound triggered while idle",
 print("=== fire button: sound must still correctly trigger when actually held ===")
 m4, target = fresh()
 m4.joystick2 = 0b00010000
-m4.press_key(0b11111011, 0b00000001)
+m4.press_key(0b11110111, 0b00000010)  # Y, to exit promptly
 reason4 = m4.run_until_return(target, max_instructions=BUDGET)
 check("program returns cleanly", reason4 is None, f"reason={reason4}")
 gate_writes4 = [v for a, v in m4.io_writes if a == 0xD404]
@@ -155,7 +155,7 @@ check("fire button correctly triggers the sound effect",
 print("=== W key: engine sound must still correctly trigger when actually held ===")
 m5, target = fresh()
 m5.press_key(0b11111101, 0b00000010)  # W
-m5.press_key(0b11111011, 0b00000001)  # Y, to exit promptly
+m5.press_key(0b11110111, 0b00000010)  # Y, to exit promptly
 reason5 = m5.run_until_return(target, max_instructions=BUDGET)
 check("program returns cleanly", reason5 is None, f"reason={reason5}")
 check("W key correctly triggers the engine sound",

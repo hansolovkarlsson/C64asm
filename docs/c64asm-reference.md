@@ -239,6 +239,23 @@ How letters get encoded depends on the `.charset` directive:
         .charset lower
 ```
 
+`.text`/`.asc` also accept numeric arguments mixed in with quoted
+strings, exactly like `.byte` does — each one is emitted as a single
+raw byte, not PETSCII-encoded, regardless of the current `.charset`
+mode:
+
+```asm
+        .text "HELLO", 13, 0    ; string, then carriage return, then a
+                                   ; null terminator -- no separate
+                                   ; .byte line needed
+```
+
+This is really the same directive as `.byte`, just defaulting to
+PETSCII-encoding its arguments instead of leaving them as raw numbers
+— an argument like `13` means exactly the same thing whether it
+appears in a `.text` line or a `.byte` line; only the quoted-string
+arguments are treated differently between the two.
+
 ### `.charset upper` (the default)
 
 Every letter, whatever case it was written in, becomes a PETSCII byte
@@ -319,7 +336,7 @@ body_msg:
 | `.org expr` | `* = expr` | one expression | Set the program counter. The *first* `.org` (or `.basic`) encountered also sets the file's load address (the two-byte header written to the `.prg`). |
 | `.byte a, b, ...` | `.db` | comma-separated bytes or `"strings"` | Emit raw bytes. Numeric arguments are truncated to 8 bits; quoted strings are PETSCII-encoded (§6). |
 | `.word a, b, ...` | `.dw` | comma-separated 16-bit values | Emit each value as two bytes, little-endian. |
-| `.text "..."` | `.asc` | comma-separated `"strings"` (or bare text) | PETSCII-encode and emit text (§6). |
+| `.text "...", n, ...` | `.asc` | comma-separated `"strings"` and/or numeric bytes | PETSCII-encode and emit text; numeric arguments are emitted as raw bytes (§6), the same as `.byte` — useful for a terminator or control code right after a string, e.g. `.text "HELLO", 13, 0`. |
 | `.fill count, value` | `.ds`, `.res` | count, optional fill byte (default 0) | Emit `count` bytes of `value`. |
 | `.align n` | — | one expression | Pad with zero bytes, if necessary, until the program counter is a multiple of `n`. A no-op if it already is. `n` must evaluate to a positive value. A label on the same line (`sprite_data: .align 64`) is bound to the *aligned* address, matching how `.org`'s same-line label works. |
 | `.basic [start]` | — | optional label/expression | Emit a tokenized BASIC line `10 SYS <addr>` at `$0801`, where `<addr>` is automatically computed to point at the very next byte of assembled code — i.e. wherever the code following `.basic` ends up. Typing `LOAD"...",8,1` then `RUN` starts the machine code directly. Must appear before any code you want it to `SYS` into. With an operand, also emits `jmp start` immediately after the stub — see the example and gotcha below. |
@@ -329,7 +346,10 @@ body_msg:
 
 `.byte`/`.word`/`.text`/`.fill` all accept comma-separated argument lists,
 so `.byte $01, $02, "AB", $00` mixes numeric bytes and quoted text on a
-single line.
+single line — and the same goes for `.text`: `.text "HELLO", 13, 0` emits
+the PETSCII-encoded string followed by two raw bytes (a carriage return
+and a null terminator), without needing a separate `.byte` line the way
+`.text "HELLO"` followed by `.byte 13, 0` used to.
 
 ### `.align` example
 
@@ -1081,6 +1101,9 @@ Common errors:
 | `Symbol '...' already defined` | A label was defined twice with two different address values. |
 | `Undefined symbol in operand '...'` | A symbol used in an instruction operand was never defined anywhere in the file. |
 | `Undefined symbol in .org expression` | Same, but for `.org`/`*=`. |
+| `Undefined symbol in .byte '...'` | Same, but for a numeric `.byte`/`.db` argument. |
+| `Undefined symbol in .word '...'` | Same, but for a `.word`/`.dw` argument. |
+| `Undefined symbol in .text '...'` | Same, but for a numeric `.text`/`.asc` argument (§6). |
 | `<MNEMONIC> requires an operand` | An instruction with no implied-mode encoding was given no operand. |
 | `<MNEMONIC> does not support that addressing mode` | The operand's syntax implies a mode the instruction doesn't have (e.g. immediate mode on `STA`). |
 | `Branch target out of range (+N)` | A branch instruction's target is more than 127 bytes forward or 128 bytes backward from the instruction following it. Reorganize the code, or replace the branch with an unconditional `JMP` reached via an inverted branch. |

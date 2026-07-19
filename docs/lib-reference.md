@@ -35,6 +35,7 @@ for the full behavior.
 | `lib/hardware.inc` | VIC-II, SID, CIA, and KERNAL register constants. No code — always safe to `.include`. |
 | `lib/text.inc` | `PRINT msg`, `CLS`, `NEWLINE`, the `print_msg` subroutine they're built on, `str_equal` for comparing typed input against known keywords, and `SET_LOWERCASE_CHARSET`/`SET_UPPERCASE_CHARSET`/`DISABLE_CHARSET_SWITCH`/`ENABLE_CHARSET_SWITCH` for the runtime character-set switch this assembler's `.charset lower` directive needs paired with it — see `c64asm-reference.md` §6. |
 | `lib/input.inc` | `CIA_KEYBOARD_SETUP`, `read_joy2`, `READ_KEY column, mask` for joystick/keyboard-matrix input; `read_line` and `extract_word` for reading and tokenizing a typed line via `CHRIN`. |
+| `lib/keyboard.inc` | Named `KEY_<NAME>_COL`/`KEY_<NAME>_ROW`/`KEY_<NAME>_CODE` constants for every key on the keyboard matrix (pairs with `input.inc`'s `READ_KEY`), and `wait_any_key` for a blocking "press any key" read that returns which key in A. |
 | `lib/graphics.inc` | `BITMAP_MODE_ON addr`, `BITMAP_MODE_OFF`, `CLEAR_BITMAP addr`, `SET_SCREEN_COLOR value`, `SPRITE_INIT data, color, x, y` for bitmap/sprite setup; `wait_frame` for raster-synced timing; `sprite0_bounce_step` for animating a sprite bouncing within a rectangular area; `sprite0_explode` for a caller-colored expand-flash-hide effect (an explosion, a hit, anything that needs a sprite to visibly go away). |
 | `lib/sound.inc` | `SID_INIT`, `PLAY_SOUND freq_hi, ad, sr, waveform`, `engine_sound_on`/`engine_sound_off`. |
 
@@ -65,6 +66,10 @@ ever `jsr`s to it, so assembly fails on an undefined symbol otherwise.
 - **`input.inc`** needs one 2-byte zero-page location, `word_dest_ptr`
   (used by `extract_word`) — even if your program only ever calls
   `read_joy2`/`READ_KEY`.
+- **`keyboard.inc`** needs one 1-byte zero-page location,
+  `key_scratch` (used by `wait_any_key`) — safe to alias with any
+  other file's own required byte(s), since it's never live across a
+  call to anything else in this library.
 - **`graphics.inc`** needs one 2-byte zero-page location, `gfx_ptr`
   (used by `CLEAR_BITMAP`/`SET_SCREEN_COLOR`), plus eight more,
   unrelated, used by `sprite0_bounce_step`: `xpos` (TWO bytes — low/high
@@ -297,6 +302,56 @@ often a fire-button sound effect that fires on its own) in case it's
 useful for recognizing a similar issue in code that doesn't use this
 library.
 
+### A `demo.asm` bug `keyboard.inc` was built to make impossible (now fixed, no action needed)
+
+An earlier version of `demo.asm` checked for a "Y (restart)" keypress
+using `READ_KEY %11111011, %00000001` — which, verified against the
+keyboard matrix (see `keyboard.inc`'s header comment and
+[the standard published reference for it](https://sta.c64.org/cbm64kbdlay.html)),
+is actually the matrix position of the **5** key, not Y. The
+corresponding test in `test_demo.py` had the identical value baked in
+as "hold Y to exit promptly," so the test passed — it was quietly
+exercising the 5 key and calling it Y, the same mistake on both sides,
+which is exactly why it went unnoticed.
+
+This is fixed as of this version: `demo.asm` now uses
+`READ_KEY KEY_Y_COL, KEY_Y_ROW` from `keyboard.inc`, and
+`test_demo.py`'s simulated keypresses were corrected to match. This is
+precisely the class of mistake `keyboard.inc` exists to prevent —
+writing out a `%binary` literal by hand for a specific key is easy to
+get subtly wrong in a way that still assembles fine and still "mostly
+works" (any single wrong key still toggles based on *some* real key,
+just not the one the comment says), where a named constant would
+either be right or fail to assemble at all.
+
+### Using `keyboard.inc`
+
+```asm
+key_scratch = $fb
+        .include "lib/keyboard.inc"
+        .include "lib/input.inc"
+
+        ; Polling style, via input.inc's READ_KEY -- checks one
+        ; specific key right now, doesn't wait:
+        READ_KEY KEY_SPACE_COL, KEY_SPACE_ROW
+        bne space_is_held
+
+        ; Blocking style, via keyboard.inc's wait_any_key -- pauses
+        ; the whole program until *some* key is pressed, then reports
+        ; which one:
+        jsr wait_any_key
+        cmp #KEY_Y_CODE
+        beq handle_yes
+        cmp #KEY_N_CODE
+        beq handle_no
+```
+
+Reach for `READ_KEY` when the rest of the program needs to keep
+running while checking for a key (the usual case in a game's main
+loop — see `pong.asm`/`lander.asm`). Reach for `wait_any_key` for a
+"press any key to continue" pause, or any other spot where blocking
+completely until *some* key is pressed is genuinely what's wanted.
+
 ## Worked example
 
 `demo.asm` (alongside this file) uses all five libraries together —
@@ -435,6 +490,20 @@ was visible from the assembled bytes alone. `test_demo.py` is a working
 example of exactly this kind of test, including checking actual bitmap
 and screen memory contents after the program runs, not just that it
 completed without crashing.
+
+Testing `keyboard.inc`-based code works the same way `press_key`
+already does for `read_joy2`/`READ_KEY` elsewhere in this file's own
+tests: `m.press_key(0b11110111, 0b00000010)` (the same COL/ROW values
+`KEY_Y_COL`/`KEY_Y_ROW` expand to — a Python test can't reference an
+assembler-time symbol by name, so write out the matching binary
+literal, ideally with a comment naming which key it is, the same way
+`test_demo.py`'s own `press_key` calls already do) simulates holding
+that key before calling `run_until_return`. For `wait_any_key`
+specifically, checking the returned matrix code against the matching
+numeric value (`KEY_Y_CODE` is 25, computed as `column_index*8 +
+row_index` — see `keyboard.inc`'s header comment for the full table)
+is the same idea `test_demo.py`'s existing assertions already use for
+other return values.
 
 ## A note on how these are built
 

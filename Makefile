@@ -24,10 +24,6 @@ SINGLE_SOURCE := $(SINGLE_DIR)/c64asm.c
 
 LIB_DIR := $(BIN_DIR)/lib
 
-TST_DIR := tests
-TST_SRC := $(wildcard $(TST_DIR)/*.asm)
-TST_PRG := $(TST_SRC:.asm=.prg)
-
 EXA_DIR := examples
 EXA_SRC := $(wildcard $(EXA_DIR)/*.asm)
 EXA_PRG := $(EXA_SRC:.asm=.prg)
@@ -57,17 +53,25 @@ single:$(SINGLE_TARGET)
 # Cleanup
 clean:
 	rm -f $(TARGET) $(SRC_DIR)/*.o $(SINGLE_TARGET)
-	rm -f $(TST_PRG) $(TST_DIR)/*.lst $(TST_DIR)/vice.log
 	rm -f $(EXA_PRG) $(EXA_DIR)/*.lst $(EXA_DIR)/vice.log 
 
 cleanprg:
-	rm -f $(TST_PRG) $(TST_DIR)/*.lst $(TST_DIR)/vice.log
 	rm -f $(EXA_PRG) $(EXA_DIR)/*.lst $(EXA_DIR)/vice.log 
 	
 
 # Assembly files to PRG
+# 	@for file in $(EXA_PRG); do \
+# 		new_file=$${file%.txt}.md; \
+# 		echo "Converting $$file to $$new_file"; \
+# 		mv "$$file" "$$new_file"; \
+# 	done
 
-tests: $(TARGET) $(TST_PRG)
+
+test: 
+	@for file in $(EXA_PRG); do \
+		echo "*** TESTING $$file ***"; \
+		python3 $(EXA_DIR)/mini6502.py "$$file"; \
+	done
 
 examples: $(TARGET) $(EXA_PRG)
 

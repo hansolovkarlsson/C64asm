@@ -2411,17 +2411,22 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
             int nargs = split_args(L->operand, args, MAX_ARGS);
             for (int i = 0; i < nargs; i++) {
                 char *a = args[i];
-                char s[MAX_LINE_LEN];
-                size_t al = strlen(a);
-                if (al >= 2 && a[0]=='"' && a[al-1]=='"') {
-                    memcpy(s, a+1, al-2); s[al-2]='\0';
+                if (a[0] == '"') {
+                    char s[MAX_LINE_LEN]; size_t al = strlen(a);
+                    size_t sl = (al >= 2 && a[al-1]=='"') ? al-2 : al-1;
+                    memcpy(s, a+1, sl); s[sl]='\0';
+                    unsigned char buf[MAX_LINE_LEN]; int blen=0;
+                    ascii_to_petscii(s, buf, &blen, charset_lower);
+                    if (pass_no == 2) bb_push_n(output, buf, blen);
+                    pc += blen;
                 } else {
-                    strncpy(s, a, sizeof(s)-1); s[sizeof(s)-1]='\0';
+                    int undef = 0;
+                    long v = eval_expr(a, pc, L->line_no, &undef);
+                    if (undef && pass_no == 2)
+                        asm_error_recoverable(L->line_no, L->raw, "Undefined symbol in .text '%s'", a);
+                    if (pass_no == 2) bb_push(output, (unsigned char)(v & 0xFF));
+                    pc += 1;
                 }
-                unsigned char buf[MAX_LINE_LEN]; int blen=0;
-                ascii_to_petscii(s, buf, &blen, charset_lower);
-                if (pass_no == 2) bb_push_n(output, buf, blen);
-                pc += blen;
             }
             continue;
         }

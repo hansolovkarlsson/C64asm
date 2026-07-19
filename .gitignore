@@ -1,8 +1,9 @@
 notes/
 archive/
 new/
-mini6502/
 tests/
+tmp/
+
 
 vice.log
 todo.md
