@@ -22,7 +22,7 @@ SINGLE_DIR := single_src
 SINGLE_TARGET := $(SINGLE_DIR)/c64asm
 SINGLE_SOURCE := $(SINGLE_DIR)/c64asm.c
 
-LIB_DIR := $(BIN_DIR)/lib
+LIB_DIR := lib
 
 EXA_DIR := examples
 EXA_SRC := $(wildcard $(EXA_DIR)/*.asm)
