@@ -23,8 +23,8 @@ cc -O2 -o c64asm c64asm.c && ./c64asm <input.asm> -o <output.prg> [--listing <fi
 | `<input.asm>` | yes | Path to the assembly source file. |
 | `-o`, `--output <file>` | yes | Path to write the assembled `.prg` file. |
 | `--listing <file>` | no | Write a listing file: addresses, encoded bytes, source lines, and a final symbol table. |
-| `--vice-labels <file>` | no | Write a VICE monitor label file for debugging by name (§16). |
-| `--lib-dir <dir>` | no | Fallback search directory for `.include` (§10). See below. |
+| `--vice-labels <file>` | no | Write a VICE monitor label file for debugging by name (§17). |
+| `--lib-dir <dir>` | no | Fallback search directory for `.include` (§11). See below. |
 | `-h`, `--help` | no | Print a short usage message. |
 
 On success, the assembler prints the number of bytes assembled and the
@@ -37,7 +37,7 @@ Assembled 60 bytes, origin=$0801 -> hello.prg
 On error, it prints one or more messages to stderr identifying the line
 number and source text, and exits with a non-zero status. Most kinds of
 mistake are collected and reported together rather than stopping at the
-first one — see §17's "Multiple errors per run"; a handful of
+first one — see §18's "Multiple errors per run"; a handful of
 whole-file structural problems still stop assembly immediately.
 
 ```
@@ -46,7 +46,7 @@ Assembly error: Undefined symbol in operand 'undefined_thing' (line 2: lda undef
 
 ### `--lib-dir`: a shared library directory across projects
 
-By default (§10), a non-absolute `.include "path"` resolves relative to
+By default (§11), a non-absolute `.include "path"` resolves relative to
 the directory of the file containing that line — which is exactly why
 `.include "lib/text.inc"` works without needing to know where the
 assembler itself was invoked from, but also means every project
@@ -343,10 +343,10 @@ body_msg:
 | `.fill count, value` | `.ds`, `.res` | count, optional fill byte (default 0) | Emit `count` bytes of `value`. |
 | `.align n` | — | one expression | Pad with zero bytes, if necessary, until the program counter is a multiple of `n`. A no-op if it already is. `n` must evaluate to a positive value. A label on the same line (`sprite_data: .align 64`) is bound to the *aligned* address, matching how `.org`'s same-line label works. |
 | `.basic [start]` | — | optional label/expression | Emit a tokenized BASIC line `10 SYS <addr>` at `$0801`, where `<addr>` is automatically computed to point at the very next byte of assembled code — i.e. wherever the code following `.basic` ends up. Typing `LOAD"...",8,1` then `RUN` starts the machine code directly. Must appear before any code you want it to `SYS` into. With an operand, also emits `jmp start` immediately after the stub — see the example and gotcha below. |
-| `.cpu 6510` / `.cpu 6510x` | `.cpu 6502` (synonym for `6510`) | one mode name | Switches illegal/undocumented-opcode support (§13) off (`6510`, the default) or on (`6510x`) from this point in the file forward. |
+| `.cpu 6510` / `.cpu 6510x` | `.cpu 6502` (synonym for `6510`) | one mode name | Switches illegal/undocumented-opcode support (§14) off (`6510`, the default) or on (`6510x`) from this point in the file forward. |
 | `.charset upper` / `.charset lower` | — | one mode name | Switches how `.text`/`.asc`/`.byte` string literals encode letters (§6) from this point in the file forward: forced-uppercase (`upper`, the default) or case-preserving (`lower`). |
-| `.error "msg"` | — | one quoted string | Records a recoverable error with the given message (§11) — typically paired with `.ifdef`/`.ifndef` to check a precondition. |
-| `.warning "msg"` | — | one quoted string | Prints the given message but never affects whether assembly succeeds (§11). |
+| `.error "msg"` | — | one quoted string | Records a recoverable error with the given message (§12) — typically paired with `.ifdef`/`.ifndef` to check a precondition. |
+| `.warning "msg"` | — | one quoted string | Prints the given message but never affects whether assembly succeeds (§12). |
 | `label = expr` | `.equ` | one expression | Bind `label` to the value of `expr` (not to the current PC). See §2. |
 
 `.byte`/`.word`/`.text`/`.fill` all accept comma-separated argument lists,
@@ -486,7 +486,7 @@ A macro is expanded as plain text substitution — an ordinary label
 defined inside a macro's body is a completely ordinary label once
 expanded, which means invoking that macro a second time defines the
 *same* label name again and fails with "Symbol already defined". Use an
-`@`-prefixed **local label** (§9) instead of an ordinary one, and it
+`@`-prefixed **local label** (§10) instead of an ordinary one, and it
 just works, with nothing extra to write:
 
 ```
@@ -502,7 +502,7 @@ just works, with nothing extra to write:
 ```
 
 Each invocation automatically gets its own distinct `@loop`, with no
-suffix parameter or other bookkeeping needed — see §9 for exactly why.
+suffix parameter or other bookkeeping needed — see §10 for exactly why.
 
 ### Rules and limitations
 
@@ -543,7 +543,71 @@ suffix parameter or other bookkeeping needed — see §9 for exactly why.
 
 ---
 
-## 9. Local labels
+## 9. `.repeat`/`.dup`
+
+```
+.repeat count[, indexname]
+        ; body, optionally referencing \indexname
+.endrepeat
+```
+
+`.dup`/`.enddup` are exact synonyms for `.repeat`/`.endrepeat` — either
+closing keyword works regardless of which opening keyword was used.
+Assembles the body `count` times in a row, exactly as if you'd typed it
+out by hand that many times. With an index name, `\indexname` is
+available inside the body and takes the literal values `0`, `1`, `2`,
+... on successive repetitions — the same `\paramname` substitution a
+macro parameter (§8) uses, since `.repeat` is implemented as exactly
+that: an anonymous macro with one parameter, immediately invoked
+`count` times in a row.
+
+### Example: cycle-exact padding
+
+```asm
+        ; pad this branch to always take exactly 20 cycles either way,
+        ; regardless of which side of an earlier branch got taken
+.repeat 6
+        nop
+.endrepeat
+```
+
+### Example: a lookup table
+
+```asm
+ramp_table:
+.repeat 16, i
+        .byte \i * 16
+.endrepeat
+```
+
+produces the same 16 bytes as writing out
+`.byte 0, 16, 32, 48, 64, ..., 240` by hand.
+
+### Rules and limitations
+
+- **`count` must be a plain integer literal** (decimal, `$hex`, or
+  `%binary`) — not a label, a `=`-defined constant, or any other
+  expression. `.repeat` is expanded during the same preprocessing pass
+  as `.macro`/`.include`, entirely before pass 1 even starts building a
+  symbol table (§1), so there's no symbol table yet for a more general
+  expression to look anything up in.
+- **A local label (`@name`) inside a `.repeat` body works the same way
+  it does inside a macro body** (§8): each repetition gets its own
+  fresh scope automatically, so `@loop` in repetition 3 never collides
+  with `@loop` in repetition 7.
+- **Nesting is not supported**: a `.repeat`/`.dup` block can't contain
+  another `.repeat`/`.dup`, and can't appear inside a `.macro`
+  definition's body. A macro *invocation* inside a `.repeat` body is
+  fine, though, and works exactly as expected.
+- **Errors inside an expanded `.repeat` body are attributed to the
+  `.endrepeat`/`.enddup` line**, not the specific body line at fault —
+  the same trade-off a macro's own body has (§8), and for the same
+  reason: this assembler tracks a single line number per expansion
+  event, not a separate one for every generated line.
+
+---
+
+## 10. Local labels
 
 ```
 @name
@@ -624,7 +688,7 @@ collisions. `@`-labels make that unnecessary.
 
 ---
 
-## 10. Includes
+## 11. Includes
 
 ```
 .include "path"
@@ -703,12 +767,12 @@ different directories) is still correctly recognized as one file.
   error.
 - Once `.include` is used **anywhere** in a program, every subsequent
   error message — including ones from the top-level file itself — names
-  which file it came from (see §17). A program that never uses
+  which file it came from (see §18). A program that never uses
   `.include` sees no change in its error output at all.
 
 ---
 
-## 11. Conditional assembly
+## 12. Conditional assembly
 
 ```
 .if expr
@@ -756,7 +820,7 @@ separate copies of the surrounding code.
 
 ### What `.if` can and can't gate
 
-Unlike macros (§8) and `.include` (§10), conditional assembly is
+Unlike macros (§8) and `.include` (§11), conditional assembly is
 resolved **while assembling**, not beforehand — which is deliberate: it
 means a condition can see real constants and labels defined with `=`,
 not just things known before any actual parsing happens. The trade-off
@@ -805,7 +869,7 @@ macro or library routine's own body several `.include`s away:
 ```
 
 `.error`'s message is collected the same way any other recoverable
-error is (§17) — several independent `.error`s (two different missing
+error is (§18) — several independent `.error`s (two different missing
 zero-page symbols in two different included files, say) can all be
 reported together in one run, not just the first. It does not stop
 assembly by itself; whether assembly ultimately fails still depends on
@@ -853,7 +917,7 @@ assembled output.
 
 ---
 
-## 12. Instruction set
+## 13. Instruction set
 
 
 All 56 documented NMOS 6502/6510 mnemonics are supported. Each entry below
@@ -925,12 +989,12 @@ operand at all — both encode identically, so `ASL` and `ASL A` are
 interchangeable.
 
 The 6502/6510 also executes a further set of undocumented/illegal
-opcodes, not part of the documented instruction set above — see §13
+opcodes, not part of the documented instruction set above — see §14
 below.
 
 ---
 
-## 13. Illegal opcodes
+## 14. Illegal opcodes
 
 > **These are not standard 6502 instructions.** MOS never documented or
 > supported any of the mnemonics on this page. They're real opcode
@@ -1022,7 +1086,7 @@ avoid entirely except for deliberate experimentation.
 
 ---
 
-## 14. Output format
+## 15. Output format
 
 The `.prg` file written is:
 
@@ -1039,7 +1103,7 @@ stub is the first thing written.
 
 ---
 
-## 15. Listing file format
+## 16. Listing file format
 
 When `--listing` is given, the assembler writes a text file with one line
 per assembled instruction or data-emitting directive:
@@ -1070,7 +1134,7 @@ only real 6502 instructions appear there.
 
 ---
 
-## 16. VICE label export
+## 17. VICE label export
 
 `--vice-labels <file>` writes a file of `add_label` commands — one per
 defined symbol, the same symbols `--listing`'s own "Symbol table:"
@@ -1116,7 +1180,7 @@ VICE (cc65, for one) export labels the same way for the same reason.
 
 ---
 
-## 17. Error messages
+## 18. Error messages
 
 Each error is printed in the form:
 
@@ -1124,7 +1188,7 @@ Each error is printed in the form:
 Assembly error: <message> (line <N>: <source text>)
 ```
 
-If `.include` (§10) has been used anywhere in the program, every error
+If `.include` (§11) has been used anywhere in the program, every error
 message additionally names the specific file `<N>` refers to — including
 errors in the top-level file itself, once *any* `.include` has been
 used anywhere:
@@ -1142,7 +1206,7 @@ existed.
 Most kinds of mistake — an undefined symbol, a malformed expression, an
 addressing mode a mnemonic doesn't support, a branch out of range, a
 redefined symbol, an unrecognized mnemonic or directive, a source-
-author-placed `.error` (§11) — don't stop assembly immediately.
+author-placed `.error` (§12) — don't stop assembly immediately.
 Instead, the assembler keeps going, collects up to 20 independent
 problems, and reports all of them together:
 
@@ -1166,14 +1230,14 @@ recorded, from either pass.
 
 A small category of problems — a missing `.include`d file, a circular
 or too-deeply-nested `.include` chain, a malformed `.macro`/`.endmacro`
-or conditional-assembly (`.if`/`.elif`/`.else`/`.endif`) block, or a
-forward reference inside a `.if`/`.elif` condition — still stops
-assembly immediately with a single message, the same way every error
-did before this feature existed. These are whole-file *structural*
-problems: once one of them is true, the shape of the rest of the source
-file is ambiguous enough that there's no reasonable way to keep
-parsing it, so collecting further "errors" downstream of it wouldn't
-be meaningful.
+or `.repeat`/`.dup`/`.endrepeat`/`.enddup` block, a conditional-assembly
+(`.if`/`.elif`/`.else`/`.endif`) block, or a forward reference inside a
+`.if`/`.elif` condition — still stops assembly immediately with a
+single message, the same way every error did before this feature
+existed. These are whole-file *structural* problems: once one of them
+is true, the shape of the rest of the source file is ambiguous enough
+that there's no reasonable way to keep parsing it, so collecting
+further "errors" downstream of it wouldn't be meaningful.
 
 There's one trade-off worth knowing about: later error messages'
 line numbers and text are always exactly correct, but if an earlier
@@ -1203,20 +1267,20 @@ Common errors:
 | `circular .include detected: a.asm -> b.inc -> a.asm` | An `.include` chain loops back on itself; the message shows the full chain. |
 | `.include nested too deeply (max 16)` | More than 16 levels of nested `.include` — almost always a sign of an undetected circular include. |
 | `Bad character '...' in expression '...'` | A character the tokenizer doesn't recognize appeared in an expression. |
-| `Undefined symbol in .if/.elif expression` | A `.if`/`.elif` condition referenced a symbol not yet defined at that point in the file — forward references aren't allowed here (see §11). |
+| `Undefined symbol in .if/.elif expression` | A `.if`/`.elif` condition referenced a symbol not yet defined at that point in the file — forward references aren't allowed here (see §12). |
 | `'.elif'/'.else'/'.endif' with no matching '.if'` | One of these appeared without an open `.if`/`.ifdef`/`.ifndef` block. |
 | `'.elif' is not allowed after '.ifdef'/'.ifndef'` | `.elif` only works in an `.if` chain; use `.else` after `.ifdef`/`.ifndef` instead. |
 | `unclosed '.if'/'.ifdef'/'.ifndef' at end of file` | A conditional block's `.endif` is missing; the message names the line the block started on. |
 | `conditional nesting too deep (max 16)` | More than 16 levels of nested `.if`/`.ifdef`/`.ifndef`. |
 | `Undefined symbol in .basic start operand '...'` | `.basic`'s optional start-label operand (§7) referenced a symbol never defined anywhere in the file. |
-| `Illegal/undocumented opcode '...' used without '.cpu 6510x'` | An illegal/undocumented opcode (§13) was used before `.cpu 6510x` enabled them. |
-| `Unknown .cpu mode '...'` | `.cpu`'s operand (§13) was something other than `6510`, `6510x`, or `6502`. |
+| `Illegal/undocumented opcode '...' used without '.cpu 6510x'` | An illegal/undocumented opcode (§14) was used before `.cpu 6510x` enabled them. |
+| `Unknown .cpu mode '...'` | `.cpu`'s operand (§14) was something other than `6510`, `6510x`, or `6502`. |
 | `Unknown .charset mode '...'` | `.charset`'s operand (§6) was something other than `upper` or `lower`. |
-| `.error requires a quoted message string, e.g. .error "message"` | `.error`'s (or `.warning`'s) operand (§11) wasn't a properly quoted string. |
+| `.error requires a quoted message string, e.g. .error "message"` | `.error`'s (or `.warning`'s) operand (§12) wasn't a properly quoted string. |
 
 ---
 
-## 18. Known limitations
+## 19. Known limitations
 
 - **Zero-page sizing of forward-referenced labels.** The assembler picks
   zero-page vs. absolute addressing based on whether an operand's value is
@@ -1231,24 +1295,26 @@ Common errors:
   addresses under `$100`, e.g. pointers in `$FB`–`$FE`) are conventionally
   defined with `=` *before* they're used, which sidesteps the issue
   entirely, and is good practice regardless.
-- **Macros (§8), local labels (§9), includes (§10), and conditional
-  assembly (§11) exist but are intentionally simple:** macros must be
-  defined before use; `.if`/`.elif` conditions can't reference a
-  forward-declared symbol (§11); and `.if` can gate instructions and
-  data but not which `.macro` gets defined or which file gets
-  `.include`d, since those are resolved before `.if` is evaluated
-  (§11). `.include` doesn't need manual include guards even without
-  conditional assembly backing them — see §10.
-- **Illegal/undocumented opcodes (§13) are opt-in, and a few are
+- **Macros (§8), `.repeat`/`.dup` (§9), local labels (§10), includes
+  (§11), and conditional assembly (§12) exist but are intentionally
+  simple:** macros must be defined before use; `.repeat`/`.dup`'s count
+  must be a plain integer literal, not a symbol or expression (§9);
+  `.if`/`.elif` conditions can't reference a forward-declared symbol
+  (§12); and `.if` can gate instructions and data but not which
+  `.macro` gets defined or which file gets `.include`d, since those are
+  resolved before `.if` is evaluated (§12). `.include` doesn't need
+  manual include guards even without conditional assembly backing them
+  — see §11.
+- **Illegal/undocumented opcodes (§14) are opt-in, and a few are
   unstable even when enabled.** They're refused by default (an assembly
   error, same as any other unrecognized mnemonic) until `.cpu 6510x`
-  turns them on; a handful of them are noted in §13's table as
+  turns them on; a handful of them are noted in §14's table as
   unstable or highly unstable even on real NMOS hardware, and none of
   them exist at all on non-NMOS 6502 variants.
 - **Multi-error reporting has a noise trade-off.** A single run can
-  surface several independent mistakes (see §17), but messages after
+  surface several independent mistakes (see §18), but messages after
   the first one can occasionally be downstream noise rather than
-  genuinely separate problems — see the note at the end of §17.
+  genuinely separate problems — see the note at the end of §18.
 - **`.charset lower` (§6) only controls assembled bytes, not the C64's
   actual runtime character set** — that's separate hardware state the
   assembler has no way to touch, so `.charset lower` text needs to be
@@ -1260,7 +1326,7 @@ Common errors:
 
 ---
 
-## 19. Complete example
+## 20. Complete example
 
 ```asm
 ; hello.asm - prints a message and cycles the border color

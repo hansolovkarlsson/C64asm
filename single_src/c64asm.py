@@ -213,6 +213,9 @@ DIRECTIVES = {'.org', '*=', '.byte', '.db', '.word', '.dw', '.text', '.asc',
 MAX_MACRO_EXPANSION_DEPTH = 16   # guards against runaway/infinite recursive macros
 MAX_INCLUDE_DEPTH = 16           # guards against runaway/circular .include chains
 MAX_COND_DEPTH = 16               # guards against runaway .if/.ifdef nesting
+MAX_REPEAT_COUNT = 65536          # guards against a mistyped .repeat/.dup count
+                                     # (e.g. a stray extra digit) generating an
+                                     # enormous, memory-exhausting expansion
 
 
 # Filename-aware error messages, for .include support -- see the
@@ -1061,6 +1064,10 @@ class MacroProcessor:
     def __init__(self, emit):
         self.macros = {}          # NAME.upper() -> MacroDef
         self.capturing = None     # MacroDef currently being defined, or None
+        self.repeat_capturing = None   # [count, index_name, body_lines] for
+                                          # a '.repeat'/'.dup' block currently
+                                          # being captured, or None -- see
+                                          # process_line() and _expand_repeat()
         self.expansion_depth = 0
         self.emit = emit
         self.current_scope = 0    # scope 0: everything before the first
@@ -1089,7 +1096,31 @@ class MacroProcessor:
                 raise AsmError(
                     f"nested macro definitions are not supported (already defining '{self.capturing.name}')",
                     line_no, raw_line)
+            if first_tok.upper() in ('.REPEAT', '.DUP'):
+                raise AsmError(
+                    "'.repeat'/'.dup' cannot appear inside a '.macro' body "
+                    "-- define the macro first, then use '.repeat' to "
+                    "invoke it, if that's what you need", line_no, raw_line)
             self.capturing.body.append(stripped)
+            return
+
+        if self.repeat_capturing is not None:
+            first_tok = trimmed.split(None, 1)[0] if trimmed else ''
+            if first_tok.upper() in ('.ENDREPEAT', '.ENDDUP'):
+                count, index_name, body = self.repeat_capturing
+                self.repeat_capturing = None
+                self._expand_repeat(count, index_name, body, filename, line_no)
+                return
+            if first_tok.upper() in ('.REPEAT', '.DUP'):
+                raise AsmError(
+                    "nested '.repeat'/'.dup' blocks are not supported",
+                    line_no, raw_line)
+            if first_tok.upper() == '.MACRO':
+                raise AsmError(
+                    "'.macro' cannot be defined inside a '.repeat'/'.dup' "
+                    "block -- define it before the '.repeat' instead",
+                    line_no, raw_line)
+            self.repeat_capturing[2].append(stripped)
             return
 
         if not trimmed:
@@ -1118,6 +1149,27 @@ class MacroProcessor:
 
         if first_tok.upper() in ('.ENDMACRO', '.ENDM'):
             raise AsmError("'.endmacro' with no matching '.macro'", line_no, raw_line)
+
+        if first_tok.upper() in ('.REPEAT', '.DUP'):
+            rest = trimmed[len(first_tok):].strip()
+            parts = [p.strip() for p in split_args(rest)] if rest else []
+            if not parts:
+                raise AsmError(
+                    "'.repeat'/'.dup' requires a count, e.g. '.repeat 16' "
+                    "or '.repeat 16, i'", line_no, raw_line)
+            if len(parts) > 2:
+                raise AsmError(
+                    "'.repeat'/'.dup' takes at most a count and an index "
+                    "name (e.g. '.repeat 16, i'), got too many arguments",
+                    line_no, raw_line)
+            count = self._parse_repeat_count(parts[0], line_no, raw_line)
+            index_name = parts[1] if len(parts) > 1 else None
+            self.repeat_capturing = [count, index_name, []]
+            return
+
+        if first_tok.upper() in ('.ENDREPEAT', '.ENDDUP'):
+            raise AsmError("'.endrepeat'/'.enddup' with no matching '.repeat'/'.dup'",
+                            line_no, raw_line)
 
         if first_tok.upper() == '.INCLUDE':
             rest = trimmed[len(first_tok):].strip()
@@ -1159,6 +1211,70 @@ class MacroProcessor:
             return
 
         self._emit_final(raw_line, filename, line_no)
+
+    def _expand_repeat(self, count, index_name, body, filename, line_no):
+        """Expands a captured '.repeat'/'.dup' block's body `count`
+        times, in order -- essentially an anonymous macro with zero or
+        one parameter (index_name), immediately invoked that many times
+        with the loop index (0, 1, 2, ...) as the argument, reusing the
+        exact same \\param substitution (_substitute) and per-invocation
+        local-label scoping every ordinary macro invocation already
+        gets (see the module comment above MacroDef). line_no here is
+        the '.endrepeat'/'.enddup' line's own number, used for any
+        error raised by the expansion itself (a too-deep nesting from a
+        macro invoked inside the body, say) -- individual body lines
+        keep whatever line_no they were originally captured with,
+        exactly like a macro body's lines do."""
+        self.expansion_depth += 1
+        if self.expansion_depth > MAX_MACRO_EXPANSION_DEPTH:
+            raise AsmError(
+                "'.repeat'/'.dup' nested too deep (via a macro invocation "
+                "inside its own body?)", line_no)
+        for i in range(count):
+            self.scope_stack.append(self.current_scope)
+            self.current_scope = self.next_scope
+            self.next_scope += 1
+
+            for body_line in body:
+                if index_name:
+                    substituted = self._substitute(body_line, [index_name], [str(i)], line_no)
+                else:
+                    substituted = body_line
+                self.process_line(substituted, filename, line_no)
+
+            self.current_scope = self.scope_stack.pop()
+        self.expansion_depth -= 1
+
+    @staticmethod
+    def _parse_repeat_count(text, line_no, raw_line):
+        """Parses '.repeat'/'.dup's count argument -- a single plain
+        integer literal (decimal, $hex, or %binary), deliberately NOT a
+        full expression: this runs during macro/include preprocessing,
+        entirely before pass 1 even starts building a symbol table, so
+        there's no way to look up a label or forward-declared constant
+        here even if the syntax allowed writing one."""
+        t = text.strip()
+        try:
+            if t.startswith('$'):
+                n = int(t[1:], 16)
+            elif t.startswith('%'):
+                n = int(t[1:], 2)
+            else:
+                n = int(t, 10)
+        except ValueError:
+            raise AsmError(
+                f"'.repeat'/'.dup' count must be a plain integer literal "
+                f"(decimal, $hex, or %binary) -- symbols and expressions "
+                f"aren't available yet at this point in assembly, got '{text}'",
+                line_no, raw_line)
+        if n < 0:
+            raise AsmError(f"'.repeat'/'.dup' count must not be negative (got {n})",
+                            line_no, raw_line)
+        if n > MAX_REPEAT_COUNT:
+            raise AsmError(
+                f"'.repeat'/'.dup' count {n} exceeds the maximum ({MAX_REPEAT_COUNT})",
+                line_no, raw_line)
+        return n
 
     def _emit_final(self, raw_line, filename, line_no):
         """The single choke point every genuinely final (non-macro,

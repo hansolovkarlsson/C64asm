@@ -77,6 +77,6 @@ examples: $(TARGET) $(EXA_PRG)
 
 %.prg: %.asm
 	echo $(TARGET) $< -o $@
-	$(TARGET) $< -o $@ --lib-dir $(LIB_DIR) --listing $(<:.asm=.lst) --vice-labels $(<:.asm=.vice)
+	$(TARGET) $< -o $@ --lib-dir $(LIB_DIR) --listing $(<:.asm=.lst) --vice-labels $(<:.asm=.vice) >> asm.log
 
 

@@ -33,6 +33,11 @@
 #define MAX_MACRO_PARAMS        8    /* most parameters one macro can declare */
 #define MAX_MACRO_BODY_LINES    200  /* longest macro body, in lines */
 #define MAX_MACRO_EXPANSION_DEPTH 16 /* guards against runaway/infinite recursive macros */
+#define MAX_REPEAT_COUNT     65536   /* guards against a mistyped .repeat/.dup
+                                         count (e.g. a stray extra digit)
+                                         generating an enormous,
+                                         memory-exhausting expansion */
+#define MAX_REPEAT_BODY_LINES   200  /* longest '.repeat'/'.dup' body, in lines */
 
 #define MAX_FILENAME_LEN 256    /* longest display filename this assembler will
                                     track per line -- deliberately much smaller

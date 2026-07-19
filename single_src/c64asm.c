@@ -1220,6 +1220,11 @@ static int split_args(const char *operand, char args[][MAX_LINE_LEN], int max_ar
 #define MAX_MACRO_PARAMS 8
 #define MAX_MACRO_BODY_LINES 200
 #define MAX_MACRO_EXPANSION_DEPTH 16
+#define MAX_REPEAT_COUNT 65536   /* guards against a mistyped .repeat/.dup
+                                     count (e.g. a stray extra digit)
+                                     generating an enormous,
+                                     memory-exhausting expansion */
+#define MAX_REPEAT_BODY_LINES 200
 
 #define LOCAL_LABEL_PREFIX "__local"
 
@@ -1235,6 +1240,22 @@ static MacroDef macros[MAX_MACROS];
 static int macro_count = 0;
 static MacroDef *capturing_macro = NULL;
 static int macro_expansion_depth = 0;
+
+/* A '.repeat'/'.dup' block currently being captured -- essentially an
+ * anonymous, single-use MacroDef with zero or one parameter (the loop
+ * index), expanded immediately at '.endrepeat'/'.enddup' rather than
+ * deferred to a later separate invocation the way a named macro is.
+ * See expand_repeat() below. */
+typedef struct {
+    long count;
+    char index_name[MAX_IDENT];
+    int has_index;
+    char body[MAX_REPEAT_BODY_LINES][MAX_LINE_LEN];
+    int body_line_count;
+} RepeatCapture;
+
+static RepeatCapture repeat_capture_storage;
+static RepeatCapture *capturing_repeat = NULL;
 
 /* current_scope: the scope id used to mangle @names right now.
  * next_scope: an ever-increasing counter; a fresh value is handed out
@@ -1305,6 +1326,98 @@ static int line_defines_global_label(const char *trimmed) {
     size_t i = 0;
     while (trimmed[i] && is_ident_char(trimmed[i])) i++;
     return trimmed[i] == ':';
+}
+
+/* Parses '.repeat'/'.dup's count argument -- a single plain integer
+ * literal (decimal, $hex, or %binary), deliberately NOT a full
+ * expression: this runs during macro/include preprocessing, entirely
+ * before pass 1 even starts building a symbol table, so there's no way
+ * to look up a label or forward-declared constant here even if the
+ * syntax allowed writing one. */
+/* Forward-declared here since expand_repeat() below needs to call it
+ * (to process each expanded body line, exactly like a macro
+ * invocation's own body lines are processed), but its real definition
+ * comes later in this file, same as it already does for ordinary
+ * macro invocation. */
+static void macro_process_line(const char *raw_line, const char *filename, int line_no);
+
+static long parse_repeat_count(const char *text, int line_no, const char *raw_line) {
+    char t[MAX_LINE_LEN];
+    strncpy(t, text, sizeof(t) - 1); t[sizeof(t) - 1] = '\0';
+    trim(t);
+    char *end = NULL;
+    long n;
+    if (t[0] == '$') {
+        n = strtol(t + 1, &end, 16);
+    } else if (t[0] == '%') {
+        n = strtol(t + 1, &end, 2);
+    } else {
+        n = strtol(t, &end, 10);
+    }
+    if (t[0] == '\0' || end == NULL || *end != '\0' || end == t ||
+        (t[0] == '$' && end == t + 1) || (t[0] == '%' && end == t + 1)) {
+        asm_error(line_no, raw_line,
+            "'.repeat'/'.dup' count must be a plain integer literal "
+            "(decimal, $hex, or %%binary) -- symbols and expressions "
+            "aren't available yet at this point in assembly, got '%s'", text);
+    }
+    if (n < 0)
+        asm_error(line_no, raw_line, "'.repeat'/'.dup' count must not be negative (got %ld)", n);
+    if (n > MAX_REPEAT_COUNT)
+        asm_error(line_no, raw_line, "'.repeat'/'.dup' count %ld exceeds the maximum (%d)",
+                  n, MAX_REPEAT_COUNT);
+    return n;
+}
+
+/* Expands a captured '.repeat'/'.dup' block's body `count` times, in
+ * order -- essentially an anonymous macro with zero or one parameter
+ * (the loop index), immediately invoked that many times with the loop
+ * index (0, 1, 2, ...) as the argument, reusing the exact same
+ * macro_substitute() and per-invocation local-label scoping every
+ * ordinary macro invocation already gets. */
+static void expand_repeat(RepeatCapture *r, const char *filename, int line_no) {
+    macro_expansion_depth++;
+    if (macro_expansion_depth > MAX_MACRO_EXPANSION_DEPTH)
+        asm_error(line_no, NULL,
+            "'.repeat'/'.dup' nested too deep (via a macro invocation "
+            "inside its own body?)");
+
+    MacroDef fake;   /* macro_substitute() needs a MacroDef* to look up
+                         parameter names against -- build a throwaway
+                         one-parameter (or zero-parameter) one here
+                         rather than changing that function's signature
+                         just for this caller */
+    fake.param_count = 0;
+    if (r->has_index) {
+        strncpy(fake.params[0], r->index_name, sizeof(fake.params[0]) - 1);
+        fake.params[0][sizeof(fake.params[0]) - 1] = '\0';
+        fake.param_count = 1;
+    }
+
+    for (long i = 0; i < r->count; i++) {
+        scope_stack[scope_stack_top++] = current_scope;
+        current_scope = next_scope;
+        next_scope++;
+
+        char arg[32];
+        snprintf(arg, sizeof(arg), "%ld", i);
+        char (*args)[MAX_LINE_LEN] = NULL;
+        char single_arg[1][MAX_LINE_LEN];
+        if (r->has_index) {
+            strncpy(single_arg[0], arg, sizeof(single_arg[0]) - 1);
+            single_arg[0][sizeof(single_arg[0]) - 1] = '\0';
+            args = single_arg;
+        }
+
+        for (int bi = 0; bi < r->body_line_count; bi++) {
+            char substituted[MAX_LINE_LEN];
+            macro_substitute(r->body[bi], &fake, args, substituted, sizeof(substituted), line_no);
+            macro_process_line(substituted, filename, line_no);
+        }
+
+        current_scope = scope_stack[--scope_stack_top];
+    }
+    macro_expansion_depth--;
 }
 
 /* Replaces every @name in `text` with a scope-specific global name,
@@ -1622,12 +1735,41 @@ static void macro_process_line(const char *raw_line, const char *filename, int l
             asm_error(line_no, raw_line,
                       "nested macro definitions are not supported (already defining '%s')",
                       capturing_macro->name);
+        if (strcasecmp(first, ".repeat") == 0 || strcasecmp(first, ".dup") == 0)
+            asm_error(line_no, raw_line,
+                      "'.repeat'/'.dup' cannot appear inside a '.macro' body "
+                      "-- define the macro first, then use '.repeat' to "
+                      "invoke it, if that's what you need");
         if (capturing_macro->body_line_count >= MAX_MACRO_BODY_LINES)
             asm_error(line_no, raw_line, "Macro '%s' body too long (max %d lines)",
                       capturing_macro->name, MAX_MACRO_BODY_LINES);
         strncpy(capturing_macro->body[capturing_macro->body_line_count], line, MAX_LINE_LEN - 1);
         capturing_macro->body[capturing_macro->body_line_count][MAX_LINE_LEN-1] = '\0';
         capturing_macro->body_line_count++;
+        return;
+    }
+
+    if (capturing_repeat != NULL) {
+        char first[MAX_IDENT];
+        first_token(trimmed, first, sizeof(first));
+        if (strcasecmp(first, ".endrepeat") == 0 || strcasecmp(first, ".enddup") == 0) {
+            RepeatCapture *r = capturing_repeat;
+            capturing_repeat = NULL;
+            expand_repeat(r, filename, line_no);
+            return;
+        }
+        if (strcasecmp(first, ".repeat") == 0 || strcasecmp(first, ".dup") == 0)
+            asm_error(line_no, raw_line, "nested '.repeat'/'.dup' blocks are not supported");
+        if (strcasecmp(first, ".macro") == 0)
+            asm_error(line_no, raw_line,
+                      "'.macro' cannot be defined inside a '.repeat'/'.dup' "
+                      "block -- define it before the '.repeat' instead");
+        if (capturing_repeat->body_line_count >= MAX_REPEAT_BODY_LINES)
+            asm_error(line_no, raw_line, "'.repeat'/'.dup' body too long (max %d lines)",
+                      MAX_REPEAT_BODY_LINES);
+        strncpy(capturing_repeat->body[capturing_repeat->body_line_count], line, MAX_LINE_LEN - 1);
+        capturing_repeat->body[capturing_repeat->body_line_count][MAX_LINE_LEN-1] = '\0';
+        capturing_repeat->body_line_count++;
         return;
     }
 
@@ -1682,6 +1824,37 @@ static void macro_process_line(const char *raw_line, const char *filename, int l
 
     if (strcasecmp(first, ".endmacro") == 0 || strcasecmp(first, ".endm") == 0)
         asm_error(line_no, raw_line, "'.endmacro' with no matching '.macro'");
+
+    if (strcasecmp(first, ".repeat") == 0 || strcasecmp(first, ".dup") == 0) {
+        char rest[MAX_LINE_LEN];
+        strncpy(rest, trimmed + strlen(first), sizeof(rest)-1); rest[sizeof(rest)-1]='\0';
+        trim(rest);
+        if (rest[0] == '\0')
+            asm_error(line_no, raw_line,
+                "'.repeat'/'.dup' requires a count, e.g. '.repeat 16' or '.repeat 16, i'");
+        char pargs[MAX_ARGS][MAX_LINE_LEN];
+        int nargs = split_args(rest, pargs, MAX_ARGS);
+        if (nargs > 2)
+            asm_error(line_no, raw_line,
+                "'.repeat'/'.dup' takes at most a count and an index name "
+                "(e.g. '.repeat 16, i'), got too many arguments");
+        repeat_capture_storage.count = parse_repeat_count(pargs[0], line_no, raw_line);
+        repeat_capture_storage.has_index = (nargs > 1);
+        if (nargs > 1) {
+            char idx[MAX_LINE_LEN];
+            strncpy(idx, pargs[1], sizeof(idx)-1); idx[sizeof(idx)-1]='\0';
+            trim(idx);
+            strncpy(repeat_capture_storage.index_name, idx,
+                    sizeof(repeat_capture_storage.index_name) - 1);
+            repeat_capture_storage.index_name[sizeof(repeat_capture_storage.index_name) - 1] = '\0';
+        }
+        repeat_capture_storage.body_line_count = 0;
+        capturing_repeat = &repeat_capture_storage;
+        return;
+    }
+
+    if (strcasecmp(first, ".endrepeat") == 0 || strcasecmp(first, ".enddup") == 0)
+        asm_error(line_no, raw_line, "'.endrepeat'/'.enddup' with no matching '.repeat'/'.dup'");
 
     if (strcasecmp(first, ".include") == 0) {
         char rest[MAX_LINE_LEN];
