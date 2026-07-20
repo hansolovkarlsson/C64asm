@@ -28,6 +28,25 @@ static size_t scan_ident(const char *s, size_t pos, char *out, size_t outsz) {
     return j;
 }
 
+/* Like scan_ident() above, but also accepts '.' mid-name -- used only
+ * for the "identifier = expr" constant-assignment form below, so that
+ * a '.struct'-generated field symbol ("Room.north = 2") parses
+ * correctly. Deliberately NOT used for scan_ident()'s other call site
+ * (ordinary "label:" recognition further down), which stays exactly
+ * as strict as it always was -- nothing before '.struct' existed ever
+ * produced or relied on a dotted name in either position, so this is
+ * purely additive for the one case that actually needs it. */
+static size_t scan_ident_dotted(const char *s, size_t pos, char *out, size_t outsz) {
+    size_t j = pos;
+    size_t n = 0;
+    while (s[j] && (is_ident_char(s[j]) || s[j] == '.')) {
+        if (n + 1 < outsz) out[n++] = s[j];
+        j++;
+    }
+    out[n] = '\0';
+    return j;
+}
+
 void split_line(const char *raw_line, int line_no, SourceLine *out) {
     char line[MAX_LINE_LEN];
     strncpy(line, raw_line, sizeof(line) - 1);
@@ -79,7 +98,7 @@ void split_line(const char *raw_line, int line_no, SourceLine *out) {
      * instruction instead. */
     if (is_ident_start(stripped[0])) {
         char ident[MAX_IDENT];
-        size_t after = scan_ident(stripped, 0, ident, sizeof(ident));
+        size_t after = scan_ident_dotted(stripped, 0, ident, sizeof(ident));
         size_t i = after;
         while (stripped[i] == ' ' || stripped[i] == '\t') i++;
         if (stripped[i] == '=' && stripped[i+1] != '=') {

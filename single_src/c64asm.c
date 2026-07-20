@@ -966,6 +966,25 @@ static size_t scan_ident(const char *s, size_t pos, char *out, size_t outsz) {
     return j;
 }
 
+/* Like scan_ident() above, but also accepts '.' mid-name -- used only
+ * for the "identifier = expr" constant-assignment form below, so that
+ * a '.struct'-generated field symbol ("Room.north = 2") parses
+ * correctly. Deliberately NOT used for scan_ident()'s other call site
+ * (ordinary "label:" recognition further down), which stays exactly
+ * as strict as it always was -- nothing before '.struct' existed ever
+ * produced or relied on a dotted name in either position, so this is
+ * purely additive for the one case that actually needs it. */
+static size_t scan_ident_dotted(const char *s, size_t pos, char *out, size_t outsz) {
+    size_t j = pos;
+    size_t n = 0;
+    while (s[j] && (is_ident_char(s[j]) || s[j] == '.')) {
+        if (n + 1 < outsz) out[n++] = s[j];
+        j++;
+    }
+    out[n] = '\0';
+    return j;
+}
+
 static void split_line(const char *raw_line, int line_no, SourceLine *out) {
     char line[MAX_LINE_LEN];
     strncpy(line, raw_line, sizeof(line) - 1);
@@ -1010,7 +1029,7 @@ static void split_line(const char *raw_line, int line_no, SourceLine *out) {
     /* "identifier = expr" constant assignment */
     if (is_ident_start(stripped[0])) {
         char ident[MAX_IDENT];
-        size_t after = scan_ident(stripped, 0, ident, sizeof(ident));
+        size_t after = scan_ident_dotted(stripped, 0, ident, sizeof(ident));
         size_t i = after;
         while (stripped[i] == ' ' || stripped[i] == '\t') i++;
         if (stripped[i] == '=' && stripped[i+1] != '=') {
@@ -1257,6 +1276,19 @@ typedef struct {
 static RepeatCapture repeat_capture_storage;
 static RepeatCapture *capturing_repeat = NULL;
 
+/* A '.struct' block currently being captured -- its body lines are
+ * kept as raw text, same as RepeatCapture's, and parsed for field
+ * declarations only once '.endstruct' is reached. See
+ * expand_struct() below. */
+typedef struct {
+    char name[MAX_IDENT];
+    char body[MAX_REPEAT_BODY_LINES][MAX_LINE_LEN];
+    int body_line_count;
+} StructCapture;
+
+static StructCapture struct_capture_storage;
+static StructCapture *capturing_struct = NULL;
+
 /* current_scope: the scope id used to mangle @names right now.
  * next_scope: an ever-increasing counter; a fresh value is handed out
  *             for every new scope, so no two scopes ever share an id.
@@ -1418,6 +1450,95 @@ static void expand_repeat(RepeatCapture *r, const char *filename, int line_no) {
         current_scope = scope_stack[--scope_stack_top];
     }
     macro_expansion_depth--;
+}
+
+static int is_valid_ident(const char *s) {
+    if (!s[0] || !is_ident_start(s[0])) return 0;
+    for (const char *p = s + 1; *p; p++)
+        if (!is_ident_char(*p)) return 0;
+    return 1;
+}
+
+/* Generates one "StructName.field = offset" line and feeds it through
+ * macro_process_line() -- the same '=' assignment pipeline an ordinary
+ * hand-written constant goes through, so no separate symbol-table
+ * code is needed here at all. */
+static void emit_struct_field(const char *struct_name, const char *field_name, long offset,
+                               const char *filename, int line_no, const char *raw_line) {
+    if (!is_valid_ident(field_name))
+        asm_error(line_no, raw_line, "'.struct %s': '%s' is not a valid field name",
+                  struct_name, field_name);
+    char synthetic[MAX_LINE_LEN];
+    snprintf(synthetic, sizeof(synthetic), "%s.%s = %ld", struct_name, field_name, offset);
+    macro_process_line(synthetic, filename, line_no);
+}
+
+/* Expands a captured '.struct' block's body into a set of
+ * Name.field = offset symbol-assignment lines, one per declared
+ * field, plus a final Name.size giving the whole struct's total byte
+ * width. Nothing here emits any actual bytes or advances the
+ * assembled program's own address -- a '.struct' block is purely a
+ * compile-time source of named offsets, the same as a plain '='
+ * constant is.
+ *
+ * line_no here is the '.endstruct' line's own number, used for errors
+ * that aren't tied to one specific field declaration; a malformed
+ * individual field declaration's error instead points at that
+ * field's own line, using the body line's original text. */
+static void expand_struct(StructCapture *s, const char *filename, int line_no) {
+    long offset = 0;
+    for (int bi = 0; bi < s->body_line_count; bi++) {
+        char stripped[MAX_LINE_LEN];
+        strncpy(stripped, s->body[bi], sizeof(stripped) - 1); stripped[sizeof(stripped)-1] = '\0';
+        trim(stripped);
+        if (stripped[0] == '\0') continue;
+
+        char directive[MAX_IDENT];
+        first_token(stripped, directive, sizeof(directive));
+        char rest[MAX_LINE_LEN];
+        strncpy(rest, stripped + strlen(directive), sizeof(rest) - 1); rest[sizeof(rest)-1] = '\0';
+        trim(rest);
+
+        char lower[MAX_IDENT];
+        strncpy(lower, directive, sizeof(lower) - 1); lower[sizeof(lower)-1] = '\0';
+        for (char *p = lower; *p; p++) *p = (char)tolower((unsigned char)*p);
+
+        if (strcmp(lower, ".byte") == 0 || strcmp(lower, ".db") == 0 ||
+            strcmp(lower, ".word") == 0 || strcmp(lower, ".dw") == 0) {
+            int field_size = (strcmp(lower, ".byte") == 0 || strcmp(lower, ".db") == 0) ? 1 : 2;
+            if (rest[0] == '\0')
+                asm_error(line_no, stripped, "'.struct %s': '%s' requires at least one field name",
+                          s->name, directive);
+            char fields[MAX_ARGS][MAX_LINE_LEN];
+            int nfields = split_args(rest, fields, MAX_ARGS);
+            for (int fi = 0; fi < nfields; fi++) {
+                trim(fields[fi]);
+                emit_struct_field(s->name, fields[fi], offset, filename, line_no, stripped);
+                offset += field_size;
+            }
+        } else if (strcmp(lower, ".res") == 0 || strcmp(lower, ".ds") == 0 || strcmp(lower, ".fill") == 0) {
+            char args[MAX_ARGS][MAX_LINE_LEN];
+            int nargs = split_args(rest, args, MAX_ARGS);
+            if (nargs != 2)
+                asm_error(line_no, stripped,
+                    "'.struct %s': '%s' requires exactly a field name and a byte "
+                    "count, e.g. '.res buf, 16'", s->name, directive);
+            trim(args[0]); trim(args[1]);
+            long count = parse_repeat_count(args[1], line_no, stripped);
+            /* parse_repeat_count()'s own restriction to a plain integer
+             * literal (no symbols/expressions) applies here too, and for
+             * the same reason: struct field offsets, like a .repeat
+             * count, need to be known during this same preprocessing
+             * pass, before pass 1 builds a symbol table. */
+            emit_struct_field(s->name, args[0], offset, filename, line_no, stripped);
+            offset += count;
+        } else {
+            asm_error(line_no, stripped,
+                "'.struct %s': '%s' is not a valid field declaration -- "
+                "expected .byte, .word, or .res", s->name, directive);
+        }
+    }
+    emit_struct_field(s->name, "size", offset, filename, line_no, NULL);
 }
 
 /* Replaces every @name in `text` with a scope-specific global name,
@@ -1758,6 +1879,10 @@ static void macro_process_line(const char *raw_line, const char *filename, int l
                       "'.repeat'/'.dup' cannot appear inside a '.macro' body "
                       "-- define the macro first, then use '.repeat' to "
                       "invoke it, if that's what you need");
+        if (strcasecmp(first, ".struct") == 0)
+            asm_error(line_no, raw_line,
+                      "'.struct' cannot appear inside a '.macro' body -- "
+                      "define it before the '.macro' instead");
         if (capturing_macro->body_line_count >= MAX_MACRO_BODY_LINES)
             asm_error(line_no, raw_line, "Macro '%s' body too long (max %d lines)",
                       capturing_macro->name, MAX_MACRO_BODY_LINES);
@@ -1782,12 +1907,44 @@ static void macro_process_line(const char *raw_line, const char *filename, int l
             asm_error(line_no, raw_line,
                       "'.macro' cannot be defined inside a '.repeat'/'.dup' "
                       "block -- define it before the '.repeat' instead");
+        if (strcasecmp(first, ".struct") == 0)
+            asm_error(line_no, raw_line,
+                      "'.struct' cannot appear inside a '.repeat'/'.dup' "
+                      "block -- define it before the '.repeat' instead");
         if (capturing_repeat->body_line_count >= MAX_REPEAT_BODY_LINES)
             asm_error(line_no, raw_line, "'.repeat'/'.dup' body too long (max %d lines)",
                       MAX_REPEAT_BODY_LINES);
         strncpy(capturing_repeat->body[capturing_repeat->body_line_count], line, MAX_LINE_LEN - 1);
         capturing_repeat->body[capturing_repeat->body_line_count][MAX_LINE_LEN-1] = '\0';
         capturing_repeat->body_line_count++;
+        return;
+    }
+
+    if (capturing_struct != NULL) {
+        char first[MAX_IDENT];
+        first_token(trimmed, first, sizeof(first));
+        if (strcasecmp(first, ".endstruct") == 0) {
+            StructCapture *s = capturing_struct;
+            capturing_struct = NULL;
+            expand_struct(s, filename, line_no);
+            return;
+        }
+        if (strcasecmp(first, ".struct") == 0)
+            asm_error(line_no, raw_line,
+                      "nested '.struct' definitions are not supported "
+                      "(already defining '%s')", capturing_struct->name);
+        if (strcasecmp(first, ".macro") == 0 || strcasecmp(first, ".repeat") == 0 ||
+            strcasecmp(first, ".dup") == 0)
+            asm_error(line_no, raw_line,
+                      "'%s' cannot appear inside a '.struct' body -- only "
+                      "field declarations (.byte, .word, .res) are allowed there",
+                      first);
+        if (capturing_struct->body_line_count >= MAX_REPEAT_BODY_LINES)
+            asm_error(line_no, raw_line, "'.struct' body too long (max %d lines)",
+                      MAX_REPEAT_BODY_LINES);
+        strncpy(capturing_struct->body[capturing_struct->body_line_count], line, MAX_LINE_LEN - 1);
+        capturing_struct->body[capturing_struct->body_line_count][MAX_LINE_LEN-1] = '\0';
+        capturing_struct->body_line_count++;
         return;
     }
 
@@ -1873,6 +2030,35 @@ static void macro_process_line(const char *raw_line, const char *filename, int l
 
     if (strcasecmp(first, ".endrepeat") == 0 || strcasecmp(first, ".enddup") == 0)
         asm_error(line_no, raw_line, "'.endrepeat'/'.enddup' with no matching '.repeat'/'.dup'");
+
+    if (strcasecmp(first, ".struct") == 0) {
+        char rest[MAX_LINE_LEN];
+        strncpy(rest, trimmed + strlen(first), sizeof(rest)-1); rest[sizeof(rest)-1]='\0';
+        trim(rest);
+        if (rest[0] == '\0')
+            asm_error(line_no, raw_line, "'.struct' requires a name, e.g. '.struct Room'");
+        char sname[MAX_LINE_LEN];
+        size_t sp = 0;
+        while (rest[sp] && !isspace((unsigned char)rest[sp])) sp++;
+        memcpy(sname, rest, sp); sname[sp] = '\0';
+        if (!is_valid_ident(sname))
+            asm_error(line_no, raw_line, "'%s' is not a valid struct name", sname);
+        char extra[MAX_LINE_LEN];
+        strncpy(extra, rest + sp, sizeof(extra)-1); extra[sizeof(extra)-1]='\0';
+        trim(extra);
+        if (extra[0] != '\0')
+            asm_error(line_no, raw_line,
+                "'.struct' takes only a name -- field declarations go on "
+                "their own lines, between '.struct' and '.endstruct'");
+        strncpy(struct_capture_storage.name, sname, sizeof(struct_capture_storage.name) - 1);
+        struct_capture_storage.name[sizeof(struct_capture_storage.name) - 1] = '\0';
+        struct_capture_storage.body_line_count = 0;
+        capturing_struct = &struct_capture_storage;
+        return;
+    }
+
+    if (strcasecmp(first, ".endstruct") == 0)
+        asm_error(line_no, raw_line, "'.endstruct' with no matching '.struct'");
 
     if (strcasecmp(first, ".include") == 0) {
         char rest[MAX_LINE_LEN];

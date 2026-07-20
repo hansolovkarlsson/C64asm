@@ -33,6 +33,12 @@
 ; the two-word "verb noun" grammar built from extract_word, and every
 ; printed message -- stays here, since none of that is reusable across
 ; other programs the way the underlying string/input primitives are.
+;
+; room_exits (see that table's own comment, further down) uses
+; '.struct' (c64asm-reference.md section 9) for named field access --
+; room_exits+Exits.north instead of a bare offset number, or the four
+; entirely separate exit_north/exit_south/exit_east/exit_west arrays
+; this table used to be before '.struct' existed.
 
         .basic start   ; auto-emits `jmp start` right after the loader
                           ; stub -- needed because the .include lines
@@ -315,21 +321,37 @@ handle_go_check_words:
         rts
 
 handle_go_north:
-        ldx current_room
-        lda exit_north,x
+        jsr compute_room_exits_offset
+        lda room_exits+Exits.north,x
         jmp do_move_check
 handle_go_south:
-        ldx current_room
-        lda exit_south,x
+        jsr compute_room_exits_offset
+        lda room_exits+Exits.south,x
         jmp do_move_check
 handle_go_east:
-        ldx current_room
-        lda exit_east,x
+        jsr compute_room_exits_offset
+        lda room_exits+Exits.east,x
         jmp do_move_check
 handle_go_west:
-        ldx current_room
-        lda exit_west,x
+        jsr compute_room_exits_offset
+        lda room_exits+Exits.west,x
         jmp do_move_check
+
+; Computes X := current_room * Exits.size, for indexing into
+; room_exits (see that table's own comment, further down, for the
+; layout this relies on).
+compute_room_exits_offset:
+        lda current_room
+        asl a
+        asl a                  ; A := current_room * 4 -- relies on
+                                  ; Exits.size being exactly 4 (two
+                                  ; left shifts); if the struct ever
+                                  ; gains or loses a field, this needs
+                                  ; updating to match, since there's no
+                                  ; way to shift by a symbolic amount
+                                  ; on the 6502
+        tax
+        rts
 
 do_move_check:
         cmp #$ff
@@ -477,7 +499,8 @@ door_have_key:
         lda #1
         sta door_unlocked
         lda #DARK_CAVE
-        sta exit_north+CAVE_ENTRANCE  ; the connection now exists
+        sta room_exits + CAVE_ENTRANCE*Exits.size + Exits.north  ; the
+                                                                     ; connection now exists
         lda #<msg_door_unlocked
         ldy #>msg_door_unlocked
         jsr print_msg
@@ -564,12 +587,22 @@ inv_found_flag: .byte 0
 item_location:
         .byte CLEARING, LOC_NONE, DARK_CAVE
 
-; indexed by room number; $ff = no exit that way. exit_north+CAVE_ENTRANCE
-; starts as $ff (door locked) and is patched to DARK_CAVE once unlocked.
-exit_north: .byte FOREST, $ff,      $ff, $ff,           $ff
-exit_south: .byte $ff,    CLEARING, $ff, $ff,           CAVE_ENTRANCE
-exit_east:  .byte COTTAGE, CAVE_ENTRANCE, $ff, $ff,     $ff
-exit_west:  .byte $ff,    $ff,      CLEARING, FOREST,   $ff
+; Each room's exits, one struct-sized (4-byte) record per room --
+; replaces what used to be four separate parallel arrays (exit_north,
+; exit_south, exit_east, exit_west, one per direction instead of one
+; per room). $ff = no exit that way. room_exits + CAVE_ENTRANCE*Exits.size
+; + Exits.north starts as $ff (door locked) and is patched to DARK_CAVE
+; once unlocked -- see the door-unlock handler above.
+.struct Exits
+        .byte north, south, east, west
+.endstruct
+;                    north    south          east            west
+room_exits:
+        .byte        FOREST,  $ff,           COTTAGE,        $ff             ; CLEARING
+        .byte        $ff,     CLEARING,      CAVE_ENTRANCE,  $ff             ; FOREST
+        .byte        $ff,     $ff,           $ff,            CLEARING        ; COTTAGE
+        .byte        $ff,     $ff,           $ff,            FOREST          ; CAVE_ENTRANCE
+        .byte        $ff,     CAVE_ENTRANCE, $ff,            $ff             ; DARK_CAVE
 
 ; --- input buffers ---
 ; (input_buf itself now lives in lib/input.inc, filled by read_line)

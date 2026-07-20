@@ -465,7 +465,12 @@ def split_line(raw_line, line_no):
     rest = stripped
 
     # label = value  (constant assignment)   e.g.  SCREEN = $0400
-    m = re.match(r'^([A-Za-z_.][A-Za-z0-9_]*)\s*=\s*(.+)$', stripped)
+    # The '.' allowed mid-name (not just as the leading character, which
+    # was already permitted) is for '.struct' field symbols (§9 --
+    # section number as of this writing) like "Room.north = 2"; nothing
+    # before that feature ever produced or relied on a dotted name here,
+    # so this is purely additive.
+    m = re.match(r'^([A-Za-z_.][A-Za-z0-9_.]*)\s*=\s*(.+)$', stripped)
     if m:
         return m.group(1), '=', m.group(2).strip()
 
@@ -530,7 +535,7 @@ class ExprParser:
           | (?P<bin>%[01]+)
           | (?P<char>'(\\.|[^'])')
           | (?P<dec>[0-9]+)
-          | (?P<ident>[A-Za-z_.][A-Za-z0-9_]*)
+          | (?P<ident>[A-Za-z_.][A-Za-z0-9_.]*)
           | (?P<op>[()+\-*/<>])
         )
     """, re.VERBOSE)
@@ -1090,6 +1095,10 @@ class MacroProcessor:
                                           # a '.repeat'/'.dup' block currently
                                           # being captured, or None -- see
                                           # process_line() and _expand_repeat()
+        self.struct_capturing = None   # [struct_name, body_lines] for a
+                                          # '.struct' block currently being
+                                          # captured, or None -- see
+                                          # process_line() and _expand_struct()
         self.expansion_depth = 0
         self.emit = emit
         self.current_scope = 0    # scope 0: everything before the first
@@ -1123,6 +1132,10 @@ class MacroProcessor:
                     "'.repeat'/'.dup' cannot appear inside a '.macro' body "
                     "-- define the macro first, then use '.repeat' to "
                     "invoke it, if that's what you need", line_no, raw_line)
+            if first_tok.upper() == '.STRUCT':
+                raise AsmError(
+                    "'.struct' cannot appear inside a '.macro' body -- "
+                    "define it before the '.macro' instead", line_no, raw_line)
             self.capturing.body.append(stripped)
             return
 
@@ -1142,7 +1155,32 @@ class MacroProcessor:
                     "'.macro' cannot be defined inside a '.repeat'/'.dup' "
                     "block -- define it before the '.repeat' instead",
                     line_no, raw_line)
+            if first_tok.upper() == '.STRUCT':
+                raise AsmError(
+                    "'.struct' cannot appear inside a '.repeat'/'.dup' "
+                    "block -- define it before the '.repeat' instead",
+                    line_no, raw_line)
             self.repeat_capturing[2].append(stripped)
+            return
+
+        if self.struct_capturing is not None:
+            first_tok = trimmed.split(None, 1)[0] if trimmed else ''
+            if first_tok.upper() == '.ENDSTRUCT':
+                name, body = self.struct_capturing
+                self.struct_capturing = None
+                self._expand_struct(name, body, filename, line_no)
+                return
+            if first_tok.upper() == '.STRUCT':
+                raise AsmError(
+                    f"nested '.struct' definitions are not supported "
+                    f"(already defining '{self.struct_capturing[0]}')",
+                    line_no, raw_line)
+            if first_tok.upper() in ('.MACRO', '.REPEAT', '.DUP'):
+                raise AsmError(
+                    f"'{first_tok}' cannot appear inside a '.struct' body "
+                    f"-- only field declarations (.byte, .word, .res) are "
+                    f"allowed there", line_no, raw_line)
+            self.struct_capturing[1].append(stripped)
             return
 
         if not trimmed:
@@ -1192,6 +1230,26 @@ class MacroProcessor:
         if first_tok.upper() in ('.ENDREPEAT', '.ENDDUP'):
             raise AsmError("'.endrepeat'/'.enddup' with no matching '.repeat'/'.dup'",
                             line_no, raw_line)
+
+        if first_tok.upper() == '.STRUCT':
+            rest = trimmed[len(first_tok):].strip()
+            parts = rest.split(None, 1) if rest else []
+            if not parts:
+                raise AsmError("'.struct' requires a name, e.g. '.struct Room'",
+                                line_no, raw_line)
+            name = parts[0]
+            if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', name):
+                raise AsmError(f"'{name}' is not a valid struct name", line_no, raw_line)
+            if len(parts) > 1:
+                raise AsmError(
+                    "'.struct' takes only a name -- field declarations go "
+                    "on their own lines, between '.struct' and '.endstruct'",
+                    line_no, raw_line)
+            self.struct_capturing = [name, []]
+            return
+
+        if first_tok.upper() == '.ENDSTRUCT':
+            raise AsmError("'.endstruct' with no matching '.struct'", line_no, raw_line)
 
         if first_tok.upper() == '.INCLUDE':
             rest = trimmed[len(first_tok):].strip()
@@ -1297,6 +1355,73 @@ class MacroProcessor:
                 f"'.repeat'/'.dup' count {n} exceeds the maximum ({MAX_REPEAT_COUNT})",
                 line_no, raw_line)
         return n
+
+    def _expand_struct(self, name, body, filename, line_no):
+        """Expands a captured '.struct' block's body into a set of
+        Name.field = offset symbol-assignment lines, one per declared
+        field, plus a final Name.size giving the whole struct's total
+        byte width -- fed back through process_line() as ordinary
+        '=' assignment lines (see _emit_struct_field()), the same way
+        _expand_repeat() feeds its own generated lines back through.
+        Nothing here emits any actual bytes or advances the assembled
+        program's own address -- a '.struct' block is purely a
+        compile-time source of named offsets, the same as a plain
+        '=' constant is.
+
+        line_no here is the '.endstruct' line's own number, used for
+        errors that aren't tied to one specific field declaration (an
+        unrecognized directive inside the block, say); a malformed
+        individual field declaration's error instead points at that
+        field's own line, using the body line's original text."""
+        offset = 0
+        for body_line in body:
+            stripped = body_line.strip()
+            if not stripped:
+                continue
+            parts = stripped.split(None, 1)
+            directive = parts[0].lower()
+            rest = parts[1].strip() if len(parts) > 1 else ''
+
+            if directive in ('.byte', '.db', '.word', '.dw'):
+                field_size = 1 if directive in ('.byte', '.db') else 2
+                field_names = [p.strip() for p in split_args(rest)] if rest else []
+                if not field_names:
+                    raise AsmError(
+                        f"'.struct {name}': '{parts[0]}' requires at least "
+                        f"one field name", line_no, stripped)
+                for fname in field_names:
+                    self._emit_struct_field(name, fname, offset, filename, line_no, stripped)
+                    offset += field_size
+            elif directive in ('.res', '.ds', '.fill'):
+                args = [p.strip() for p in split_args(rest)] if rest else []
+                if len(args) != 2:
+                    raise AsmError(
+                        f"'.struct {name}': '{parts[0]}' requires exactly a "
+                        f"field name and a byte count, e.g. '.res buf, 16'",
+                        line_no, stripped)
+                fname, count_str = args
+                count = self._parse_repeat_count(count_str, line_no, stripped)
+                # _parse_repeat_count's own restriction to a plain integer
+                # literal (no symbols/expressions) applies here too, and
+                # for the same reason: struct field offsets, like a
+                # .repeat count, need to be known during this same
+                # preprocessing pass, before pass 1 builds a symbol table.
+                self._emit_struct_field(name, fname, offset, filename, line_no, stripped)
+                offset += count
+            else:
+                raise AsmError(
+                    f"'.struct {name}': '{parts[0]}' is not a valid field "
+                    f"declaration -- expected .byte, .word, or .res",
+                    line_no, stripped)
+
+        self._emit_struct_field(name, 'size', offset, filename, line_no, None)
+
+    def _emit_struct_field(self, struct_name, field_name, offset, filename, line_no, raw_line):
+        if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', field_name):
+            raise AsmError(f"'.struct {struct_name}': '{field_name}' is not "
+                            f"a valid field name", line_no, raw_line)
+        synthetic = f"{struct_name}.{field_name} = {offset}"
+        self.process_line(synthetic, filename, line_no)
 
     def _emit_final(self, raw_line, filename, line_no):
         """The single choke point every genuinely final (non-macro,

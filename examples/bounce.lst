@@ -107,11 +107,11 @@
 08F0  85 07             sta engine_playing
 08F2  60                rts
 08F3  AD 11 D0          lda VIC_CTRL1
-08F6  09 20             ora #%00100000        
+08F6  09 20             ora #%00100000
 08F8  8D 11 D0          sta VIC_CTRL1
 08FB  AD 18 D0          lda VIC_MEMPTRS
-08FE  29 F0             and #%11110000        
-0900  09 08             ora #((BITMAP) / 1024)   
+08FE  29 F0             and #%11110000
+0900  09 08             ora #((BITMAP) / 1024)
 0902  8D 18 D0          sta VIC_MEMPTRS
 0905  A9 00             lda #<(BITMAP)
 0907  85 FB             sta gfx_ptr

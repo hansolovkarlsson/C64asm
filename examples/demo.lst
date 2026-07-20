@@ -215,11 +215,11 @@
 09F3  20 10 08          jsr print_msg
 09F6  20 B6 08          jsr wait_any_key        ; without this, BITMAP_MODE_ON below wipes
 09F9  AD 11 D0          lda VIC_CTRL1
-09FC  09 20             ora #%00100000        
+09FC  09 20             ora #%00100000
 09FE  8D 11 D0          sta VIC_CTRL1
 0A01  AD 18 D0          lda VIC_MEMPTRS
-0A04  29 F0             and #%11110000        
-0A06  09 08             ora #((BITMAP) / 1024)   
+0A04  29 F0             and #%11110000
+0A06  09 08             ora #((BITMAP) / 1024)
 0A08  8D 18 D0          sta VIC_MEMPTRS
 0A0B  A9 00             lda #<(BITMAP)
 0A0D  85 FD             sta gfx_ptr
@@ -289,7 +289,7 @@
 0A98  8D 00 DC          sta CIA1_PRA
 0A9B  AD 01 DC          lda CIA1_PRB
 0A9E  58                cli
-0A9F  49 FF             eor #$ff          
+0A9F  49 FF             eor #$ff
 0AA1  29 02             and #KEY_W_ROW
 0AA3  F0 0C             beq check_s
 0AA5  A5 0B             lda ypos
@@ -304,7 +304,7 @@
 0AB9  8D 00 DC          sta CIA1_PRA
 0ABC  AD 01 DC          lda CIA1_PRB
 0ABF  58                cli
-0AC0  49 FF             eor #$ff          
+0AC0  49 FF             eor #$ff
 0AC2  29 20             and #KEY_S_ROW
 0AC4  F0 0C             beq check_a
 0AC6  A5 0B             lda ypos
@@ -319,7 +319,7 @@
 0ADA  8D 00 DC          sta CIA1_PRA
 0ADD  AD 01 DC          lda CIA1_PRB
 0AE0  58                cli
-0AE1  49 FF             eor #$ff          
+0AE1  49 FF             eor #$ff
 0AE3  29 04             and #KEY_A_ROW
 0AE5  F0 12             beq check_d
 0AE7  A5 06             lda xpos                 ; 16-bit compare against XMIN (X needs
@@ -337,7 +337,7 @@
 0B01  8D 00 DC          sta CIA1_PRA
 0B04  AD 01 DC          lda CIA1_PRB
 0B07  58                cli
-0B08  49 FF             eor #$ff          
+0B08  49 FF             eor #$ff
 0B0A  29 04             and #KEY_D_ROW
 0B0C  F0 12             beq check_sound
 0B0E  A5 06             lda xpos
@@ -369,14 +369,14 @@
 0B4B  8D 00 DC          sta CIA1_PRA
 0B4E  AD 01 DC          lda CIA1_PRB
 0B51  58                cli
-0B52  49 FF             eor #$ff          
+0B52  49 FF             eor #$ff
 0B54  29 40             and #KEY_Q_ROW
 0B56  D0 03             bne do_restart
 0B58  4C 60 0A          jmp main_loop
 0B5B  AD 11 D0          lda VIC_CTRL1
-0B5E  29 DF             and #%11011111         
+0B5E  29 DF             and #%11011111
 0B60  8D 11 D0          sta VIC_CTRL1
-0B63  A9 14             lda #$14                
+0B63  A9 14             lda #$14
 0B65  8D 18 D0          sta VIC_MEMPTRS
 0B68  A9 93             lda #$93
 0B6A  20 D2 FF          jsr CHROUT
