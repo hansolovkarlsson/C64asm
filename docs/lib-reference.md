@@ -531,7 +531,12 @@ listing, for exactly the reason `demo.asm`'s bugs above show: neither
 was visible from the assembled bytes alone. `test_demo.py` is a working
 example of exactly this kind of test, including checking actual bitmap
 and screen memory contents after the program runs, not just that it
-completed without crashing.
+completed without crashing. `test_sprites.py` (alongside `sprites.asm`)
+is another: it reads `star_anim.bin` itself and compares those exact
+bytes against what ended up in the running program's memory at each
+frame's address, confirming `.incbin` actually pulled the right slice
+of the file into the right place — not just that the byte *count*
+came out right, which a less careful test could pass on accident.
 
 Testing `keyboard.inc`-based code works the same way `press_key`
 already does for `read_joy2`/`READ_KEY` elsewhere in this file's own

@@ -148,6 +148,8 @@ unzip c64asm-split-src.zip && make
 | `c64asm-stdlib.zip` | **Standard library** — `.include`-able text/input/graphics/sound routines, shared across the demos (see below) |
 | `mini6502.zip` | **mini6502** — a from-scratch 6502/C64 emulator used to test-drive every demo and library routine below (see below) |
 | `hello.asm` / `.prg` / `.lst` | Demo: prints text via `CHROUT` and cycles the border color |
+| `demo.asm` / `.prg` / `.lst` | Demo: exercises every standard library file together (`lib/text.inc`, `lib/input.inc`, `lib/keyboard.inc`, `lib/graphics.inc`, `lib/sound.inc`) in one small program — a visible sprite, W/A/S/D movement with a border stop and a sound on each move, Q to exit; also this project's own integration test, cross-checked across all three implementations and actually executed, not just assembled (see `lib-reference.md`) |
+| `sprites.asm` / `.prg` / `.lst` (+ `star_anim.bin`) | Demo: a 4-frame sprite animation loaded from `star_anim.bin`, an external binary asset, via `.incbin` (`c64asm-reference.md` §11) instead of hand-transcribed `.byte` data; same W/A/S/D movement and border stop as `demo.asm`'s own star, plus continuous frame-cycling independent of movement |
 | `bounce.asm` / `.prg` / `.lst` | Demo: a sprite bouncing around a bitmap graphics screen, raster-synced |
 | `pong.asm` / `.prg` / `.lst` | Demo: two-paddle Pong — joystick and keyboard-matrix input, ball/paddle collision, AI opponent; uses the standard library (`lib/graphics.inc`, `lib/input.inc`, `lib/sound.inc`) rather than reimplementing raster timing, input handling, and sound |
 | `adventure.asm` / `.prg` / `.lst` | Demo: a small text adventure — typed commands via `CHRIN`, a room/item/puzzle state machine; uses the standard library (`lib/text.inc`, `lib/input.inc`) rather than reimplementing string/input handling |
@@ -196,12 +198,12 @@ form. Every file checks its own required zero-page symbols with
 `.error` (see above) right at the top, so a missing one fails with a
 specific message naming exactly what to define, not a generic
 `Undefined symbol` from somewhere inside a routine you never called
-directly. Five of the six programs above (`adventure.asm`,
-`bounce.asm`, `pong.asm`, `lander.asm`, and the library-focused
-`demo.asm`) are built *on* the library rather than duplicating it —
-only `hello.asm` still has everything written out locally, since it's
-deliberately meant as the simplest possible complete program, with no
-dependencies at all — see `lib-reference.md` (inside the zip) for the
+directly. Six of the seven programs above (`adventure.asm`,
+`bounce.asm`, `pong.asm`, `lander.asm`, the library-focused `demo.asm`,
+and `sprites.asm`) are built *on* the library rather than duplicating
+it — only `hello.asm` still has everything written out locally, since
+it's deliberately meant as the simplest possible complete program, with
+no dependencies at all — see `lib-reference.md` (inside the zip) for the
 full API, required zero-page setup per file, and worked examples,
 including two smaller, even more focused demo programs (`demo.asm`,
 alongside `bounce.asm`) built specifically to exercise the library in
