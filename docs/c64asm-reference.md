@@ -770,6 +770,52 @@ different directories) is still correctly recognized as one file.
   which file it came from (see §18). A program that never uses
   `.include` sees no change in its error output at all.
 
+### `.incbin`
+
+```
+.incbin "path"
+.incbin "path", offset
+.incbin "path", offset, length
+```
+
+Reads a *binary* file — not assembler source — and emits its raw bytes
+directly into the assembled output at the current position, exactly as
+if they'd been written out as a `.byte` list by hand. Useful for
+sprite/font/music/level data made in an external tool, instead of
+hand-transcribing a binary asset into `.byte` lines (and keeping that
+transcription in sync every time the asset changes).
+
+`path` follows exactly the same resolution rules `.include` does —
+relative to the file containing the `.incbin` line first, `--lib-dir`
+as a fallback — see above. With no `offset`/`length`, the whole file is
+emitted. With just `offset`, everything from that byte onward is
+emitted. With both, exactly `length` bytes starting at `offset` are
+emitted — useful for pulling one sprite's worth of bytes out of a
+larger asset file a graphics tool exported as one blob. Unlike
+`.repeat`'s count (§9), `offset` and `length` are ordinary expressions,
+evaluated the normal way — `.incbin` runs during the same pass as
+`.byte`/`.fill`, not the earlier preprocessing pass `.repeat`/`.macro`/
+`.include` share, so the symbol table is already available here.
+
+```asm
+sprite_data:
+        .align 64
+        .incbin "sprites.bin", 0, 63     ; the first sprite
+        .incbin "sprites.bin", 63, 63    ; the second, right after it
+```
+
+**Every error `.incbin` can produce is fatal, not recoverable** —
+deliberately different from `.byte`'s own undefined-symbol handling
+(§18). An ordinary `.byte` with an undefined symbol still emits exactly
+one byte (with an unknown *value*, corrected once the symbol resolves),
+so the rest of the program's addresses stay right even while that one
+error is pending. An `.incbin` problem — file not found, `offset`
+beyond the end of the file, `length` reaching past it — means the
+assembler doesn't know how many bytes this line emits at all, which
+would throw off every address computed after it if assembly tried to
+continue; the same reasoning a missing `.include`d file's own fatal
+error follows.
+
 ---
 
 ## 12. Conditional assembly
@@ -1229,8 +1275,10 @@ No `.prg` or listing file is written once *any* error has been
 recorded, from either pass.
 
 A small category of problems — a missing `.include`d file, a circular
-or too-deeply-nested `.include` chain, a malformed `.macro`/`.endmacro`
-or `.repeat`/`.dup`/`.endrepeat`/`.enddup` block, a conditional-assembly
+or too-deeply-nested `.include` chain, an `.incbin` problem (file not
+found, or `offset`/`length` reaching past the end of the file — see
+§11), a malformed `.macro`/`.endmacro` or `.repeat`/`.dup`/
+`.endrepeat`/`.enddup` block, a conditional-assembly
 (`.if`/`.elif`/`.else`/`.endif`) block, or a forward reference inside a
 `.if`/`.elif` condition — still stops assembly immediately with a
 single message, the same way every error did before this feature
@@ -1264,6 +1312,9 @@ Common errors:
 | `Branch target out of range (+N)` | A branch instruction's target is more than 127 bytes forward or 128 bytes backward from the instruction following it. Reorganize the code, or replace the branch with an unconditional `JMP` reached via an inverted branch. |
 | `Missing ')' in expression '...'` | Unbalanced parentheses in an expression. |
 | `Cannot open included file '...'` | A `.include`'d path doesn't resolve to a readable, regular file. If `--lib-dir` (§1) was given, the message names both paths tried. |
+| `Cannot open included binary file '...'` | Same, but for `.incbin` (§11) — its path resolution and `--lib-dir` fallback work identically to `.include`'s. |
+| `.incbin offset ... is out of range for '...'` | `.incbin`'s `offset` argument (§11) is negative or larger than the file itself. |
+| `.incbin length ... (from offset ...) exceeds the size of '...'` | `.incbin`'s `length` argument (§11), added to `offset`, reaches past the end of the file. |
 | `circular .include detected: a.asm -> b.inc -> a.asm` | An `.include` chain loops back on itself; the message shows the full chain. |
 | `.include nested too deeply (max 16)` | More than 16 levels of nested `.include` — almost always a sign of an undetected circular include. |
 | `Bad character '...' in expression '...'` | A character the tokenizer doesn't recognize appeared in an expression. |

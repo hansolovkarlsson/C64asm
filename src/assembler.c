@@ -2,6 +2,8 @@
  * assembler.c - see assembler.h for the two-pass architecture overview.
  */
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <ctype.h>
@@ -16,6 +18,7 @@
 #include "lineparser.h"
 #include "basicstub.h"
 #include "listing.h"
+#include "includes.h"
 
 /*
  * split_args() (comma-separated argument list splitting, used below for
@@ -517,6 +520,96 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                 for (long i = 0; i < count; i++) bb_push(output, (unsigned char)(fill_val & 0xFF));
             }
             pc += count;
+            continue;
+        }
+
+        if (strcasecmp(L->op, ".incbin") == 0) {
+            /* Unlike .byte/.text's undefined-symbol errors, every
+             * error path below is fatal, not recoverable -- an
+             * .incbin problem means the assembler doesn't know how
+             * many bytes this line emits, which (unlike an ordinary
+             * .byte's *value* being wrong) would throw off every
+             * address computed after it, the same class of problem a
+             * missing .include'd file is. */
+            char args[MAX_ARGS][MAX_LINE_LEN];
+            int nargs = split_args(L->operand, args, MAX_ARGS);
+            if (nargs < 1) asm_error(L->line_no, L->raw,
+                ".incbin requires a quoted path, e.g. .incbin \"sprite.bin\"");
+            trim(args[0]);
+            size_t flen = strlen(args[0]);
+            if (flen < 2 || args[0][0] != '"' || args[0][flen-1] != '"')
+                asm_error(L->line_no, L->raw,
+                    ".incbin requires a quoted path, e.g. .incbin \"sprite.bin\"");
+            if (nargs > 3) asm_error(L->line_no, L->raw,
+                ".incbin takes at most a path, an offset, and a length");
+
+            char path[MAX_LINE_LEN];
+            size_t plen = flen - 2;
+            memcpy(path, args[0] + 1, plen); path[plen] = '\0';
+
+            long offset = 0, length = 0;
+            int length_given = 0;
+            if (nargs > 1) {
+                int off_undef = 0;
+                offset = eval_expr(args[1], pc, L->line_no, &off_undef);
+                if (off_undef) asm_error(L->line_no, L->raw,
+                    "Undefined symbol in .incbin offset expression");
+            }
+            if (nargs > 2) {
+                int len_undef = 0;
+                length_given = 1;
+                length = eval_expr(args[2], pc, L->line_no, &len_undef);
+                if (len_undef) asm_error(L->line_no, L->raw,
+                    "Undefined symbol in .incbin length expression");
+            }
+
+            char resolved_display[MAX_FILENAME_LEN];
+            char lib_dir_display[MAX_FILENAME_LEN];
+            int tried_lib_dir;
+            includes_resolve_asset_path(path, L->filename[0] ? L->filename : NULL,
+                                         resolved_display, sizeof(resolved_display),
+                                         lib_dir_display, sizeof(lib_dir_display), &tried_lib_dir);
+
+            FILE *bf = fopen(resolved_display, "rb");
+            if (!bf) {
+                if (tried_lib_dir && strcmp(resolved_display, lib_dir_display) != 0)
+                    asm_error(L->line_no, L->raw,
+                        "Cannot open included binary file '%s' (also tried '%s' via --lib-dir)",
+                        resolved_display, lib_dir_display);
+                else
+                    asm_error(L->line_no, L->raw,
+                        "Cannot open included binary file '%s'", resolved_display);
+            }
+            if (fseek(bf, 0, SEEK_END) != 0)
+                asm_error(L->line_no, L->raw, "Cannot determine size of '%s'", resolved_display);
+            long filesize = ftell(bf);
+            if (filesize < 0)
+                asm_error(L->line_no, L->raw, "Cannot determine size of '%s'", resolved_display);
+
+            if (offset < 0 || offset > filesize)
+                asm_error(L->line_no, L->raw,
+                    ".incbin offset %ld is out of range for '%s' (%ld bytes)",
+                    offset, resolved_display, filesize);
+            if (!length_given) length = filesize - offset;
+            if (length < 0 || offset + length > filesize)
+                asm_error(L->line_no, L->raw,
+                    ".incbin length %ld (from offset %ld) exceeds the size of '%s' (%ld bytes)",
+                    length, offset, resolved_display, filesize);
+
+            if (pass_no == 2 && length > 0) {
+                unsigned char *buf = malloc((size_t)length);
+                if (!buf) { fprintf(stderr, "Out of memory\n"); exit(1); }
+                if (fseek(bf, offset, SEEK_SET) != 0 ||
+                    fread(buf, 1, (size_t)length, bf) != (size_t)length) {
+                    free(buf);
+                    fclose(bf);
+                    asm_error(L->line_no, L->raw, "Error reading '%s'", resolved_display);
+                }
+                bb_push_n(output, buf, (size_t)length);
+                free(buf);
+            }
+            fclose(bf);
+            pc += length;
             continue;
         }
 

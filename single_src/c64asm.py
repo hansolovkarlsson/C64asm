@@ -207,7 +207,7 @@ BRANCHES = {'BCC','BCS','BEQ','BMI','BNE','BPL','BVC','BVS'}
 
 DIRECTIVES = {'.org', '*=', '.byte', '.db', '.word', '.dw', '.text', '.asc',
               '.fill', '.ds', '.res', '.basic', '.equ', '.align', '.cpu',
-              '.charset', '.error', '.warning',
+              '.charset', '.error', '.warning', '.incbin',
               '.if', '.elif', '.else', '.endif', '.ifdef', '.ifndef'}
 
 MAX_MACRO_EXPANSION_DEPTH = 16   # guards against runaway/infinite recursive macros
@@ -961,6 +961,58 @@ class MacroDef:
 # source actually refers to it, since the fully-canonicalized form is
 # usually a long, less readable absolute path.
 
+def resolve_asset_path(requested_path, including_file, lib_dir):
+    """Resolves a quoted path from '.include'/'.incbin' to an actual
+    file on disk -- shared by IncludeProcessor.process_file() below and
+    '.incbin's own handling in _pass(), so the two follow identical
+    rules: relative to the file containing the directive first (the
+    default, always tried first), then --lib-dir as a fallback (see the
+    comment where IncludeProcessor.process_file() used to inline this
+    same logic, before .incbin needed it too).
+
+    Returns (resolved_display, lib_dir_display) -- resolved_display is
+    where the file was actually found (or the primary path attempted,
+    if neither location has it); lib_dir_display is the --lib-dir
+    fallback path that was tried, or None if --lib-dir wasn't
+    consulted (either because it wasn't given, or the default
+    resolution already succeeded). Callers use lib_dir_display only to
+    decide whether an error message should mention it."""
+    if including_file and not os.path.isabs(requested_path):
+        resolved_display = os.path.join(os.path.dirname(including_file), requested_path)
+    else:
+        resolved_display = requested_path
+
+    # --lib-dir is purely a fallback: the default resolution above
+    # (relative to the file containing the directive) is always tried
+    # first and, if it finds the file, --lib-dir is never even
+    # consulted -- so a project with its own local lib/ next to it
+    # keeps working unchanged whether or not --lib-dir is given. Only
+    # when that default lookup comes up empty, and --lib-dir was
+    # given, and the requested path isn't absolute (an absolute path
+    # is never subject to search-path fallback, same as the default
+    # resolution above), do we also try requested_path relative to
+    # --lib-dir.
+    #
+    # --lib-dir names the lib/ directory itself (the one holding
+    # text.inc, input.inc, ...), not its parent -- so a leading "lib/"
+    # in the requested path (this project's own convention,
+    # `.include "lib/text.inc"`) is stripped before joining with
+    # --lib-dir, or `--lib-dir /shared/c64lib` would end up looking for
+    # /shared/c64lib/lib/text.inc, one "lib" too many. A requested path
+    # that doesn't start with "lib/" is joined as-is.
+    lib_dir_display = None
+    if (lib_dir and including_file and not os.path.isabs(requested_path)
+            and not os.path.isfile(resolved_display)):
+        lib_relative = requested_path
+        if lib_relative.startswith('lib/'):
+            lib_relative = lib_relative[len('lib/'):]
+        lib_dir_display = os.path.join(lib_dir, lib_relative)
+        if os.path.isfile(lib_dir_display):
+            resolved_display = lib_dir_display
+
+    return resolved_display, lib_dir_display
+
+
 class IncludeProcessor:
     def __init__(self, on_line, lib_dir=None):
         self.on_line = on_line              # callback(raw_line, filename, line_no)
@@ -970,38 +1022,8 @@ class IncludeProcessor:
         self.lib_dir = lib_dir              # --lib-dir fallback search root, or None
 
     def process_file(self, requested_path, including_file, including_line_no, including_raw):
-        if including_file and not os.path.isabs(requested_path):
-            resolved_display = os.path.join(os.path.dirname(including_file), requested_path)
-        else:
-            resolved_display = requested_path
-
-        # --lib-dir is purely a fallback: the default resolution above
-        # (relative to the file containing the .include line) is always
-        # tried first and, if it finds the file, --lib-dir is never even
-        # consulted -- so a project with its own local lib/ next to it
-        # keeps working unchanged whether or not --lib-dir is given.
-        # Only when that default lookup comes up empty, and --lib-dir
-        # was given, and the requested path isn't absolute (an absolute
-        # path is never subject to search-path fallback, same as the
-        # default resolution above), do we also try requested_path
-        # relative to --lib-dir.
-        #
-        # --lib-dir names the lib/ directory itself (the one holding
-        # text.inc, input.inc, ...), not its parent -- so a leading
-        # "lib/" in the .include path (this project's own convention,
-        # `.include "lib/text.inc"`) is stripped before joining with
-        # --lib-dir, or `--lib-dir /shared/c64lib` would end up looking
-        # for /shared/c64lib/lib/text.inc, one "lib" too many. A
-        # requested path that doesn't start with "lib/" is joined as-is.
-        lib_dir_display = None
-        if (self.lib_dir and including_file and not os.path.isabs(requested_path)
-                and not os.path.isfile(resolved_display)):
-            lib_relative = requested_path
-            if lib_relative.startswith('lib/'):
-                lib_relative = lib_relative[len('lib/'):]
-            lib_dir_display = os.path.join(self.lib_dir, lib_relative)
-            if os.path.isfile(lib_dir_display):
-                resolved_display = lib_dir_display
+        resolved_display, lib_dir_display = resolve_asset_path(
+            requested_path, including_file, self.lib_dir)
 
         try:
             canon = os.path.realpath(resolved_display)
@@ -1401,6 +1423,9 @@ class Assembler:
         self.listing = []
 
     def load(self, main_path, lib_dir=None):
+        self.lib_dir = lib_dir   # needed again in _pass(), for '.incbin's
+                                    # own path resolution -- see
+                                    # resolve_asset_path()
         def emit(raw, filename, line_no):
             label, op, operand = split_line(raw, line_no)
             self.lines.append((line_no, raw, label, op, operand, filename))
@@ -1799,6 +1824,71 @@ class Assembler:
                 if pass_no == 2:
                     output.extend(bytes([fill_val & 0xFF]) * count)
                 pc += count
+                continue
+
+            if op == '.incbin':
+                # Unlike .byte/.text's undefined-symbol errors, every
+                # error path below is fatal, not recoverable -- an
+                # .incbin problem means the assembler doesn't know how
+                # many bytes this line emits, which (unlike an
+                # ordinary .byte's *value* being wrong) would throw off
+                # every address computed after it, the same class of
+                # problem a missing .include'd file is (§11).
+                args = split_args(operand)
+                if not args or len(args[0].strip()) < 2 or \
+                        args[0].strip()[0] != '"' or args[0].strip()[-1] != '"':
+                    raise AsmError(
+                        '.incbin requires a quoted path, e.g. .incbin "sprite.bin"',
+                        line_no, raw)
+                path = args[0].strip()[1:-1]
+                if len(args) > 3:
+                    raise AsmError(
+                        ".incbin takes at most a path, an offset, and a length",
+                        line_no, raw)
+
+                offset = 0
+                length = None
+                if len(args) > 1:
+                    offset, off_undef = eval_expr(args[1], self.symbols, pc, line_no)
+                    if off_undef:
+                        raise AsmError("Undefined symbol in .incbin offset expression",
+                                        line_no, raw)
+                if len(args) > 2:
+                    length, len_undef = eval_expr(args[2], self.symbols, pc, line_no)
+                    if len_undef:
+                        raise AsmError("Undefined symbol in .incbin length expression",
+                                        line_no, raw)
+
+                resolved_display, lib_dir_display = resolve_asset_path(
+                    path, filename, self.lib_dir)
+                try:
+                    with open(resolved_display, 'rb') as f:
+                        data = f.read()
+                except OSError:
+                    if lib_dir_display and lib_dir_display != resolved_display:
+                        raise AsmError(
+                            f"Cannot open included binary file '{resolved_display}' "
+                            f"(also tried '{lib_dir_display}' via --lib-dir)",
+                            line_no, raw)
+                    raise AsmError(
+                        f"Cannot open included binary file '{resolved_display}'",
+                        line_no, raw)
+
+                if offset < 0 or offset > len(data):
+                    raise AsmError(
+                        f".incbin offset {offset} is out of range for "
+                        f"'{resolved_display}' ({len(data)} bytes)", line_no, raw)
+                if length is None:
+                    length = len(data) - offset
+                if length < 0 or offset + length > len(data):
+                    raise AsmError(
+                        f".incbin length {length} (from offset {offset}) exceeds "
+                        f"the size of '{resolved_display}' ({len(data)} bytes)", line_no, raw)
+
+                chunk = data[offset:offset + length]
+                if pass_no == 2:
+                    output.extend(chunk)
+                pc += length
                 continue
 
             # Real instruction

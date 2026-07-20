@@ -378,7 +378,7 @@ static int is_directive(const char *tok) {
     static const char *dirs[] = {
         ".org", ".byte", ".db", ".word", ".dw", ".text", ".asc",
         ".fill", ".ds", ".res", ".basic", ".equ", ".align", ".cpu", ".charset",
-        ".error", ".warning",
+        ".error", ".warning", ".incbin",
         ".if", ".elif", ".else", ".endif", ".ifdef", ".ifndef", NULL
     };
     for (int i = 0; dirs[i]; i++)
@@ -1549,53 +1549,71 @@ static int is_currently_open(const char *canon) {
  * to macro_process_line() with `filename` set to this file's resolved
  * display name and `line_no` counted 1-based within it.
  */
-static void process_include_file(const char *requested_path, const char *including_file,
-                                  int including_line_no, const char *including_raw) {
-    char resolved_display[MAX_FILENAME_LEN];
+/* Resolves a quoted path from '.include'/'.incbin' to an actual file
+ * on disk -- shared by process_include_file() below and '.incbin's own
+ * handling in run_pass(), so the two follow identical rules: relative
+ * to the file containing the directive first (the default, always
+ * tried first), then --lib-dir as a fallback.
+ *
+ * --lib-dir is purely a fallback: the default resolution above is
+ * always tried first, and if it finds the file, --lib-dir is never
+ * even consulted -- so a project with its own local lib/ next to it
+ * keeps working unchanged whether or not --lib-dir is given. Only when
+ * that default lookup comes up empty, and --lib-dir was given, and the
+ * requested path isn't absolute (an absolute path is never subject to
+ * search-path fallback, same as the default resolution above), do we
+ * also try requested_path relative to --lib-dir.
+ *
+ * --lib-dir names the lib/ directory itself (the one holding text.inc,
+ * input.inc, ...), not its parent -- so a leading "lib/" in the
+ * requested path (this project's own convention, e.g.
+ * `.include "lib/text.inc"`) is stripped before joining with
+ * --lib-dir, or `--lib-dir /shared/c64lib` would end up looking for
+ * /shared/c64lib/lib/text.inc, one "lib" too many. A requested path
+ * that doesn't start with "lib/" is joined as-is.
+ *
+ * resolved_display receives where the file was actually found (or the
+ * primary path attempted, if neither location has it). lib_dir_display
+ * receives the --lib-dir fallback path that was tried; *tried_lib_dir
+ * is set to 1 if it was consulted at all (callers use this, plus a
+ * strcmp against resolved_display, to decide whether an error message
+ * should mention it), 0 otherwise. */
+static void resolve_asset_path(const char *requested_path, const char *including_file,
+                                 char *resolved_display, size_t resolved_sz,
+                                 char *lib_dir_display, size_t lib_dir_sz,
+                                 int *tried_lib_dir) {
+    *tried_lib_dir = 0;
     if (including_file && requested_path[0] != '/') {
         char dir[MAX_FILENAME_LEN];
         dirname_of(including_file, dir, sizeof(dir));
-        join_path(dir, requested_path, resolved_display, sizeof(resolved_display));
+        join_path(dir, requested_path, resolved_display, resolved_sz);
     } else {
-        strncpy(resolved_display, requested_path, sizeof(resolved_display) - 1);
-        resolved_display[sizeof(resolved_display) - 1] = '\0';
+        strncpy(resolved_display, requested_path, resolved_sz - 1);
+        resolved_display[resolved_sz - 1] = '\0';
     }
 
-    /* --lib-dir is purely a fallback: the default resolution above
-     * (relative to the file containing the .include line) is always
-     * tried first, and if it finds the file, --lib-dir is never even
-     * consulted -- so a project with its own local lib/ next to it
-     * keeps working unchanged whether or not --lib-dir is given. Only
-     * when that default lookup comes up empty, and --lib-dir was
-     * given, and the requested path isn't absolute (an absolute path
-     * is never subject to search-path fallback, same as the default
-     * resolution above), do we also try requested_path relative to
-     * --lib-dir.
-     *
-     * --lib-dir names the lib/ directory itself (the one holding
-     * text.inc, input.inc, ...), not its parent -- so a leading
-     * "lib/" in the .include path (this project's own convention,
-     * `.include "lib/text.inc"`) is stripped before joining with
-     * --lib-dir, or `--lib-dir /shared/c64lib` would end up looking
-     * for /shared/c64lib/lib/text.inc, one "lib" too many. A
-     * requested path that doesn't start with "lib/" is joined as-is. */
-    char lib_dir_display[MAX_FILENAME_LEN];
-    int tried_lib_dir = 0;
-    {
-        struct stat default_st;
-        int default_exists = (stat(resolved_display, &default_st) == 0 && S_ISREG(default_st.st_mode));
-        if (!default_exists && g_lib_dir && including_file && requested_path[0] != '/') {
-            const char *lib_relative = requested_path;
-            if (strncmp(lib_relative, "lib/", 4) == 0) lib_relative += 4;
-            snprintf(lib_dir_display, sizeof(lib_dir_display), "%s/%s", g_lib_dir, lib_relative);
-            struct stat lib_st;
-            tried_lib_dir = 1;
-            if (stat(lib_dir_display, &lib_st) == 0 && S_ISREG(lib_st.st_mode)) {
-                strncpy(resolved_display, lib_dir_display, sizeof(resolved_display) - 1);
-                resolved_display[sizeof(resolved_display) - 1] = '\0';
-            }
+    struct stat default_st;
+    int default_exists = (stat(resolved_display, &default_st) == 0 && S_ISREG(default_st.st_mode));
+    if (!default_exists && g_lib_dir && including_file && requested_path[0] != '/') {
+        const char *lib_relative = requested_path;
+        if (strncmp(lib_relative, "lib/", 4) == 0) lib_relative += 4;
+        snprintf(lib_dir_display, lib_dir_sz, "%s/%s", g_lib_dir, lib_relative);
+        struct stat lib_st;
+        *tried_lib_dir = 1;
+        if (stat(lib_dir_display, &lib_st) == 0 && S_ISREG(lib_st.st_mode)) {
+            strncpy(resolved_display, lib_dir_display, resolved_sz - 1);
+            resolved_display[resolved_sz - 1] = '\0';
         }
     }
+}
+
+static void process_include_file(const char *requested_path, const char *including_file,
+                                  int including_line_no, const char *including_raw) {
+    char resolved_display[MAX_FILENAME_LEN];
+    char lib_dir_display[MAX_FILENAME_LEN];
+    int tried_lib_dir;
+    resolve_asset_path(requested_path, including_file, resolved_display, sizeof(resolved_display),
+                        lib_dir_display, sizeof(lib_dir_display), &tried_lib_dir);
 
     char canon[PATH_MAX];
     struct stat st;
@@ -2685,6 +2703,96 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                 for (long i = 0; i < count; i++) bb_push(output, (unsigned char)(fill_val & 0xFF));
             }
             pc += count;
+            continue;
+        }
+
+        if (strcasecmp(L->op, ".incbin") == 0) {
+            /* Unlike .byte/.text's undefined-symbol errors, every
+             * error path below is fatal, not recoverable -- an
+             * .incbin problem means the assembler doesn't know how
+             * many bytes this line emits, which (unlike an ordinary
+             * .byte's *value* being wrong) would throw off every
+             * address computed after it, the same class of problem a
+             * missing .include'd file is. */
+            char args[MAX_ARGS][MAX_LINE_LEN];
+            int nargs = split_args(L->operand, args, MAX_ARGS);
+            if (nargs < 1) asm_error(L->line_no, L->raw,
+                ".incbin requires a quoted path, e.g. .incbin \"sprite.bin\"");
+            trim(args[0]);
+            size_t flen = strlen(args[0]);
+            if (flen < 2 || args[0][0] != '"' || args[0][flen-1] != '"')
+                asm_error(L->line_no, L->raw,
+                    ".incbin requires a quoted path, e.g. .incbin \"sprite.bin\"");
+            if (nargs > 3) asm_error(L->line_no, L->raw,
+                ".incbin takes at most a path, an offset, and a length");
+
+            char path[MAX_LINE_LEN];
+            size_t plen = flen - 2;
+            memcpy(path, args[0] + 1, plen); path[plen] = '\0';
+
+            long offset = 0, length = 0;
+            int length_given = 0;
+            if (nargs > 1) {
+                int off_undef = 0;
+                offset = eval_expr(args[1], pc, L->line_no, &off_undef);
+                if (off_undef) asm_error(L->line_no, L->raw,
+                    "Undefined symbol in .incbin offset expression");
+            }
+            if (nargs > 2) {
+                int len_undef = 0;
+                length_given = 1;
+                length = eval_expr(args[2], pc, L->line_no, &len_undef);
+                if (len_undef) asm_error(L->line_no, L->raw,
+                    "Undefined symbol in .incbin length expression");
+            }
+
+            char resolved_display[MAX_FILENAME_LEN];
+            char lib_dir_display[MAX_FILENAME_LEN];
+            int tried_lib_dir;
+            resolve_asset_path(path, L->filename[0] ? L->filename : NULL,
+                                resolved_display, sizeof(resolved_display),
+                                lib_dir_display, sizeof(lib_dir_display), &tried_lib_dir);
+
+            FILE *bf = fopen(resolved_display, "rb");
+            if (!bf) {
+                if (tried_lib_dir && strcmp(resolved_display, lib_dir_display) != 0)
+                    asm_error(L->line_no, L->raw,
+                        "Cannot open included binary file '%s' (also tried '%s' via --lib-dir)",
+                        resolved_display, lib_dir_display);
+                else
+                    asm_error(L->line_no, L->raw,
+                        "Cannot open included binary file '%s'", resolved_display);
+            }
+            if (fseek(bf, 0, SEEK_END) != 0)
+                asm_error(L->line_no, L->raw, "Cannot determine size of '%s'", resolved_display);
+            long filesize = ftell(bf);
+            if (filesize < 0)
+                asm_error(L->line_no, L->raw, "Cannot determine size of '%s'", resolved_display);
+
+            if (offset < 0 || offset > filesize)
+                asm_error(L->line_no, L->raw,
+                    ".incbin offset %ld is out of range for '%s' (%ld bytes)",
+                    offset, resolved_display, filesize);
+            if (!length_given) length = filesize - offset;
+            if (length < 0 || offset + length > filesize)
+                asm_error(L->line_no, L->raw,
+                    ".incbin length %ld (from offset %ld) exceeds the size of '%s' (%ld bytes)",
+                    length, offset, resolved_display, filesize);
+
+            if (pass_no == 2 && length > 0) {
+                unsigned char *buf = malloc((size_t)length);
+                if (!buf) { fprintf(stderr, "Out of memory\n"); exit(1); }
+                if (fseek(bf, offset, SEEK_SET) != 0 ||
+                    fread(buf, 1, (size_t)length, bf) != (size_t)length) {
+                    free(buf);
+                    fclose(bf);
+                    asm_error(L->line_no, L->raw, "Error reading '%s'", resolved_display);
+                }
+                bb_push_n(output, buf, (size_t)length);
+                free(buf);
+            }
+            fclose(bf);
+            pc += length;
             continue;
         }
 

@@ -83,21 +83,22 @@ static int is_currently_open(const char *canon) {
     return 0;
 }
 
-void includes_process_file(const char *requested_path, const char *including_file,
-                            int including_line_no, const char *including_raw,
-                            IncludeLineCallback on_line) {
-    char resolved_display[MAX_FILENAME_LEN];
+void includes_resolve_asset_path(const char *requested_path, const char *including_file,
+                                  char *resolved_display, size_t resolved_sz,
+                                  char *lib_dir_display, size_t lib_dir_sz,
+                                  int *tried_lib_dir) {
+    *tried_lib_dir = 0;
     if (including_file && requested_path[0] != '/') {
         char dir[MAX_FILENAME_LEN];
         dirname_of(including_file, dir, sizeof(dir));
-        join_path(dir, requested_path, resolved_display, sizeof(resolved_display));
+        join_path(dir, requested_path, resolved_display, resolved_sz);
     } else {
-        strncpy(resolved_display, requested_path, sizeof(resolved_display) - 1);
-        resolved_display[sizeof(resolved_display) - 1] = '\0';
+        strncpy(resolved_display, requested_path, resolved_sz - 1);
+        resolved_display[resolved_sz - 1] = '\0';
     }
 
     /* --lib-dir is purely a fallback: the default resolution above
-     * (relative to the file containing the .include line) is always
+     * (relative to the file containing the directive) is always
      * tried first, and if it finds the file, --lib-dir is never even
      * consulted -- so a project with its own local lib/ next to it
      * keeps working unchanged whether or not --lib-dir is given. Only
@@ -108,28 +109,35 @@ void includes_process_file(const char *requested_path, const char *including_fil
      *
      * --lib-dir names the lib/ directory itself (the one holding
      * text.inc, input.inc, ...), not its parent -- so a leading
-     * "lib/" in the .include path (this project's own convention,
-     * `.include "lib/text.inc"`) is stripped before joining with
+     * "lib/" in the requested path (this project's own convention,
+     * e.g. `.include "lib/text.inc"`) is stripped before joining with
      * --lib-dir, or `--lib-dir /shared/c64lib` would end up looking
      * for /shared/c64lib/lib/text.inc, one "lib" too many. A
      * requested path that doesn't start with "lib/" is joined as-is. */
-    char lib_dir_display[MAX_FILENAME_LEN];
-    int tried_lib_dir = 0;
-    {
-        struct stat default_st;
-        int default_exists = (stat(resolved_display, &default_st) == 0 && S_ISREG(default_st.st_mode));
-        if (!default_exists && g_lib_dir && including_file && requested_path[0] != '/') {
-            const char *lib_relative = requested_path;
-            if (strncmp(lib_relative, "lib/", 4) == 0) lib_relative += 4;
-            snprintf(lib_dir_display, sizeof(lib_dir_display), "%s/%s", g_lib_dir, lib_relative);
-            struct stat lib_st;
-            tried_lib_dir = 1;
-            if (stat(lib_dir_display, &lib_st) == 0 && S_ISREG(lib_st.st_mode)) {
-                strncpy(resolved_display, lib_dir_display, sizeof(resolved_display) - 1);
-                resolved_display[sizeof(resolved_display) - 1] = '\0';
-            }
+    struct stat default_st;
+    int default_exists = (stat(resolved_display, &default_st) == 0 && S_ISREG(default_st.st_mode));
+    if (!default_exists && g_lib_dir && including_file && requested_path[0] != '/') {
+        const char *lib_relative = requested_path;
+        if (strncmp(lib_relative, "lib/", 4) == 0) lib_relative += 4;
+        snprintf(lib_dir_display, lib_dir_sz, "%s/%s", g_lib_dir, lib_relative);
+        struct stat lib_st;
+        *tried_lib_dir = 1;
+        if (stat(lib_dir_display, &lib_st) == 0 && S_ISREG(lib_st.st_mode)) {
+            strncpy(resolved_display, lib_dir_display, resolved_sz - 1);
+            resolved_display[resolved_sz - 1] = '\0';
         }
     }
+}
+
+void includes_process_file(const char *requested_path, const char *including_file,
+                            int including_line_no, const char *including_raw,
+                            IncludeLineCallback on_line) {
+    char resolved_display[MAX_FILENAME_LEN];
+    char lib_dir_display[MAX_FILENAME_LEN];
+    int tried_lib_dir;
+    includes_resolve_asset_path(requested_path, including_file,
+                                 resolved_display, sizeof(resolved_display),
+                                 lib_dir_display, sizeof(lib_dir_display), &tried_lib_dir);
 
     char canon[PATH_MAX];
     struct stat st;

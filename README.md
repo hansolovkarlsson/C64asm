@@ -92,6 +92,10 @@ a real C64 to run it.
 - **`.include`**, with automatic include-once semantics (no manual
   include guards needed), relative path resolution, and circular-include
   detection
+- **`.incbin`** — import a raw binary file's bytes directly (sprite,
+  font, or music data made in an external tool), with an optional
+  offset/length to pull one asset out of a larger file; see
+  `c64asm-reference.md` §11
 - **Conditional assembly** (`.if`/`.elif`/`.else`/`.endif`,
   `.ifdef`/`.ifndef`) for things like PAL/NTSC timing variants
 - Directives for raw bytes/words, text (with ASCII→PETSCII conversion,
@@ -138,7 +142,7 @@ unzip c64asm-split-src.zip && make
 | `c64asm.c` | The assembler, single-file portable C99 implementation |
 | `c64asm-split-src.zip` | The same assembler split into one file per concern, heavily commented, with a `Makefile` — for reading, not a different implementation (see `ARCHITECTURE.md`) |
 | `ARCHITECTURE.md` | Guide to the split-source project's module layout |
-| `c64asm-reference.md` | **Assembler syntax reference** — labels, expressions, addressing-mode syntax, macros, local labels, `.include`, conditional assembly, every directive, error messages, VICE label export, CLI usage |
+| `c64asm-reference.md` | **Assembler syntax reference** — labels, expressions, addressing-mode syntax, macros, local labels, `.include`/`.incbin`, conditional assembly, every directive, error messages, VICE label export, CLI usage |
 | `c64asm-opcode-reference.md` | **6502 opcode reference** — what every documented instruction does, which status flags it affects, and a worked example of each; a full write-up of all 13 addressing modes; and a section on the illegal/undocumented opcodes, clearly marked as non-standard |
 | `c64-memory-reference.md` | **C64 hardware reference** — screen/color RAM, VIC-II graphics modes, sprites, SID sound, joystick input, common KERNAL routines, all with tested example code |
 | `c64asm-stdlib.zip` | **Standard library** — `.include`-able text/input/graphics/sound routines, shared across the demos (see below) |
