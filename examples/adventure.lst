@@ -243,7 +243,7 @@
 0A3E  4C 48 0A          jmp do_move_check
 0A41  AD D0 0B          lda current_room
 0A44  0A                asl a
-0A45  0A                asl a                  ; A := current_room * 4 -- relies on
+0A45  0A                asl a
 0A46  AA                tax
 0A47  60                rts
 0A48  C9 FF             cmp #$ff

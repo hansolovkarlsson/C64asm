@@ -68,6 +68,7 @@ handler_vec   = $02   ; indirect-call target (only set after str_equal
 
         .include "lib/text.inc"
         .include "lib/input.inc"
+        .include "lib/math.inc"
 
 ; Room numbers
 CLEARING      = 0
@@ -340,21 +341,19 @@ handle_go_west:
 ; Computes X := current_room * Exits.size, for indexing into
 ; room_exits (see that table's own comment, further down, for the
 ; layout this relies on).
-.assert Exits.size == 4, "compute_room_exits_offset assumes 4 fields (two left shifts below) -- update both if Exits ever changes shape"
+.assert Exits.size == 4, "compute_room_exits_offset uses MULT_4 -- switch to a different MULT_N (lib/math.inc) if Exits ever changes shape"
 compute_room_exits_offset:
         lda current_room
-        asl a
-        asl a                  ; A := current_room * 4 -- relies on
-                                  ; Exits.size being exactly 4 (two
-                                  ; left shifts); if the struct ever
-                                  ; gains or loses a field, this needs
-                                  ; updating to match, since there's no
-                                  ; way to shift by a symbolic amount
-                                  ; on the 6502 -- the .assert just
-                                  ; above turns "silently wrong room
-                                  ; navigation at runtime" into a clear
-                                  ; assembly-time error if that's ever
-                                  ; forgotten
+        MULT_4                 ; A := current_room * 4 -- relies on
+                                  ; Exits.size being exactly 4, the
+                                  ; .assert just above turns a
+                                  ; forgotten update into a clear
+                                  ; assembly-time error instead of
+                                  ; silently wrong room navigation at
+                                  ; runtime -- see c64asm-reference.md
+                                  ; section 10's "Indexing an array of
+                                  ; records" for the full pattern this
+                                  ; is
         tax
         rts
 

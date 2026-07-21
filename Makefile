@@ -32,12 +32,14 @@ EXA_DIR := examples
 EXA_SRC := $(wildcard $(EXA_DIR)/*.asm)
 EXA_PRG := $(EXA_SRC:.asm=.prg)
 LIB_DIR := lib
-AFLAGS  ?= --warn-unused
+AFLAGS  ?=
+#--warn-unused
 # --warn-unused-all
 
 
 # Make
 all: $(TARGET) $(SINGLE_TARGET) $(EXA_PRG)
+single: $(SINGLE_TARGET)
 
 $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $(OBJECTS)

@@ -656,6 +656,62 @@ same-sized fields on one line, at consecutive offsets. `.res`/`.ds`/
 `.fill` declares one field `count` bytes wide (a fixed-size buffer,
 say), taking exactly a field name and a count — not a list.
 
+### Indexing an array of records
+
+A single record's fields (`room_data + Room.north`, from the example
+above) is only half the picture — the other common case is an *array*
+of same-shaped records, indexed by some variable at runtime, not a
+single fixed one known at assembly time. That needs an actual
+multiply: record index times `Name.size`, added to the array's base
+address.
+
+The 6502 has no multiply instruction, but multiplying by a small
+power-of-two constant is just repeated left shifts — `lib/math.inc`
+(part of the standard library, `c64asm-stdlib.zip`) spells this out as
+`MULT_2`/`MULT_4`/`MULT_8`/`MULT_16`, one macro per shift count, so the
+common cases don't need re-deriving by hand each time:
+
+```asm
+        .include "lib/math.inc"
+
+.struct Exits
+        .byte north, south, east, west
+.endstruct
+
+; indexed by room number * Exits.size; $ff = no exit that way
+room_exits:
+        .byte FOREST,  $ff,           COTTAGE,        $ff        ; room 0
+        .byte $ff,     CLEARING,      CAVE_ENTRANCE,  $ff        ; room 1
+        ; ...
+
+.assert Exits.size == 4, "compute_room_exits_offset uses MULT_4 -- switch to a different MULT_N if Exits ever changes shape"
+compute_room_exits_offset:
+        lda current_room
+        MULT_4                  ; A := current_room * Exits.size
+        tax
+        rts
+        ; ... lda room_exits+Exits.north,x
+```
+
+This is this project's own `adventure.asm`, close to verbatim — see
+that file for the real, complete, tested version. The `.assert` is
+doing real work here, not just decoration: `MULT_4` bakes in the
+assumption that `Exits.size` is exactly 4 (two left shifts), and
+nothing about changing `Exits`'s field list would otherwise fail
+assembly — it would just silently compute the wrong offset and
+misbehave at runtime, the exact class of bug `.assert` (§11) exists to
+turn into a clear, immediate, assembly-time error instead.
+
+If `Name.size` isn't a power of two, none of `lib/math.inc`'s macros
+apply — that needs either a different technique (an explicit
+lookup table of precomputed offsets, say, if the record count is
+small and fixed) or genuine multi-bit multiplication, which is
+beyond what a handful of shifts can do. And if an array's *worst-case*
+byte offset (last valid index times `Name.size`) can exceed 255, an
+8-bit shift-based multiply isn't enough either, regardless of whether
+`Name.size` itself is a power of two — see `lib/math.inc`'s own header
+comment for the exact limit.
+
 ### Rules and limitations
 
 - **A field's size, and `.res`'s count, must be a plain integer
