@@ -175,11 +175,11 @@
 099D  8D 04 D4          sta VOICE1_CTRL
 09A0  85 14             sta engine_playing        ; SID_INIT leaves A=$00 -- reuse it rather
 09A2  AD 11 D0          lda VIC_CTRL1
-09A5  09 20             ora #%00100000        
+09A5  09 20             ora #%00100000
 09A7  8D 11 D0          sta VIC_CTRL1
 09AA  AD 18 D0          lda VIC_MEMPTRS
-09AD  29 F0             and #%11110000        
-09AF  09 08             ora #((BITMAP) / 1024)   
+09AD  29 F0             and #%11110000
+09AF  09 08             ora #((BITMAP) / 1024)
 09B1  8D 18 D0          sta VIC_MEMPTRS
 09B4  A9 00             lda #<(BITMAP)
 09B6  85 FB             sta gfx_ptr
@@ -293,7 +293,7 @@
 0A99  8D 00 DC          sta CIA1_PRA
 0A9C  AD 01 DC          lda CIA1_PRB
 0A9F  58                cli
-0AA0  49 FF             eor #$ff          
+0AA0  49 FF             eor #$ff
 0AA2  29 02             and #%00000010
 0AA4  F0 04             beq no_thrust_key
 0AA6  A9 01             lda #1
@@ -310,7 +310,7 @@
 0ABC  8D 00 DC          sta CIA1_PRA
 0ABF  AD 01 DC          lda CIA1_PRB
 0AC2  58                cli
-0AC3  49 FF             eor #$ff          
+0AC3  49 FF             eor #$ff
 0AC5  29 04             and #%00000100
 0AC7  F0 04             beq no_left_key
 0AC9  A9 01             lda #1
@@ -327,7 +327,7 @@
 0ADF  8D 00 DC          sta CIA1_PRA
 0AE2  AD 01 DC          lda CIA1_PRB
 0AE5  58                cli
-0AE6  49 FF             eor #$ff          
+0AE6  49 FF             eor #$ff
 0AE8  29 04             and #%00000100
 0AEA  F0 04             beq no_right_key
 0AEC  A9 01             lda #1
@@ -580,9 +580,9 @@
 0CC9  C9 03             cmp #SAFE_V+1
 0CCB  B0 2F             bcs do_crash
 0CCD  AD 11 D0          lda VIC_CTRL1
-0CD0  29 DF             and #%11011111         
+0CD0  29 DF             and #%11011111
 0CD2  8D 11 D0          sta VIC_CTRL1
-0CD5  A9 14             lda #$14                
+0CD5  A9 14             lda #$14
 0CD7  8D 18 D0          sta VIC_MEMPTRS
 0CDA  A9 93             lda #$93
 0CDC  20 D2 FF          jsr CHROUT
@@ -600,9 +600,9 @@
 0CF9  4C 1F 0D          jmp show_try_again
 0CFC  20 2A 0D          jsr show_explosion
 0CFF  AD 11 D0          lda VIC_CTRL1
-0D02  29 DF             and #%11011111         
+0D02  29 DF             and #%11011111
 0D04  8D 11 D0          sta VIC_CTRL1
-0D07  A9 14             lda #$14                
+0D07  A9 14             lda #$14
 0D09  8D 18 D0          sta VIC_MEMPTRS
 0D0C  A9 93             lda #$93
 0D0E  20 D2 FF          jsr CHROUT
@@ -669,7 +669,7 @@
 0DA2  8D 00 DC          sta CIA1_PRA
 0DA5  AD 01 DC          lda CIA1_PRB
 0DA8  58                cli
-0DA9  49 FF             eor #$ff          
+0DA9  49 FF             eor #$ff
 0DAB  29 02             and #%00000010
 0DAD  F0 EB             beq wait_for_restart
 0DAF  4C 91 09          jmp start
