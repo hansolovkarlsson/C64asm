@@ -229,7 +229,7 @@
 0A19  8D 00 DC          sta CIA1_PRA
 0A1C  AD 01 DC          lda CIA1_PRB
 0A1F  58                cli
-0A20  49 FF             eor #$ff
+0A20  49 FF             eor #$ff          
 0A22  29 02             and #KEY_W_ROW
 0A24  F0 09             beq check_s
 0A26  A5 0B             lda ypos
@@ -243,7 +243,7 @@
 0A37  8D 00 DC          sta CIA1_PRA
 0A3A  AD 01 DC          lda CIA1_PRB
 0A3D  58                cli
-0A3E  49 FF             eor #$ff
+0A3E  49 FF             eor #$ff          
 0A40  29 20             and #KEY_S_ROW
 0A42  F0 09             beq check_a
 0A44  A5 0B             lda ypos
@@ -257,7 +257,7 @@
 0A55  8D 00 DC          sta CIA1_PRA
 0A58  AD 01 DC          lda CIA1_PRB
 0A5B  58                cli
-0A5C  49 FF             eor #$ff
+0A5C  49 FF             eor #$ff          
 0A5E  29 04             and #KEY_A_ROW
 0A60  F0 0F             beq check_d
 0A62  A5 06             lda xpos
@@ -274,7 +274,7 @@
 0A79  8D 00 DC          sta CIA1_PRA
 0A7C  AD 01 DC          lda CIA1_PRB
 0A7F  58                cli
-0A80  49 FF             eor #$ff
+0A80  49 FF             eor #$ff          
 0A82  29 04             and #KEY_D_ROW
 0A84  F0 0F             beq check_exit
 0A86  A5 06             lda xpos
@@ -291,7 +291,7 @@
 0A9D  8D 00 DC          sta CIA1_PRA
 0AA0  AD 01 DC          lda CIA1_PRB
 0AA3  58                cli
-0AA4  49 FF             eor #$ff
+0AA4  49 FF             eor #$ff          
 0AA6  29 40             and #KEY_Q_ROW
 0AA8  D0 03             bne do_exit
 0AAA  4C EC 09          jmp main_loop

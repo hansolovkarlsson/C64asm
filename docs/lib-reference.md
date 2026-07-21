@@ -47,7 +47,7 @@ for the full behavior.
 ```
 
 resolved relative to the file that contains the `.include` line (see
-`c64asm-reference.md` §13) — so if your project keeps `lib/` alongside
+`c64asm-reference.md` §14) — so if your project keeps `lib/` alongside
 your source file, this line works unchanged regardless of what
 directory you actually run `c64asm` from.
 
@@ -61,7 +61,7 @@ still references its zero-page location whether or not your program
 ever `jsr`s to it.
 
 Every library file below checks for its own required symbols right at
-the top, using `.ifdef`/`.error` (`c64asm-reference.md` §14), and
+the top, using `.ifdef`/`.error` (`c64asm-reference.md` §15), and
 fails with a specific message naming exactly what's missing:
 
 ```
@@ -140,7 +140,7 @@ Assembly error: graphics.inc requires XMAX (a compile-time constant) defined bef
 
 ### A note on `--warn-unused` and this library
 
-`c64asm-reference.md` §20 documents `--warn-unused`, a flag that warns
+`c64asm-reference.md` §21 documents `--warn-unused`, a flag that warns
 about every symbol defined but never referenced. By default it's
 scoped to your own main file, not anything it `.include`s — which
 matters here specifically, since `.include`ing a file defines
@@ -591,6 +591,6 @@ distinction this project's own reference documentation draws between
 the two — see `c64asm-reference.md` §8's introduction to macros for
 more on that trade-off.
 
-`print_msg`'s internal loop uses `@`-prefixed local labels (§12), so its
+`print_msg`'s internal loop uses `@`-prefixed local labels (§13), so its
 labels can never collide with anything else in a program that includes
 it, no matter how many other things are also called `loop` or `done`.

@@ -378,7 +378,7 @@ static int is_directive(const char *tok) {
     static const char *dirs[] = {
         ".org", ".byte", ".db", ".word", ".dw", ".text", ".asc",
         ".fill", ".ds", ".res", ".basic", ".equ", ".align", ".cpu", ".charset",
-        ".error", ".warning", ".incbin", ".assert",
+        ".error", ".warning", ".incbin", ".assert", ".tag", ".endtag",
         ".if", ".elif", ".else", ".endif", ".ifdef", ".ifndef", NULL
     };
     for (int i = 0; dirs[i]; i++)
@@ -2520,6 +2520,14 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
     int charset_lower = 0;     /* toggled by '.charset lower'/'.charset
                                    upper' -- see that directive's handling
                                    below */
+    int tag_active = 0;        /* '.tag' block currently open? -- see
+                                   '.tag'/'.endtag' handling below */
+    char tag_name[MAX_IDENT] = "";
+    long tag_start_pc = 0;
+    int tag_start_li = -1;     /* g_lines index of the '.tag' line itself,
+                                   so '.endtag' can report an error against
+                                   its exact line_no/raw without needing to
+                                   copy those strings out in advance */
 
     for (int li = 0; li < g_line_count; li++) {
         SourceLine *L = &g_lines[li];
@@ -2905,6 +2913,83 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
         }
 
         if (L->has_label) define_symbol(L->label, pc, L->line_no, pass_no, 0, L->raw, li);
+
+        if (strcmp(L->op, ".tag") == 0) {
+            /* Binds this data block to a '.struct', so a mismatch
+             * between the block's actual size and the struct's
+             * declared size becomes a clear, immediate error instead
+             * of silently wrong data:
+             *
+             *       room_data: .tag Room
+             *               .word room0_desc
+             *               .byte FOREST, $ff, COTTAGE, $ff
+             *       .endtag
+             *
+             * Doesn't emit anything itself, and doesn't transform the
+             * lines between '.tag' and '.endtag' in any way -- unlike
+             * '.repeat'/'.struct', which reshape the source during an
+             * earlier preprocessing pass, '.tag' just watches how far
+             * pc moves while ordinary lines in between assemble
+             * completely normally, then compares that against
+             * Name.size at '.endtag'. Recoverable, not fatal, the
+             * same as '.assert' -- and for the same reason: getting a
+             * '.tag' wrong doesn't corrupt anything about the rest of
+             * the file the way a malformed '.repeat'/'.struct'/
+             * '.macro' would. This runs after the shared
+             * label-definition line just above, on purpose:
+             * "room_data: .tag Room" needs room_data itself defined
+             * at the usual current-pc value, exactly like any other
+             * label, before '.tag' does anything of its own. */
+            if (tag_active) {
+                asm_error_recoverable(L->line_no, L->raw,
+                    "nested '.tag' blocks are not supported (already "
+                    "tagging as '%s')", tag_name);
+                continue;
+            }
+            char trimmed_name[MAX_LINE_LEN];
+            strncpy(trimmed_name, L->operand, sizeof(trimmed_name) - 1);
+            trimmed_name[sizeof(trimmed_name) - 1] = '\0';
+            trim(trimmed_name);
+            if (!is_valid_ident(trimmed_name)) {
+                asm_error_recoverable(L->line_no, L->raw,
+                    "'.tag' requires a struct name, e.g. '.tag Room'");
+                continue;
+            }
+            strncpy(tag_name, trimmed_name, sizeof(tag_name) - 1);
+            tag_name[sizeof(tag_name) - 1] = '\0';
+            tag_start_pc = pc;
+            tag_start_li = li;
+            tag_active = 1;
+            continue;
+        }
+
+        if (strcmp(L->op, ".endtag") == 0) {
+            if (!tag_active) {
+                asm_error_recoverable(L->line_no, L->raw,
+                    "'.endtag' with no matching '.tag'");
+                continue;
+            }
+            tag_active = 0;
+            SourceLine *start_L = &g_lines[tag_start_li];
+            char size_expr[MAX_IDENT + 8];
+            snprintf(size_expr, sizeof(size_expr), "%s.size", tag_name);
+            int size_undef = 0;
+            long size_val = eval_expr(size_expr, pc, L->line_no, &size_undef);
+            if (size_undef) {
+                asm_error_recoverable(start_L->line_no, start_L->raw,
+                    "'.tag %s' doesn't match any known .struct -- no "
+                    "'%s.size' symbol", tag_name, tag_name);
+                continue;
+            }
+            long actual_size = pc - tag_start_pc;
+            if (actual_size != size_val) {
+                asm_error_recoverable(L->line_no, L->raw,
+                    "data tagged as '%s' is %ld byte%s but %s is %ld byte%s",
+                    tag_name, actual_size, actual_size == 1 ? "" : "s",
+                    tag_name, size_val, size_val == 1 ? "" : "s");
+            }
+            continue;
+        }
 
         if (strcasecmp(L->op, ".byte") == 0 || strcasecmp(L->op, ".db") == 0) {
             char args[MAX_ARGS][MAX_LINE_LEN];

@@ -601,10 +601,15 @@ Symbol table:
   rock_here_msg        = $0EB5
   rock_name_msg        = $0F78
   rock_take_msg        = $0F0E
+  room0                = $0BD7
   room0_desc           = $0D20
+  room1                = $0BDB
   room1_desc           = $0D8F
+  room2                = $0BDF
   room2_desc           = $0DF7
+  room3                = $0BE3
   room3_desc           = $0E35
+  room4                = $0BE7
   room4_desc           = $0E75
   room_desc_table      = $0C4F
   room_exits           = $0BD7

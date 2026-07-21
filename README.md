@@ -67,7 +67,7 @@ a real C64 to run it.
 - Optional support for illegal/undocumented 6502/6510 opcodes (`LAX`,
   `SAX`, `DCP`, and 17 others) via `.cpu 6510x` — off by default, since
   they're not part of the documented instruction set; see
-  `c64asm-reference.md` §16
+  `c64asm-reference.md` §17
 - Two-pass assembly, so forward references to labels just work
 - Automatic zero-page vs. absolute addressing selection
 - A real expression evaluator: `+ - * /`, `==`/`!=` for equality
@@ -85,30 +85,34 @@ a real C64 to run it.
   4, "..."`) that fails assembly with a clear message if a condition
   built on a struct size, a computed address, or anything else known
   at assembly time turns out false; see `c64asm-reference.md` §11
+- **`.tag`/`.endtag`** — binds a data block to a `.struct` and checks
+  automatically that it's really that struct's size (`room_data: .tag
+  Room` ... `.endtag`), instead of a manual end-label plus `.assert`
+  each time; see `c64asm-reference.md` §12
 - **Local labels** (`@label`), scoped between global labels and per
   macro expansion, so loop/branch labels inside a subroutine or macro
   never collide with anything else in the file
 - **VICE monitor label export** (`--vice-labels`) — debug by name in
   VICE (`break .main_loop` instead of `break $0a60`) instead of bare
-  hex addresses; see `c64asm-reference.md` §19
+  hex addresses; see `c64asm-reference.md` §20
 - **Unused-symbol warnings** (`--warn-unused`) — flags every label or
   constant defined but never referenced, after assembly finishes.
   Scoped to the main file by default (an `.include`d library's own
   unused symbols are suppressed, with a count of how many — see
   `--warn-unused-all` to see them too); off entirely unless one of
-  these flags is given; see `c64asm-reference.md` §20
+  these flags is given; see `c64asm-reference.md` §21
 - **`.error`/`.warning` directives** — paired with `.ifdef`/`.ifndef`,
   turn a missing precondition (a required zero-page symbol, say) into
   one clear message right at the point of the mistake, instead of a
   confusing `Undefined symbol` buried inside a macro or library
-  routine several `.include`s away; see `c64asm-reference.md` §14
+  routine several `.include`s away; see `c64asm-reference.md` §15
 - **`.include`**, with automatic include-once semantics (no manual
   include guards needed), relative path resolution, and circular-include
   detection
 - **`.incbin`** — import a raw binary file's bytes directly (sprite,
   font, or music data made in an external tool), with an optional
   offset/length to pull one asset out of a larger file; see
-  `c64asm-reference.md` §13
+  `c64asm-reference.md` §14
 - **Conditional assembly** (`.if`/`.elif`/`.else`/`.endif`,
   `.ifdef`/`.ifndef`) for things like PAL/NTSC timing variants
 - Directives for raw bytes/words, text (with ASCII→PETSCII conversion,
@@ -163,10 +167,10 @@ unzip c64asm-split-src.zip && make
 | `mini6502.zip` | **mini6502** — a from-scratch 6502/C64 emulator used to test-drive every demo and library routine below (see below) |
 | `hello.asm` / `.prg` / `.lst` | Demo: prints text via `CHROUT` and cycles the border color |
 | `demo.asm` / `.prg` / `.lst` | Demo: exercises every standard library file together (`lib/text.inc`, `lib/input.inc`, `lib/keyboard.inc`, `lib/graphics.inc`, `lib/sound.inc`) in one small program — a visible sprite, W/A/S/D movement with a border stop and a sound on each move, Q to exit; also this project's own integration test, cross-checked across all three implementations and actually executed, not just assembled (see `lib-reference.md`) |
-| `sprites.asm` / `.prg` / `.lst` (+ `star_anim.bin`) | Demo: a 4-frame sprite animation loaded from `star_anim.bin`, an external binary asset, via `.incbin` (`c64asm-reference.md` §13) instead of hand-transcribed `.byte` data; same W/A/S/D movement and border stop as `demo.asm`'s own star, plus continuous frame-cycling independent of movement |
+| `sprites.asm` / `.prg` / `.lst` (+ `star_anim.bin`) | Demo: a 4-frame sprite animation loaded from `star_anim.bin`, an external binary asset, via `.incbin` (`c64asm-reference.md` §14) instead of hand-transcribed `.byte` data; same W/A/S/D movement and border stop as `demo.asm`'s own star, plus continuous frame-cycling independent of movement |
 | `bounce.asm` / `.prg` / `.lst` | Demo: a sprite bouncing around a bitmap graphics screen, raster-synced |
 | `pong.asm` / `.prg` / `.lst` | Demo: two-paddle Pong — joystick and keyboard-matrix input, ball/paddle collision, AI opponent; uses the standard library (`lib/graphics.inc`, `lib/input.inc`, `lib/sound.inc`) rather than reimplementing raster timing, input handling, and sound |
-| `adventure.asm` / `.prg` / `.lst` | Demo: a small text adventure — typed commands via `CHRIN`, a room/item/puzzle state machine, room exits stored in a `.struct`-based table (`room_exits+Exits.north,x` instead of a bare offset number) indexed via `lib/math.inc`'s `MULT_4`, with an `.assert` guarding that choice; uses the standard library (`lib/text.inc`, `lib/input.inc`, `lib/math.inc`) rather than reimplementing string/input handling |
+| `adventure.asm` / `.prg` / `.lst` | Demo: a small text adventure — typed commands via `CHRIN`, a room/item/puzzle state machine, room exits stored in a `.struct`-based table (`room_exits+Exits.north,x` instead of a bare offset number) indexed via `lib/math.inc`'s `MULT_4`, with an `.assert` guarding that choice and each row individually `.tag`'d against `Exits`; uses the standard library (`lib/text.inc`, `lib/input.inc`, `lib/math.inc`) rather than reimplementing string/input handling |
 | `lander.asm` / `.prg` / `.lst` | Demo: lunar lander — bitmap graphics, physics, terrain collision, a fuel bar, sound, and an explosion animation; uses the standard library (`lib/graphics.inc`, `lib/input.inc`, `lib/sound.inc`, `lib/text.inc`) rather than reimplementing bitmap setup, input handling, sound, and text output |
 
 Start with `c64asm-reference.md` for assembler syntax, `c64asm-opcode-reference.md`
@@ -251,16 +255,16 @@ for worked regression suites built on it).
 ## Known limitations
 
 - **Zero-page sizing of a *forward-referenced* label** can, in rare
-  cases, differ between passes — see `c64asm-reference.md` §22 for when
+  cases, differ between passes — see `c64asm-reference.md` §23 for when
   this can matter and why it almost never does in practice
 - Macros, local labels, `.include`, and conditional assembly are all
   supported but intentionally simple: macros must be defined before
   use, `.if`/`.elif` conditions can't reference a forward-declared
   symbol, and `.if` can gate instructions/data but not which `.macro`
   gets defined or which file gets `.include`d (see `c64asm-reference.md`
-  §22 for the full list)
+  §23 for the full list)
 - Assembly can surface several independent errors from one run (see
-  `c64asm-reference.md` §21), though messages after the first can
+  `c64asm-reference.md` §22), though messages after the first can
   occasionally be downstream noise rather than genuinely separate
   problems; a handful of whole-file structural errors (missing/circular
   `.include`, a broken macro or conditional-assembly block) still stop

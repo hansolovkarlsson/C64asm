@@ -600,13 +600,35 @@ item_location:
 .struct Exits
         .byte north, south, east, west
 .endstruct
+; Each row below is individually .tag'd -- .struct (section 10) alone
+; only guarantees Exits itself is 4 fields; it says nothing about
+; whether any *particular* row here actually has 4 values. Before
+; .tag existed, a mistyped row (three values instead of four, say)
+; assembled cleanly with no warning at all, silently shifting every
+; room after it by one byte -- this is exactly that mistake, made
+; impossible: room_exits itself still resolves to the very first
+; tagged row's own address (nothing emits between the label and
+; "room0: .tag Exits" below), and compute_room_exits_offset's
+; MULT_4-based indexing keeps working completely unchanged, since
+; these five tagged rows are still exactly as contiguous as one plain
+; room_exits: table always was.
 ;                    north    south          east            west
 room_exits:
+room0: .tag Exits
         .byte        FOREST,  $ff,           COTTAGE,        $ff             ; CLEARING
+.endtag
+room1: .tag Exits
         .byte        $ff,     CLEARING,      CAVE_ENTRANCE,  $ff             ; FOREST
+.endtag
+room2: .tag Exits
         .byte        $ff,     $ff,           $ff,            CLEARING        ; COTTAGE
+.endtag
+room3: .tag Exits
         .byte        $ff,     $ff,           $ff,            FOREST          ; CAVE_ENTRANCE
+.endtag
+room4: .tag Exits
         .byte        $ff,     CAVE_ENTRANCE, $ff,            $ff             ; DARK_CAVE
+.endtag
 
 ; --- input buffers ---
 ; (input_buf itself now lives in lib/input.inc, filled by read_line)

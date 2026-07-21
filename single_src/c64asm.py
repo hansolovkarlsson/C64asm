@@ -208,6 +208,7 @@ BRANCHES = {'BCC','BCS','BEQ','BMI','BNE','BPL','BVC','BVS'}
 DIRECTIVES = {'.org', '*=', '.byte', '.db', '.word', '.dw', '.text', '.asc',
               '.fill', '.ds', '.res', '.basic', '.equ', '.align', '.cpu',
               '.charset', '.error', '.warning', '.incbin', '.assert',
+              '.tag', '.endtag',
               '.if', '.elif', '.else', '.endif', '.ifdef', '.ifndef'}
 
 MAX_MACRO_EXPANSION_DEPTH = 16   # guards against runaway/infinite recursive macros
@@ -1645,6 +1646,10 @@ class Assembler:
         charset_lower = False     # toggled by '.charset lower'/'.charset
                                      # upper' -- see that directive's
                                      # handling below
+        tag_active = None          # (struct_name, start_pc, start_line_no)
+                                      # for a '.tag' block currently open,
+                                      # or None -- see '.tag'/'.endtag'
+                                      # handling below
 
         def parent_active():
             return not cond_stack or cond_stack[-1].currently_active
@@ -1972,6 +1977,69 @@ class Assembler:
                 self._define_symbol(label, pc, line_no, pass_no, li, raw=raw)
 
             if op is None:
+                continue
+
+            if op == '.tag':
+                # Binds this data block to a '.struct' (§10), so a
+                # mismatch between the block's actual size and the
+                # struct's declared size becomes a clear, immediate
+                # error instead of silently wrong data:
+                #
+                #       room_data: .tag Room
+                #               .word room0_desc
+                #               .byte FOREST, $ff, COTTAGE, $ff
+                #       .endtag
+                #
+                # Doesn't emit anything itself, and doesn't transform
+                # the lines between '.tag' and '.endtag' in any way --
+                # unlike '.repeat'/'.struct' (§9, §10), which reshape
+                # the source during an earlier preprocessing pass,
+                # '.tag' just watches how far `pc` moves while ordinary
+                # lines in between assemble completely normally, then
+                # compares that against Name.size at '.endtag'.
+                # Recoverable, not fatal, the same as '.assert' -- and
+                # for the same reason: getting a '.tag' wrong doesn't
+                # corrupt anything about the rest of the file the way a
+                # malformed '.repeat'/'.struct'/'.macro' would. This
+                # runs after the shared label-definition line just
+                # above, on purpose: room_data: .tag Room needs
+                # room_data itself defined at the usual current-pc
+                # value, exactly like any other label, before '.tag'
+                # does anything of its own.
+                if tag_active is not None:
+                    record_error(
+                        f"nested '.tag' blocks are not supported "
+                        f"(already tagging as '{tag_active[0]}')", line_no, raw)
+                    continue
+                tag_name = operand.strip()
+                if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', tag_name):
+                    record_error(
+                        "'.tag' requires a struct name, e.g. '.tag Room'",
+                        line_no, raw)
+                    continue
+                tag_active = (tag_name, pc, line_no, raw)
+                continue
+
+            if op == '.endtag':
+                if tag_active is None:
+                    record_error("'.endtag' with no matching '.tag'", line_no, raw)
+                    continue
+                tag_name, start_pc, start_line, start_raw = tag_active
+                tag_active = None
+                size_val, size_undef = eval_expr(f"{tag_name}.size", self.symbols, pc, line_no)
+                if size_undef:
+                    record_error(
+                        f"'.tag {tag_name}' doesn't match any known .struct "
+                        f"-- no '{tag_name}.size' symbol", start_line, start_raw)
+                    continue
+                actual_size = pc - start_pc
+                if actual_size != size_val:
+                    a_plural = "" if actual_size == 1 else "s"
+                    s_plural = "" if size_val == 1 else "s"
+                    record_error(
+                        f"data tagged as '{tag_name}' is {actual_size} "
+                        f"byte{a_plural} but {tag_name} is {size_val} "
+                        f"byte{s_plural}", line_no, raw)
                 continue
 
             if op in ('.byte', '.db'):

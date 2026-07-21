@@ -13,6 +13,52 @@ this project's full regression suite before being marked done — that
 discipline is this project's own standing practice, not something
 worth repeating in every entry below.
 
+## `adventure.asm`: each `room_exits` row individually `.tag`'d
+
+`.tag` checks one struct instance, not a whole array — but nothing
+stops tagging each *element* of an array on its own, which turned out
+to be a real, meaningful check `.struct` alone never provided:
+`.struct` guarantees `Exits` itself is 4 fields, but says nothing
+about whether any particular row in `room_exits` actually has 4
+values written out. Before this, a mistyped row (three values instead
+of four) assembled cleanly with no warning at all, silently shifting
+every room after it by one byte — confirmed by deliberately
+introducing exactly that mistake and watching it assemble without
+complaint. Tagging each of the five rows individually closes that gap
+— the same mistake now fails immediately, naming which row and by how
+much it's off — while assembling to *exactly* the same bytes as
+before, confirmed byte-for-byte identical to the prior shipped
+`adventure.prg`, and re-verified against the full game-playing test
+suite including the win-condition playthrough. See
+`c64asm-reference.md` §12, "Tagging each element of an array".
+
+## `.tag`/`.endtag`
+
+Binds a data block to a `.struct`, automatically checking at
+`.endtag` that the block is really that struct's size:
+
+```asm
+room_data: .tag Room
+        .word room0_desc
+        .byte FOREST, $ff, COTTAGE, $ff
+.endtag
+```
+
+Replaces the manual pattern of an `_end` label plus `.assert
+end_label - start_label == Name.size` with something automatic. Pure
+observation, not transformation — unlike `.repeat`/`.struct`, `.tag`
+doesn't capture or reshape the lines between `.tag` and `.endtag` at
+all, it just records `pc` at each end and compares the difference, so
+whatever's actually in between (`.byte`, `.word`, `.text`, `.incbin`,
+ordinary instructions, anything) assembles completely normally on its
+own terms. Recoverable, not fatal, the same as `.assert` — a wrong
+`.tag` doesn't corrupt anything about the rest of the file the way a
+malformed `.repeat`/`.struct`/`.macro` would, so there's no reason to
+stop assembly over it. Checks a single struct instance's size only,
+not an array of them — `adventure.asm`'s array-of-records `room_exits`
+table still uses the `.assert`-based pattern for that case, documented
+alongside `.tag` itself. See `c64asm-reference.md` §12.
+
 ## `lib/math.inc`: `DIV_2`/`DIV_4`/`DIV_8`/`DIV_16`
 
 Truncating, unsigned division of the A register by a small power of
@@ -38,14 +84,14 @@ scoping exists because the original, unscoped version reported so much
 routine library noise — 184 warnings against `demo.asm`, almost
 entirely unused `keyboard.inc` constants for keys that particular demo
 never checks — that it was hard to use in practice on any program
-built on the standard library. See `c64asm-reference.md` §20.
+built on the standard library. See `c64asm-reference.md` §21.
 
 ## `--warn-unused`
 
 Warns, after assembly finishes, about every label or `=`/`.equ`
 constant (including `.struct` fields) defined but never referenced
 anywhere in the program. Opt-in, never fails the build. See
-`c64asm-reference.md` §20.
+`c64asm-reference.md` §21.
 
 ## `.assert`, and `==`/`!=` expression operators
 
@@ -98,7 +144,7 @@ including file first, `--lib-dir` as a fallback). Every error
 `.byte`'s undefined-symbol handling: an `.incbin` problem means the
 assembler doesn't know the emitted byte *count*, which would corrupt
 every address computed after it if assembly tried to continue. See
-`c64asm-reference.md` §13.
+`c64asm-reference.md` §14.
 
 ## `.repeat`/`.dup`
 
@@ -127,14 +173,14 @@ surfaced a real, pre-existing bug: an earlier `demo.asm` checked for a
 the **5** key's position, not Y's — found while cross-checking against
 `keyboard.inc`'s new named key constants, which made the mismatch
 visible for the first time; fixed in both `demo.asm` and its test.
-See `c64asm-reference.md` §14.
+See `c64asm-reference.md` §15.
 
 ## `--vice-labels`
 
 Writes a VICE monitor label file (one `add_label` command per symbol),
 for debugging by name in the VICE monitor — `break .main_loop` instead
 of `break $0a60`, and disassembly showing names instead of bare
-addresses. See `c64asm-reference.md` §19.
+addresses. See `c64asm-reference.md` §20.
 
 ## `keyboard.inc`
 
@@ -185,7 +231,7 @@ followed by `.byte 13, 0`. See `c64asm-reference.md` §7.
 opcodes (`LAX`, `SAX`, `DCP`, and others); `.cpu 6510` (the default)
 or `.cpu 6502` turns support back off. Off by default, since these
 aren't part of the documented instruction set. See
-`c64asm-reference.md` §16 and `c64asm-opcode-reference.md`.
+`c64asm-reference.md` §17 and `c64asm-opcode-reference.md`.
 
 ## Multi-error reporting
 
@@ -197,7 +243,7 @@ pass, closer to how a modern compiler behaves. A smaller category of
 whole-file structural problems (a missing `.include`d file, a
 malformed `.macro`, and similar) still stops assembly immediately,
 since the shape of the rest of the file becomes genuinely ambiguous
-once one of those is true. See `c64asm-reference.md` §21.
+once one of those is true. See `c64asm-reference.md` §22.
 
 ## Foundational feature set
 

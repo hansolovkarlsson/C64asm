@@ -169,10 +169,15 @@ add_label $086D .read_line
 add_label $0EB5 .rock_here_msg
 add_label $0F78 .rock_name_msg
 add_label $0F0E .rock_take_msg
+add_label $0BD7 .room0
 add_label $0D20 .room0_desc
+add_label $0BDB .room1
 add_label $0D8F .room1_desc
+add_label $0BDF .room2
 add_label $0DF7 .room2_desc
+add_label $0BE3 .room3
 add_label $0E35 .room3_desc
+add_label $0BE7 .room4
 add_label $0E75 .room4_desc
 add_label $0C4F .room_desc_table
 add_label $0BD7 .room_exits
