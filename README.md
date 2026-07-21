@@ -92,10 +92,11 @@ a real C64 to run it.
   VICE (`break .main_loop` instead of `break $0a60`) instead of bare
   hex addresses; see `c64asm-reference.md` §19
 - **Unused-symbol warnings** (`--warn-unused`) — flags every label or
-  constant defined but never referenced, after assembly finishes. Off
-  by default, since a program using only part of an `.include`d
-  library will have plenty of correctly-unused library-internal
-  symbols; see `c64asm-reference.md` §20
+  constant defined but never referenced, after assembly finishes.
+  Scoped to the main file by default (an `.include`d library's own
+  unused symbols are suppressed, with a count of how many — see
+  `--warn-unused-all` to see them too); off entirely unless one of
+  these flags is given; see `c64asm-reference.md` §20
 - **`.error`/`.warning` directives** — paired with `.ifdef`/`.ifndef`,
   turn a missing precondition (a required zero-page symbol, say) into
   one clear message right at the point of the mistake, instead of a

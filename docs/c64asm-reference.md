@@ -14,8 +14,8 @@ for the same source file. Use whichever suits your environment.
 ## 1. Command-line usage
 
 ```
-python3 c64asm.py <input.asm> -o <output.prg> [--listing <file.lst>] [--vice-labels <file>] [--lib-dir <dir>] [--warn-unused]
-cc -O2 -o c64asm c64asm.c && ./c64asm <input.asm> -o <output.prg> [--listing <file.lst>] [--vice-labels <file>] [--lib-dir <dir>] [--warn-unused]
+python3 c64asm.py <input.asm> -o <output.prg> [--listing <file.lst>] [--vice-labels <file>] [--lib-dir <dir>] [--warn-unused | --warn-unused-all]
+cc -O2 -o c64asm c64asm.c && ./c64asm <input.asm> -o <output.prg> [--listing <file.lst>] [--vice-labels <file>] [--lib-dir <dir>] [--warn-unused | --warn-unused-all]
 ```
 
 | Argument | Required | Description |
@@ -25,7 +25,8 @@ cc -O2 -o c64asm c64asm.c && ./c64asm <input.asm> -o <output.prg> [--listing <fi
 | `--listing <file>` | no | Write a listing file: addresses, encoded bytes, source lines, and a final symbol table. |
 | `--vice-labels <file>` | no | Write a VICE monitor label file for debugging by name (§19). |
 | `--lib-dir <dir>` | no | Fallback search directory for `.include` (§13). See below. |
-| `--warn-unused` | no | Warn about every symbol defined but never referenced (§20). Off by default. |
+| `--warn-unused` | no | Warn about every symbol defined but never referenced, scoped to the main file (§20). Off by default. |
+| `--warn-unused-all` | no | Like `--warn-unused`, but without the main-file scoping — also reports unused symbols from `.include`d files (§20). |
 | `-h`, `--help` | no | Print a short usage message. |
 
 On success, the assembler prints the number of bytes assembled and the
@@ -1355,13 +1356,14 @@ VICE (cc65, for one) export labels the same way for the same reason.
 `--warn-unused` prints a warning, after assembly finishes, for every
 symbol — a label or a `=`/`.equ` constant, including `.struct` (§10)
 fields — that was defined but never referenced anywhere in the
-program:
+program, **defined in the main file itself**:
 
 ```
-$ python3 c64asm.py mygame.asm -o mygame.prg --warn-unused
+$ python3 c64asm.py mygame.asm -o mygame.prg --lib-dir lib --warn-unused
 Assembled 1214 bytes, origin=$0801 -> mygame.prg
 Warning: Unused symbol 'Room.flags' (never referenced) (line 12: Room.flags = 6)
 Warning: Unused symbol 'old_helper' (never referenced) (line 88: old_helper:)
+(24 more unused symbols in .include'd files not shown -- use --warn-unused-all to see them)
 ```
 
 "Referenced" means looked up by name from within an expression —
@@ -1370,20 +1372,31 @@ list to another symbol's own defining expression. This genuinely never
 fails the build: it's purely informational, off by default, and has no
 effect at all unless the flag is given.
 
-### Why this is opt-in, not automatic
+### Scope: main file by default, `--warn-unused-all` for everything
 
-A program that only exercises part of an `.include`d library will
-have plenty of correctly-unused library-internal symbols — that's
-normal, not a mistake. Concretely: running `--warn-unused` against
-this project's own `adventure.asm` (a text-only game) reports 24
-unused symbols, almost all of them `hardware.inc` sprite/sound
-registers a text adventure has no reason to touch; against `demo.asm`
-(which uses far more of the library, but still only five keys' worth
-of `keyboard.inc`'s 192 generated constants) it's 184. Making this
-always-on would bury any warning actually worth reading under a pile
-of expected noise on nearly every program that uses the standard
-library at all — so it's a tool to reach for deliberately, not a
-running commentary on every build.
+By far the most common source of "unused" symbols in any program that
+uses the standard library (or any `.include`d library) is the library
+itself — a project rarely uses every constant a general-purpose
+`.inc` file defines, and that's completely normal, not a mistake. So
+by default, `--warn-unused` only reports symbols *defined in the main
+file* — the file named on the command line, not anything it
+`.include`s — and prints a one-line count of how many more were found
+in included files but suppressed, so nothing goes missing silently.
+
+`--warn-unused-all` (which implies `--warn-unused`) removes that
+scoping and reports everything, main file and included files alike.
+Concretely: running `--warn-unused-all` against this project's own
+`adventure.asm` (a text-only game) reports 24 unused symbols, almost
+all of them `hardware.inc` sprite/sound registers a text adventure has
+no reason to touch; against `demo.asm` (which uses far more of the
+library, but still only five keys' worth of `keyboard.inc`'s 192
+generated constants) it's 184 — and, in both cases, plain
+`--warn-unused` reports zero, since neither demo has any unused
+symbols of its *own*. `--warn-unused-all` is still there for when you
+genuinely want the full picture — auditing a library you're writing
+yourself, say — but the default is tuned for the much more common
+case: "did *I* leave something unused," not "does this library define
+more than I happen to be using today."
 
 ### What this can and can't catch
 

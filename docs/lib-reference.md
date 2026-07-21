@@ -140,16 +140,25 @@ Assembly error: graphics.inc requires XMAX (a compile-time constant) defined bef
 ### A note on `--warn-unused` and this library
 
 `c64asm-reference.md` §20 documents `--warn-unused`, a flag that warns
-about every symbol defined but never referenced. Expect it to be noisy
-against any program built on this library: `.include`ing a file
-defines *everything* in it, whether your program uses all of it or
-not, and this library defines a lot — `keyboard.inc` alone is 192
-constants for keys most programs never check. Concretely,
-`demo.asm` reports 184 unused symbols this way, almost entirely
-`keyboard.inc` entries for keys it doesn't use; that's expected, not a
-sign anything's wrong. `--warn-unused` is still worth reaching for
-when you want it — just expect to skim past library noise to find
-anything relevant to your own code.
+about every symbol defined but never referenced. By default it's
+scoped to your own main file, not anything it `.include`s — which
+matters here specifically, since `.include`ing a file defines
+*everything* in it whether your program uses all of it or not, and
+this library defines a lot (`keyboard.inc` alone is 192 constants for
+keys most programs never check). Plain `--warn-unused` skips all of
+that automatically, so it stays useful even on a program built
+entirely on this library: both `demo.asm` and `adventure.asm` (this
+project's own demos) report zero unused symbols with plain
+`--warn-unused`, despite using only a fraction of what the library
+defines.
+
+`--warn-unused-all` removes that scoping if you ever want the full
+picture — auditing the library itself, say, rather than a program
+built on it. Expect it to be noisy: concretely, `--warn-unused-all`
+against `demo.asm` reports 184 unused symbols, almost entirely
+`keyboard.inc` entries for keys it doesn't use. That's expected, not a
+sign anything's wrong — it's just not the question plain
+`--warn-unused` is trying to answer.
 
 ### A `.basic` gotcha these libraries will expose
 

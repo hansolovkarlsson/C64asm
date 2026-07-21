@@ -2214,7 +2214,7 @@ def assemble_source(main_path, lib_dir=None):
     return origin, code, asm.listing, asm.symbols, asm
 
 
-def report_unused_symbols(asm):
+def report_unused_symbols(asm, main_path, include_library=False):
     """Prints a warning for every symbol defined but never referenced
     anywhere in the program -- see --warn-unused. Opt-in, not
     automatic: a typical program that only uses part of an .include'd
@@ -2223,6 +2223,13 @@ def report_unused_symbols(asm):
     say), which would otherwise bury any warning actually worth
     looking at under a pile of expected noise.
 
+    Scoped to the main file by default, for the same reason: an
+    .include'd file's own unused symbols are overwhelmingly library
+    noise rather than anything about *this* program, so they're
+    suppressed (with a one-line count of how many, so nothing goes
+    missing silently) unless include_library is set -- see
+    --warn-unused-all.
+
     "Used" means looked up by name from within an expression -- see
     ExprParser.parse_atom's TK_IDENT case, which is the only place
     _used_symbols is added to. A symbol only referenced from inside a
@@ -2230,8 +2237,14 @@ def report_unused_symbols(asm):
     actually evaluates) counts as unused here, the same as a real
     compiler would treat code excluded by an '#ifdef'."""
     unused = sorted(set(asm.symbols) - _used_symbols)
+    suppressed_count = 0
     for name in unused:
         li = asm.symbol_first_li.get(name)
+        filename = asm.lines[li][5] if (li is not None and li < len(asm.lines)) else None
+        is_local = filename is None or filename == main_path
+        if not is_local and not include_library:
+            suppressed_count += 1
+            continue
         if li is not None and li < len(asm.lines):
             line_no, raw, _label, _op, _operand, filename = asm.lines[li]
             _set_error_file(filename)
@@ -2242,6 +2255,12 @@ def report_unused_symbols(asm):
             # define_symbol()), but degrade to a plain message with no
             # location rather than crash the whole report over it.
             record_warning(f"Unused symbol '{name}' (never referenced)")
+
+    if suppressed_count and not include_library:
+        plural = "" if suppressed_count == 1 else "s"
+        print(f"({suppressed_count} more unused symbol{plural} in "
+              f".include'd files not shown -- use --warn-unused-all to see them)",
+              file=sys.stderr)
 
 
 def main():
@@ -2268,13 +2287,20 @@ def main():
     parser.add_argument('--warn-unused', action='store_true',
                          help="After assembling, warn about every symbol "
                               "(label or constant) defined but never "
-                              "referenced anywhere in the program. Off by "
-                              "default: a typical program that only uses "
-                              "part of an .include'd library will have "
-                              "plenty of expected, harmless unused "
-                              "library-internal symbols. Never fails the "
-                              "build -- see c64asm-reference.md's "
-                              "\"Unused-symbol warnings\" section.")
+                              "referenced anywhere in the program, scoped "
+                              "to the main file (an .include'd file's own "
+                              "unused symbols are suppressed by default -- "
+                              "see --warn-unused-all). Off by default. "
+                              "Never fails the build -- see "
+                              "c64asm-reference.md's \"Unused-symbol "
+                              "warnings\" section.")
+    parser.add_argument('--warn-unused-all', action='store_true',
+                         help="Like --warn-unused (and implies it), but "
+                              "without the main-file scoping -- also warns "
+                              "about unused symbols defined in .include'd "
+                              "files. Expect a lot of library-internal "
+                              "noise unless the program uses nearly "
+                              "everything a library it includes defines.")
     args = parser.parse_args()
 
     # File reading (of the main file, and of anything it .include's) now
@@ -2294,8 +2320,8 @@ def main():
 
     print(f"Assembled {len(code)} bytes, origin=${origin:04X} -> {args.output}")
 
-    if args.warn_unused:
-        report_unused_symbols(asm)
+    if args.warn_unused or args.warn_unused_all:
+        report_unused_symbols(asm, args.input, include_library=args.warn_unused_all)
 
     if args.listing:
         with open(args.listing, 'w') as f:

@@ -26,12 +26,14 @@ SINGLE_TARGET := $(SINGLE_DIR)/c64asm
 SINGLE_SOURCE := $(SINGLE_DIR)/c64asm.c
 
 # C64 Programs
+# CASM = [ bin/c64asm single_src/c64asm "python3 single_src/c64asm.py"]
+CASM    ?= $(TARGET)
 EXA_DIR := examples
 EXA_SRC := $(wildcard $(EXA_DIR)/*.asm)
 EXA_PRG := $(EXA_SRC:.asm=.prg)
 LIB_DIR := lib
-AFLAGS  ?= 
-# --warn-unused
+AFLAGS  ?= --warn-unused
+# --warn-unused-all
 
 
 # Make
@@ -77,6 +79,6 @@ $(EXA_PRG): $(EXA_SRC)
 
 %.prg: %.asm
 	touch $<
-	$(TARGET) $< -o $@ --lib-dir $(LIB_DIR) --listing $(<:.asm=.lst) --vice-labels $(<:.asm=.vice) $(AFLAGS) >> asm.log
+	$(CASM) $< -o $@ --lib-dir $(LIB_DIR) --listing $(<:.asm=.lst) --vice-labels $(<:.asm=.vice) $(AFLAGS) >> asm.log
 
 

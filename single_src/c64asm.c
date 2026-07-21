@@ -3171,10 +3171,15 @@ static void usage(const char *prog) {
         "                   \"<file>\"' in the VICE monitor to debug by name.\n"
         "  --warn-unused    After assembling, warn about every symbol (label\n"
         "                   or constant) defined but never referenced anywhere\n"
-        "                   in the program. Off by default: a typical program\n"
-        "                   that only uses part of an .include'd library will\n"
-        "                   have plenty of expected, harmless unused\n"
-        "                   library-internal symbols. Never fails the build.\n",
+        "                   in the program, scoped to the main file (an\n"
+        "                   .include'd file's own unused symbols are\n"
+        "                   suppressed by default -- see --warn-unused-all).\n"
+        "                   Off by default. Never fails the build.\n"
+        "  --warn-unused-all  Like --warn-unused (and implies it), but without\n"
+        "                   the main-file scoping -- also warns about unused\n"
+        "                   symbols defined in .include'd files. Expect a lot\n"
+        "                   of library-internal noise unless the program uses\n"
+        "                   nearly everything a library it includes defines.\n",
         prog);
 }
 
@@ -3186,13 +3191,23 @@ static void usage(const char *prog) {
  * would otherwise bury any warning actually worth looking at under a
  * pile of expected noise.
  *
+ * Scoped to the main file by default, for the same reason: an
+ * .include'd file's own unused symbols are overwhelmingly library
+ * noise rather than anything about *this* program, so they're
+ * suppressed (with a one-line count of how many, so nothing goes
+ * missing silently) unless include_library is set -- see
+ * --warn-unused-all. main_path is compared against each symbol's
+ * defining line's filename (empty for a program that never uses
+ * .include, in which case everything is trivially "local") to tell
+ * the two apart.
+ *
  * "Used" means looked up by name from within an expression -- see
  * parse_atom's TK_IDENT case, the only place that sets a Symbol's
  * `used` flag. A symbol only referenced from inside a permanently-
  * false '.if' branch (dead code that pass 2 never actually evaluates)
  * counts as unused here, the same as a real compiler would treat code
  * excluded by an '#ifdef'. */
-static void report_unused_symbols(void) {
+static void report_unused_symbols(const char *main_path, int include_library) {
     /* alphabetical, matching the --listing/--vice-labels symbol tables */
     int *order = malloc(sizeof(int) * symtab_count);
     for (int i = 0; i < symtab_count; i++) order[i] = i;
@@ -3202,11 +3217,18 @@ static void report_unused_symbols(void) {
             if (strcmp(symtab[order[j]].name, symtab[order[min]].name) < 0) min = j;
         int t = order[i]; order[i] = order[min]; order[min] = t;
     }
+    int suppressed_count = 0;
     for (int i = 0; i < symtab_count; i++) {
         Symbol *s = &symtab[order[i]];
         if (s->used) continue;
-        if (s->first_li >= 0 && s->first_li < g_line_count) {
-            SourceLine *L = &g_lines[s->first_li];
+        SourceLine *L = (s->first_li >= 0 && s->first_li < g_line_count)
+                         ? &g_lines[s->first_li] : NULL;
+        int is_local = !L || L->filename[0] == '\0' || strcmp(L->filename, main_path) == 0;
+        if (!is_local && !include_library) {
+            suppressed_count++;
+            continue;
+        }
+        if (L) {
             set_error_file(L->filename);
             asm_warning(L->line_no, L->raw, "Unused symbol '%s' (never referenced)", s->name);
         } else {
@@ -3217,6 +3239,11 @@ static void report_unused_symbols(void) {
             asm_warning(0, NULL, "Unused symbol '%s' (never referenced)", s->name);
         }
     }
+    if (suppressed_count && !include_library) {
+        fprintf(stderr, "(%d more unused symbol%s in .include'd files not shown "
+                "-- use --warn-unused-all to see them)\n",
+                suppressed_count, suppressed_count == 1 ? "" : "s");
+    }
     free(order);
 }
 
@@ -3226,6 +3253,7 @@ int main(int argc, char **argv) {
     const char *listing_path = NULL;
     const char *vice_labels_path = NULL;
     int warn_unused = 0;
+    int warn_unused_all = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
@@ -3237,6 +3265,8 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--vice-labels") == 0) {
             if (i + 1 >= argc) { usage(argv[0]); return 1; }
             vice_labels_path = argv[++i];
+        } else if (strcmp(argv[i], "--warn-unused-all") == 0) {
+            warn_unused_all = 1;
         } else if (strcmp(argv[i], "--warn-unused") == 0) {
             warn_unused = 1;
         } else if (strcmp(argv[i], "--lib-dir") == 0) {
@@ -3305,7 +3335,8 @@ int main(int argc, char **argv) {
 
     printf("Assembled %zu bytes, origin=$%04lX -> %s\n", output.len, origin2, output_path);
 
-    if (warn_unused) report_unused_symbols();
+    if (warn_unused || warn_unused_all)
+        report_unused_symbols(input_path, warn_unused_all);
 
     /* Shared alphabetical symbol order for --listing's "Symbol table:"
      * section and/or --vice-labels below -- simple insertion-sort-free
