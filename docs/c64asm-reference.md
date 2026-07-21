@@ -1475,18 +1475,19 @@ stub is the first thing written.
 ## 19. Listing file format
 
 When `--listing` is given, the assembler writes a text file with one line
-per assembled instruction or data-emitting directive:
+per assembled instruction:
 
 ```
-<address>  <bytes>    <original source line>
+<address>  <bytes>    <cycles>  <original source line>
 ```
 
 followed by a `Symbol table:` section listing every defined symbol and its
 final value, sorted alphabetically:
 
 ```
-080D  A2 00             ldx #$00
-080F  BD 30 08          lda message,x
+080D  A2 00      2       ldx #$00
+080F  BD 30 08   4/5     lda message,x
+0812  D0 FA      2/3/4   bne loop
 ...
 
 Symbol table:
@@ -1500,6 +1501,38 @@ Symbol table:
 Directives that don't correspond to a single machine instruction (e.g.
 `.byte`, `.word`, `.fill`) are not individually itemized in the listing;
 only real 6502 instructions appear there.
+
+### The CYCLES column
+
+A plain number is a fixed cycle count — every instruction takes exactly
+that long, always. `b/b+1` marks a *read* instruction (`lda`, `cmp`,
+`adc`, and similar) using indexed addressing, which takes one extra
+cycle if the indexing happens to cross a page boundary at runtime — a
+runtime condition this assembler can't know at assembly time, since it
+depends on the actual value in the index register when the instruction
+executes, so both possibilities are shown rather than guessing. `2/3/4`
+marks a conditional branch: 2 cycles if not taken, 3 if taken, 4 if
+taken and the branch crosses a page boundary.
+
+Notably, the page-boundary bonus above does *not* apply to `sta`/`stx`/
+`sty` or to read-modify-write instructions (`asl`, `lsr`, `rol`, `ror`,
+`inc`, `dec`) using indexed addressing — those always take the same
+fixed number of cycles regardless of whether a page gets crossed, which
+is why (for example) `lda $1000,x` shows `4/5` but `sta $2000,x` shows a
+plain `5`, not `4/5`, even though both use the same addressing mode.
+
+An empty CYCLES column means an illegal/undocumented opcode (§16) —
+cycle timing for those isn't covered here; only the documented NMOS
+6502/6510 instruction set has cycle counts shown.
+
+The listing never attempts a running cycle total across multiple lines:
+between page-crossable reads and branches, the *exact* total for any
+nontrivial stretch of code depends on runtime conditions this assembler
+has no way to know, so adding up a specific range of lines — using the
+worst case, the best case, or both, depending on what you're checking —
+is left to you, the same way it would be with a printed cycle-count
+table and a pencil, just without needing to cross-reference a separate
+table for every line.
 
 ---
 

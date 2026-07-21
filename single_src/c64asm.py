@@ -203,6 +203,84 @@ ILLEGAL_SLOTS |= {('NOP', mode) for mode in ILLEGAL_NOP_MODES}
 MODE_SIZE = {'imp':1,'acc':1,'imm':2,'zp':2,'zpx':2,'zpy':2,'rel':2,
              'abs':3,'absx':3,'absy':3,'ind':3,'indx':2,'indy':2}
 
+# ---------------------------------------------------------------------------
+# Cycle counts for --listing (§18) -- documented (legal) NMOS 6502/6510
+# opcodes only. Every (mnemonic, mode) key here matches OPCODES above
+# exactly, cross-checked entry-by-entry against 6502.org's published
+# timing table (http://6502.org/tutorials/6502opcodes.html); illegal/
+# undocumented opcodes (.cpu 6510x) are deliberately not covered -- see
+# that section's own note on why.
+#
+# A plain int is a fixed cycle count. The string 'branch' means the
+# well-known 2/3/4 case every conditional branch shares: 2 cycles if
+# not taken, 3 if taken, 4 if taken AND the branch crosses a page
+# boundary (the boundary check is against the address immediately
+# after the branch, not the branch opcode itself). A ('pc', base)
+# tuple means a *read* instruction using an indexed addressing mode
+# that takes one extra cycle if the indexing crosses a page boundary --
+# shown as base/base+1. Note this "+1 if it crosses a page" rule does
+# NOT apply to writes (STA/STX/STY) or read-modify-write instructions
+# (ASL/LSR/ROL/ROR/INC/DEC) using an indexed mode -- those always take
+# the same fixed cycle count regardless of whether a page is crossed,
+# which is why STA/DEC/etc below are given plain ints for absx/absy,
+# not ('pc', ...) tuples, even though LDA/CMP/etc are.
+CYCLES = {
+    'ADC': {'imm':2,'zp':3,'zpx':4,'abs':4,'absx':('pc',4),'absy':('pc',4),'indx':6,'indy':('pc',5)},
+    'AND': {'imm':2,'zp':3,'zpx':4,'abs':4,'absx':('pc',4),'absy':('pc',4),'indx':6,'indy':('pc',5)},
+    'ASL': {'acc':2,'imp':2,'zp':5,'zpx':6,'abs':6,'absx':7},
+    'BCC': {'rel':'branch'}, 'BCS': {'rel':'branch'}, 'BEQ': {'rel':'branch'},
+    'BIT': {'zp':3,'abs':4},
+    'BMI': {'rel':'branch'}, 'BNE': {'rel':'branch'}, 'BPL': {'rel':'branch'},
+    'BRK': {'imp':7},
+    'BVC': {'rel':'branch'}, 'BVS': {'rel':'branch'},
+    'CLC': {'imp':2}, 'CLD': {'imp':2}, 'CLI': {'imp':2}, 'CLV': {'imp':2},
+    'CMP': {'imm':2,'zp':3,'zpx':4,'abs':4,'absx':('pc',4),'absy':('pc',4),'indx':6,'indy':('pc',5)},
+    'CPX': {'imm':2,'zp':3,'abs':4},
+    'CPY': {'imm':2,'zp':3,'abs':4},
+    'DEC': {'zp':5,'zpx':6,'abs':6,'absx':7},
+    'DEX': {'imp':2}, 'DEY': {'imp':2},
+    'EOR': {'imm':2,'zp':3,'zpx':4,'abs':4,'absx':('pc',4),'absy':('pc',4),'indx':6,'indy':('pc',5)},
+    'INC': {'zp':5,'zpx':6,'abs':6,'absx':7},
+    'INX': {'imp':2}, 'INY': {'imp':2},
+    'JMP': {'abs':3,'ind':5},
+    'JSR': {'abs':6},
+    'LDA': {'imm':2,'zp':3,'zpx':4,'abs':4,'absx':('pc',4),'absy':('pc',4),'indx':6,'indy':('pc',5)},
+    'LDX': {'imm':2,'zp':3,'zpy':4,'abs':4,'absy':('pc',4)},
+    'LDY': {'imm':2,'zp':3,'zpx':4,'abs':4,'absx':('pc',4)},
+    'LSR': {'acc':2,'imp':2,'zp':5,'zpx':6,'abs':6,'absx':7},
+    'NOP': {'imp':2},
+    'ORA': {'imm':2,'zp':3,'zpx':4,'abs':4,'absx':('pc',4),'absy':('pc',4),'indx':6,'indy':('pc',5)},
+    'PHA': {'imp':3}, 'PHP': {'imp':3},
+    'PLA': {'imp':4}, 'PLP': {'imp':4},
+    'ROL': {'acc':2,'imp':2,'zp':5,'zpx':6,'abs':6,'absx':7},
+    'ROR': {'acc':2,'imp':2,'zp':5,'zpx':6,'abs':6,'absx':7},
+    'RTI': {'imp':6}, 'RTS': {'imp':6},
+    'SBC': {'imm':2,'zp':3,'zpx':4,'abs':4,'absx':('pc',4),'absy':('pc',4),'indx':6,'indy':('pc',5)},
+    'SEC': {'imp':2}, 'SED': {'imp':2}, 'SEI': {'imp':2},
+    'STA': {'zp':3,'zpx':4,'abs':4,'absx':5,'absy':5,'indx':6,'indy':6},
+    'STX': {'zp':3,'zpy':4,'abs':4},
+    'STY': {'zp':3,'zpx':4,'abs':4},
+    'TAX': {'imp':2}, 'TAY': {'imp':2}, 'TSX': {'imp':2},
+    'TXA': {'imp':2}, 'TXS': {'imp':2}, 'TYA': {'imp':2},
+}
+
+
+def cycle_str(mnemonic, mode):
+    """Formats CYCLES's entry for (mnemonic, mode) the way --listing
+    shows it: a plain number for a fixed count, 'base/base+1' for a
+    page-crossable read, '2/3/4' for a branch, or '' if there's no
+    entry at all (an illegal/undocumented opcode -- see CYCLES's own
+    comment above)."""
+    spec = CYCLES.get(mnemonic, {}).get(mode)
+    if spec is None:
+        return ''
+    if spec == 'branch':
+        return '2/3/4'
+    if isinstance(spec, tuple):
+        base = spec[1]
+        return f'{base}/{base + 1}'
+    return str(spec)
+
 BRANCHES = {'BCC','BCS','BEQ','BMI','BNE','BPL','BVC','BVS'}
 
 DIRECTIVES = {'.org', '*=', '.byte', '.db', '.word', '.dw', '.text', '.asc',
@@ -1756,7 +1834,7 @@ class Assembler:
                         output.append(0x4C)
                         output.append(val & 0xFF)
                         output.append((val >> 8) & 0xFF)
-                        self.listing.append((jmp_addr, raw, output[-3:]))
+                        self.listing.append((jmp_addr, raw, output[-3:], '3'))
                 continue
 
             if op == '.cpu':
@@ -2209,7 +2287,8 @@ class Assembler:
                     output.append(val & 0xFF)
                     output.append((val >> 8) & 0xFF)
 
-                self.listing.append((entry_pc, raw, output[-size:] if size else b''))
+                self.listing.append((entry_pc, raw, output[-size:] if size else b'',
+                                      cycle_str(mnemonic, mode)))
 
             pc += size
 
@@ -2393,10 +2472,20 @@ def main():
 
     if args.listing:
         with open(args.listing, 'w') as f:
-            f.write(f"; c64asm listing  (origin ${origin:04X}, {len(code)} bytes)\n\n")
-            for (addr, raw, byts) in listing:
+            f.write(f"; c64asm listing  (origin ${origin:04X}, {len(code)} bytes)\n")
+            f.write("; CYCLES column: a plain number is a fixed cycle count; "
+                     "\"b/b+1\" means b cycles, +1 more if this instruction's "
+                     "indexed addressing crosses a page boundary; \"2/3/4\" means "
+                     "a branch's usual 2 (not taken) / 3 (taken) / 4 (taken, "
+                     "crossing a page). Blank means an illegal/undocumented "
+                     "opcode (.cpu 6510x) -- see c64asm-reference.md \x22Listing "
+                     "file format\x22.\n\n")
+            f.write(f"{'ADDR':<6}{'BYTES':<11}{'CYCLES':<8}SOURCE\n")
+            for entry in listing:
+                addr, raw, byts = entry[0], entry[1], entry[2]
+                cycles = entry[3] if len(entry) > 3 else ''
                 hexb = ' '.join(f'{b:02X}' for b in byts)
-                f.write(f"{addr:04X}  {hexb:<9} {raw.rstrip()}\n")
+                f.write(f"{addr:04X}  {hexb:<11}{cycles:<8}{raw.rstrip()}\n")
             f.write("\nSymbol table:\n")
             for name in sorted(symbols):
                 f.write(f"  {name:<20} = ${symbols[name]:04X}\n")

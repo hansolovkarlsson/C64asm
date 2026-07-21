@@ -13,13 +13,23 @@
 #ifndef C64ASM_LISTING_H
 #define C64ASM_LISTING_H
 
+#include <stddef.h>
 #include "common.h"
+#include "opcodes.h"
+
+/* Formats the cycle count for (mnemonic, mode) into out (see
+ * listing.c for the exact notation) -- used both when building a
+ * listing entry (assembler.c) and inside listing.c's own writer. */
+void cycle_str(const char *mnemonic, Mode mode, char *out, size_t outsz);
 
 typedef struct {
     long addr;
     char raw[MAX_LINE_LEN];
     unsigned char bytes[3];   /* an instruction is at most 3 bytes */
     int nbytes;
+    char cycles[8];   /* see cycle_str() in listing.c for the exact
+                          notation; empty for an illegal/undocumented
+                          opcode */
 } ListEntry;
 
 /* The listing itself and its current size, exposed directly for the
@@ -30,8 +40,11 @@ extern ListEntry *g_listing;
 extern int g_listing_count;
 
 /* Records one more listing entry. Grows the backing array (by doubling,
- * same strategy as bytebuf.c) if it's full. */
-void listing_add(long addr, const char *raw, const unsigned char *bytes, int nbytes);
+ * same strategy as bytebuf.c) if it's full. cycles may be NULL or "",
+ * both meaning "no cycle info for this instruction" (see cycle_str()
+ * in listing.c). */
+void listing_add(long addr, const char *raw, const unsigned char *bytes,
+                  int nbytes, const char *cycles);
 
 /*
  * Writes the full listing file: one line per recorded instruction in

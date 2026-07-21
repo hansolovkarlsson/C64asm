@@ -213,7 +213,7 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                     jmp_bytes[1] = (unsigned char)(target & 0xFF);
                     jmp_bytes[2] = (unsigned char)((target >> 8) & 0xFF);
                     bb_push_n(output, jmp_bytes, 3);
-                    listing_add(pc, L->raw, jmp_bytes, 3);
+                    listing_add(pc, L->raw, jmp_bytes, 3, "3");
                 }
                 pc += 3;
             }
@@ -830,7 +830,9 @@ long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                     bytes[nb++] = (unsigned char)((val >> 8) & 0xFF);
                 }
                 bb_push_n(output, bytes, nb);
-                listing_add(entry_pc, L->raw, bytes, nb);
+                char cyc_buf[8];
+                cycle_str(L->op, mode, cyc_buf, sizeof(cyc_buf));
+                listing_add(entry_pc, L->raw, bytes, nb, cyc_buf);
             }
             pc += size;
         }

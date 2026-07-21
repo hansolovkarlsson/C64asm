@@ -13,6 +13,30 @@ this project's full regression suite before being marked done — that
 discipline is this project's own standing practice, not something
 worth repeating in every entry below.
 
+## Cycle counts in `--listing`
+
+Every assembled instruction in the listing file now shows how many
+cycles it takes, cross-checked entry-by-entry against 6502.org's
+published NMOS 6502/6510 timing table rather than reconstructed from
+memory, given how easy this is to get subtly wrong. Handles the two
+well-known variable cases explicitly instead of guessing: `4/5` for a
+*read* instruction (`lda`, `cmp`, and similar) using indexed
+addressing that might cross a page boundary at runtime, and `2/3/4`
+for a conditional branch (not taken / taken / taken across a page).
+Correctly excludes the page-crossing bonus for writes (`sta`) and
+read-modify-write instructions (`inc`, `asl`, and similar) using
+indexed addressing, which always take a fixed number of cycles
+regardless — confirmed directly in test output that `lda $1000,x`
+shows `4/5` while `sta $2000,x` shows a plain `5`, not `4/5`, despite
+using the same addressing mode. Illegal/undocumented opcodes are
+deliberately left blank rather than guessed. Along the way, found and
+fixed a small pre-existing inconsistency between the Python and C
+implementations' listing output (C wasn't trimming all trailing
+whitespace from the source column, only newlines) that had never
+surfaced before since nothing previously compared listing file
+*content* between implementations directly. See `c64asm-reference.md`
+§19.
+
 ## `adventure.asm`: each `room_exits` row individually `.tag`'d
 
 `.tag` checks one struct instance, not a whole array — but nothing

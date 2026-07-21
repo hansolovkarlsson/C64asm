@@ -95,6 +95,10 @@ a real C64 to run it.
 - **VICE monitor label export** (`--vice-labels`) — debug by name in
   VICE (`break .main_loop` instead of `break $0a60`) instead of bare
   hex addresses; see `c64asm-reference.md` §20
+- **Cycle counts in `--listing`** — every assembled instruction is
+  annotated with how many cycles it takes, including the well-known
+  variable cases (`4/5` for a page-crossable read, `2/3/4` for a
+  branch) rather than guessing; see `c64asm-reference.md` §19
 - **Unused-symbol warnings** (`--warn-unused`) — flags every label or
   constant defined but never referenced, after assembly finishes.
   Scoped to the main file by default (an `.include`d library's own
