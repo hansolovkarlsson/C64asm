@@ -378,7 +378,7 @@ static int is_directive(const char *tok) {
     static const char *dirs[] = {
         ".org", ".byte", ".db", ".word", ".dw", ".text", ".asc",
         ".fill", ".ds", ".res", ".basic", ".equ", ".align", ".cpu", ".charset",
-        ".error", ".warning", ".incbin",
+        ".error", ".warning", ".incbin", ".assert",
         ".if", ".elif", ".else", ".endif", ".ifdef", ".ifndef", NULL
     };
     for (int i = 0; dirs[i]; i++)
@@ -705,7 +705,7 @@ static void define_symbol(const char *name, long value, int line_no,
 /* Expression evaluator                                                   */
 /* --------------------------------------------------------------------- */
 
-typedef enum { TK_HEX, TK_BIN, TK_DEC, TK_CHAR, TK_IDENT, TK_STAR, TK_OP, TK_END } TokKind;
+typedef enum { TK_HEX, TK_BIN, TK_DEC, TK_CHAR, TK_IDENT, TK_STAR, TK_OP, TK_CMP, TK_END } TokKind;
 
 typedef struct {
     TokKind kind;
@@ -792,6 +792,10 @@ static void tokenize_expr(const char *text, EParser *p) {
             size_t n = j - i; if (n >= MAX_IDENT) n = MAX_IDENT - 1;
             memcpy(t.text, s + i, n); t.text[n] = '\0';
             t.kind = TK_IDENT; i = j;
+        } else if (c == '=' && i + 1 < len && s[i+1] == '=') {
+            t.kind = TK_CMP; t.text[0] = '='; t.text[1] = '='; t.text[2] = '\0'; i += 2;
+        } else if (c == '!' && i + 1 < len && s[i+1] == '=') {
+            t.kind = TK_CMP; t.text[0] = '!'; t.text[1] = '='; t.text[2] = '\0'; i += 2;
         } else if (c == '(' || c == ')' || c == '+' || c == '-' || c == '/' ||
                    c == '<' || c == '>' || c == '*') {
             t.kind = TK_OP; t.text[0] = c; t.text[1] = '\0'; i++;
@@ -896,6 +900,28 @@ static long parse_expr(EParser *p) {
     return v;
 }
 
+/* == and != -- deliberately the loosest-binding operators (lower
+ * precedence than +/-, matching the usual convention that
+ * "a + b == c + d" means "(a+b) == (c+d)"), and deliberately not
+ * chainable the way some languages allow ("a == b == c" is valid here
+ * but means "(a==b) == c", not "a==b and b==c"). Mainly meant for
+ * '.assert' (c64asm-reference.md), but available in any expression,
+ * evaluating to 1 (true) or 0 (false) either way. Deliberately not <,
+ * >, <=, >= as binary comparisons -- < and > are already unary
+ * low/high-byte operators here, and overloading them for both meanings
+ * would be genuinely ambiguous to parse. */
+static long parse_equality(EParser *p) {
+    long v = parse_expr(p);
+    Token *t = ep_peek(p);
+    if (t->kind == TK_CMP) {
+        ep_next(p);
+        long rhs = parse_expr(p);
+        int result = (t->text[0] == '=') ? (v == rhs) : (v != rhs);
+        v = result ? 1 : 0;
+    }
+    return v;
+}
+
 static long eval_expr(const char *text, long pc, int line_no, int *undefined_out) {
     EParser p;
     memset(&p, 0, sizeof(p));
@@ -916,7 +942,7 @@ static long eval_expr(const char *text, long pc, int line_no, int *undefined_out
         if (undefined_out) *undefined_out = 1;
         return 0;
     }
-    long v = parse_expr(&p);
+    long v = parse_equality(&p);
     if (p.pos != p.ntoks) {
         asm_error_recoverable(line_no, text, "Unexpected trailing text in expression '%s'", text);
         p.undefined = 1;
@@ -2690,6 +2716,66 @@ static long run_pass(int pass_no, ByteBuf *output, long *origin_out) {
                 if (pass_no == 2) asm_warning(L->line_no, L->raw, "%s", msg_text);
             } else {
                 asm_error_recoverable(L->line_no, L->raw, "%s", msg_text);
+            }
+            continue;
+        }
+
+        if (strcmp(L->op, ".assert") == 0) {
+            /* Fails assembly (recoverably -- see '.error' just above)
+             * if `condition` evaluates to 0, e.g. to catch a struct
+             * changing shape out from under code that assumed a
+             * specific size:
+             *
+             *       .assert Exits.size == 4, "compute_room_exits_offset assumes 4 fields"
+             *
+             * The message is optional; without one, the condition's
+             * own source text stands in for it. Only checked on pass
+             * 2 -- during pass 1, a symbol the condition depends on
+             * may still be an unresolved forward reference, standing
+             * in as 0, which would make an otherwise-true condition
+             * look spuriously false. */
+            char args[MAX_ARGS][MAX_LINE_LEN];
+            int nargs = split_args(L->operand, args, MAX_ARGS);
+            if (nargs < 1) {
+                asm_error_recoverable(L->line_no, L->raw,
+                    ".assert requires a condition, e.g. .assert Exits.size == 4");
+                continue;
+            }
+            if (nargs > 2) {
+                asm_error_recoverable(L->line_no, L->raw,
+                    ".assert takes at most a condition and a quoted message");
+                continue;
+            }
+            char msg_text[MAX_LINE_LEN];
+            int has_msg = 0;
+            if (nargs > 1) {
+                strncpy(msg_text, args[1], sizeof(msg_text) - 1);
+                msg_text[sizeof(msg_text) - 1] = '\0';
+                trim(msg_text);
+                size_t mlen = strlen(msg_text);
+                if (mlen >= 2 && msg_text[0] == '"' && msg_text[mlen-1] == '"') {
+                    msg_text[mlen-1] = '\0';
+                    memmove(msg_text, msg_text + 1, mlen - 1);
+                    has_msg = 1;
+                } else {
+                    asm_error_recoverable(L->line_no, L->raw,
+                        ".assert's message must be a quoted string, e.g. "
+                        ".assert Exits.size == 4, \"message\"");
+                    continue;
+                }
+            }
+            int undef = 0;
+            long val = eval_expr(args[0], pc, L->line_no, &undef);
+            if (undef && pass_no == 2) {
+                asm_error_recoverable(L->line_no, L->raw,
+                    "Undefined symbol in .assert condition '%s'", args[0]);
+                continue;
+            }
+            if (pass_no == 2 && val == 0) {
+                if (has_msg)
+                    asm_error_recoverable(L->line_no, L->raw, "%s", msg_text);
+                else
+                    asm_error_recoverable(L->line_no, L->raw, "Assertion failed: %s", args[0]);
             }
             continue;
         }

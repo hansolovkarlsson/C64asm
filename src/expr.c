@@ -14,7 +14,7 @@
 #include "strutils.h"
 #include "symtab.h"
 
-typedef enum { TK_HEX, TK_BIN, TK_DEC, TK_CHAR, TK_IDENT, TK_OP, TK_END } TokKind;
+typedef enum { TK_HEX, TK_BIN, TK_DEC, TK_CHAR, TK_IDENT, TK_OP, TK_CMP, TK_END } TokKind;
 
 typedef struct {
     TokKind kind;
@@ -129,6 +129,10 @@ static void tokenize_expr(const char *text, EParser *p) {
             size_t n = j - i; if (n >= MAX_IDENT) n = MAX_IDENT - 1;
             memcpy(t.text, s + i, n); t.text[n] = '\0';
             t.kind = TK_IDENT; i = j;
+        } else if (c == '=' && i + 1 < len && s[i+1] == '=') {
+            t.kind = TK_CMP; t.text[0] = '='; t.text[1] = '='; t.text[2] = '\0'; i += 2;
+        } else if (c == '!' && i + 1 < len && s[i+1] == '=') {
+            t.kind = TK_CMP; t.text[0] = '!'; t.text[1] = '='; t.text[2] = '\0'; i += 2;
         } else if (c == '(' || c == ')' || c == '+' || c == '-' || c == '/' ||
                    c == '<' || c == '>' || c == '*') {
             t.kind = TK_OP; t.text[0] = c; t.text[1] = '\0'; i++;
@@ -277,6 +281,28 @@ static long parse_expr(EParser *p) {
     return v;
 }
 
+/* == and != -- deliberately the loosest-binding operators (lower
+ * precedence than +/-, matching the usual convention that
+ * "a + b == c + d" means "(a+b) == (c+d)"), and deliberately not
+ * chainable the way some languages allow ("a == b == c" is valid here
+ * but means "(a==b) == c", not "a==b and b==c"). Mainly meant for
+ * '.assert' (c64asm-reference.md), but available in any expression,
+ * evaluating to 1 (true) or 0 (false) either way. Deliberately not <,
+ * >, <=, >= as binary comparisons -- < and > are already unary
+ * low/high-byte operators here, and overloading them for both meanings
+ * would be genuinely ambiguous to parse. */
+static long parse_equality(EParser *p) {
+    long v = parse_expr(p);
+    Token *t = ep_peek(p);
+    if (t->kind == TK_CMP) {
+        ep_next(p);
+        long rhs = parse_expr(p);
+        int result = (t->text[0] == '=') ? (v == rhs) : (v != rhs);
+        v = result ? 1 : 0;
+    }
+    return v;
+}
+
 long eval_expr(const char *text, long pc, int line_no, int *undefined_out) {
     EParser p;
     memset(&p, 0, sizeof(p));
@@ -297,7 +323,7 @@ long eval_expr(const char *text, long pc, int line_no, int *undefined_out) {
         if (undefined_out) *undefined_out = 1;
         return 0;
     }
-    long v = parse_expr(&p);
+    long v = parse_equality(&p);
     /* If parse_expr() returned without consuming every token, there's
      * leftover text after what should have been the end of the
      * expression (e.g. "5 5", or a stray character the grammar has no

@@ -207,7 +207,7 @@ BRANCHES = {'BCC','BCS','BEQ','BMI','BNE','BPL','BVC','BVS'}
 
 DIRECTIVES = {'.org', '*=', '.byte', '.db', '.word', '.dw', '.text', '.asc',
               '.fill', '.ds', '.res', '.basic', '.equ', '.align', '.cpu',
-              '.charset', '.error', '.warning', '.incbin',
+              '.charset', '.error', '.warning', '.incbin', '.assert',
               '.if', '.elif', '.else', '.endif', '.ifdef', '.ifndef'}
 
 MAX_MACRO_EXPANSION_DEPTH = 16   # guards against runaway/infinite recursive macros
@@ -526,8 +526,12 @@ def split_line(raw_line, line_no):
 class ExprParser:
     """A small recursive-descent parser/evaluator for assembler expressions.
     Supports + - * / ( ) unary - , unary < (low byte) and > (high byte),
-    hex ($), binary (%), decimal, character literals, '*' (current PC),
-    and symbol references."""
+    == and != (comparison, evaluating to 1 or 0 -- see parse_equality;
+    deliberately not <, >, <=, >= as binary comparisons, since < and >
+    are already unary low/high-byte operators here and overloading them
+    for both meanings would be genuinely ambiguous to parse), hex ($),
+    binary (%), decimal, character literals, '*' (current PC), and
+    symbol references."""
 
     TOKEN_RE = re.compile(r"""
         \s*(?:
@@ -536,6 +540,7 @@ class ExprParser:
           | (?P<char>'(\\.|[^'])')
           | (?P<dec>[0-9]+)
           | (?P<ident>[A-Za-z_.][A-Za-z0-9_.]*)
+          | (?P<cmp>==|!=)
           | (?P<op>[()+\-*/<>])
         )
     """, re.VERBOSE)
@@ -604,13 +609,30 @@ class ExprParser:
             record_error("Empty expression", self.line_no, self.text)
             self.undefined = True
             return 0
-        val = self.parse_expr()
+        val = self.parse_equality()
         if self.pos != len(self.tokens):
             record_error(f"Unexpected trailing text in expression '{self.text}'",
                          self.line_no)
             self.undefined = True
             return val  # still return what was successfully parsed so far,
                           # rather than discarding it for a trailing-text typo
+        return val
+
+    def parse_equality(self):
+        """== and != -- deliberately the loosest-binding operators (lower
+        precedence than +/-, matching the usual convention that
+        "a + b == c + d" means "(a+b) == (c+d)"), and deliberately not
+        chainable the way some languages allow ("a == b == c" is valid
+        here but means "(a==b) == c", not "a==b and b==c"). Mainly
+        meant for '.assert' (c64asm-reference.md), but available in any
+        expression, evaluating to 1 (true) or 0 (false) either way."""
+        val = self.parse_expr()
+        kind, tok = self.peek()
+        if kind == 'cmp':
+            self.next()
+            rhs = self.parse_expr()
+            result = (val == rhs) if tok == '==' else (val != rhs)
+            val = 1 if result else 0
         return val
 
     def parse_expr(self):
@@ -1780,6 +1802,53 @@ class Assembler:
                     record_error(msg_text, line_no, raw)
                 elif pass_no == 2:
                     record_warning(msg_text, line_no, raw)
+                continue
+
+            if op == '.assert':
+                # Fails assembly (recoverably -- see '.error' just
+                # above) if `condition` evaluates to 0, e.g. to catch a
+                # struct (§10) changing shape out from under code that
+                # assumed a specific size:
+                #
+                #       .assert Exits.size == 4, "compute_room_exits_offset assumes 4 fields"
+                #
+                # The message is optional; without one, the condition's
+                # own source text stands in for it. Only checked on
+                # pass 2 -- during pass 1, a symbol the condition
+                # depends on may still be an unresolved forward
+                # reference, standing in as 0 (§4), which would make an
+                # otherwise-true condition look spuriously false.
+                args = split_args(operand)
+                if not args:
+                    record_error(
+                        ".assert requires a condition, e.g. "
+                        ".assert Exits.size == 4", line_no, raw)
+                    continue
+                if len(args) > 2:
+                    record_error(
+                        ".assert takes at most a condition and a quoted "
+                        "message", line_no, raw)
+                    continue
+                cond_text = args[0]
+                msg_text = None
+                if len(args) > 1:
+                    msg_arg = args[1].strip()
+                    if len(msg_arg) >= 2 and msg_arg[0] == '"' and msg_arg[-1] == '"':
+                        msg_text = msg_arg[1:-1]
+                    else:
+                        record_error(
+                            ".assert's message must be a quoted string, "
+                            'e.g. .assert Exits.size == 4, "message"',
+                            line_no, raw)
+                        continue
+                val, undef = eval_expr(cond_text, self.symbols, pc, line_no)
+                if undef and pass_no == 2:
+                    record_error(f"Undefined symbol in .assert condition '{cond_text}'",
+                                 line_no, raw)
+                    continue
+                if pass_no == 2 and val == 0:
+                    record_error(msg_text if msg_text else f"Assertion failed: {cond_text}",
+                                 line_no, raw)
                 continue
 
             if op == '.charset':

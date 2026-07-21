@@ -46,7 +46,7 @@ for the full behavior.
 ```
 
 resolved relative to the file that contains the `.include` line (see
-`c64asm-reference.md` §12) — so if your project keeps `lib/` alongside
+`c64asm-reference.md` §13) — so if your project keeps `lib/` alongside
 your source file, this line works unchanged regardless of what
 directory you actually run `c64asm` from.
 
@@ -60,7 +60,7 @@ still references its zero-page location whether or not your program
 ever `jsr`s to it.
 
 Every library file below checks for its own required symbols right at
-the top, using `.ifdef`/`.error` (`c64asm-reference.md` §13), and
+the top, using `.ifdef`/`.error` (`c64asm-reference.md` §14), and
 fails with a specific message naming exactly what's missing:
 
 ```
@@ -567,6 +567,6 @@ distinction this project's own reference documentation draws between
 the two — see `c64asm-reference.md` §8's introduction to macros for
 more on that trade-off.
 
-`print_msg`'s internal loop uses `@`-prefixed local labels (§11), so its
+`print_msg`'s internal loop uses `@`-prefixed local labels (§12), so its
 labels can never collide with anything else in a program that includes
 it, no matter how many other things are also called `loop` or `done`.

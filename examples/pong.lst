@@ -288,7 +288,7 @@
 0A9C  8D 00 DC          sta CIA1_PRA
 0A9F  AD 01 DC          lda CIA1_PRB
 0AA2  58                cli
-0AA3  49 FF             eor #$ff
+0AA3  49 FF             eor #$ff          
 0AA5  29 02             and #%00000010
 0AA7  F0 08             beq no_up
 0AA9  A5 07             lda p1_y
@@ -305,7 +305,7 @@
 0ABF  8D 00 DC          sta CIA1_PRA
 0AC2  AD 01 DC          lda CIA1_PRB
 0AC5  58                cli
-0AC6  49 FF             eor #$ff
+0AC6  49 FF             eor #$ff          
 0AC8  29 20             and #%00100000
 0ACA  F0 08             beq no_down
 0ACC  A5 07             lda p1_y

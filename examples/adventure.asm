@@ -340,6 +340,7 @@ handle_go_west:
 ; Computes X := current_room * Exits.size, for indexing into
 ; room_exits (see that table's own comment, further down, for the
 ; layout this relies on).
+.assert Exits.size == 4, "compute_room_exits_offset assumes 4 fields (two left shifts below) -- update both if Exits ever changes shape"
 compute_room_exits_offset:
         lda current_room
         asl a
@@ -349,7 +350,11 @@ compute_room_exits_offset:
                                   ; gains or loses a field, this needs
                                   ; updating to match, since there's no
                                   ; way to shift by a symbolic amount
-                                  ; on the 6502
+                                  ; on the 6502 -- the .assert just
+                                  ; above turns "silently wrong room
+                                  ; navigation at runtime" into a clear
+                                  ; assembly-time error if that's ever
+                                  ; forgotten
         tax
         rts
 
