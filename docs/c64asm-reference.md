@@ -702,6 +702,14 @@ assembly — it would just silently compute the wrong offset and
 misbehave at runtime, the exact class of bug `.assert` (§11) exists to
 turn into a clear, immediate, assembly-time error instead.
 
+`lib/math.inc` also has the reverse operation, `DIV_2`/`DIV_4`/
+`DIV_8`/`DIV_16` — for going the other way, from a byte offset back to
+a record index (`offset DIV_N record_size`, plain truncating unsigned
+division), the same shift technique with `LSR` instead of `ASL`. Less
+commonly needed than `MULT_N` — usually you already know the index and
+want the offset, not the reverse — but the same `.assert`-guarded
+pairing applies if you do need it.
+
 If `Name.size` isn't a power of two, none of `lib/math.inc`'s macros
 apply — that needs either a different technique (an explicit
 lookup table of precomputed offsets, say, if the record count is

@@ -38,7 +38,7 @@ for the full behavior.
 | `lib/keyboard.inc` | Named `KEY_<NAME>_COL`/`KEY_<NAME>_ROW`/`KEY_<NAME>_CODE` constants for every key on the keyboard matrix (pairs with `input.inc`'s `READ_KEY`), and `wait_any_key` for a blocking "press any key" read that returns which key in A. |
 | `lib/graphics.inc` | `BITMAP_MODE_ON addr`, `BITMAP_MODE_OFF`, `CLEAR_BITMAP addr`, `SET_SCREEN_COLOR value`, `SPRITE_INIT data, color, x, y` for bitmap/sprite setup; `wait_frame` for raster-synced timing; `sprite0_bounce_step` for animating a sprite bouncing within a rectangular area; `sprite0_explode` for a caller-colored expand-flash-hide effect (an explosion, a hit, anything that needs a sprite to visibly go away). |
 | `lib/sound.inc` | `SID_INIT`, `PLAY_SOUND freq_hi, ad, sr, waveform`, `engine_sound_on`/`engine_sound_off`. |
-| `lib/math.inc` | `MULT_2`/`MULT_4`/`MULT_8`/`MULT_16` — multiply A in place by a small power of two, via left shifts (the 6502 has no multiply instruction). Needs no zero page, no other `.include`. Meant for indexing an array of `.struct`-sized records — see `c64asm-reference.md` §10's "Indexing an array of records". |
+| `lib/math.inc` | `MULT_2`/`MULT_4`/`MULT_8`/`MULT_16` and `DIV_2`/`DIV_4`/`DIV_8`/`DIV_16` — multiply or (truncating, unsigned) divide A in place by a small power of two, via left/right shifts (the 6502 has no multiply or divide instruction). Needs no zero page, no other `.include`. Meant for indexing an array of `.struct`-sized records and the reverse — see `c64asm-reference.md` §10's "Indexing an array of records". |
 
 ## Using a library file
 
