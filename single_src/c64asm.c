@@ -662,6 +662,10 @@ typedef struct {
                         this been defined YET" in a way that's consistent
                         across both assembly passes -- see the note above
                         the conditional-assembly handling in run_pass() */
+    int used;       /* set the first time this symbol is successfully
+                        looked up from within an expression (TK_IDENT in
+                        parse_atom) -- see --warn-unused/
+                        report_unused_symbols() near main() */
 } Symbol;
 
 static Symbol symtab[MAX_SYMBOLS];
@@ -698,6 +702,12 @@ static void define_symbol(const char *name, long value, int line_no,
     symtab[symtab_count].name[MAX_IDENT - 1] = '\0';
     symtab[symtab_count].value = value;
     symtab[symtab_count].first_li = li;
+    symtab[symtab_count].used = 0;   /* symtab is static storage, so this
+                                         is already guaranteed by the C
+                                         standard, but spelled out here
+                                         to match the other fields above
+                                         rather than relying on that
+                                         implicitly */
     symtab_count++;
 }
 
@@ -839,7 +849,7 @@ static long parse_atom(EParser *p) {
         case TK_CHAR: return (long)(unsigned char)t->text[0];
         case TK_IDENT: {
             Symbol *s = find_symbol(t->text);
-            if (s) return s->value;
+            if (s) { s->used = 1; return s->value; }
             p->undefined = 1;
             return 0;
         }
@@ -3158,8 +3168,56 @@ static void usage(const char *prog) {
         "                   of each needing its own copy.\n"
         "  --vice-labels <file>  Write a VICE monitor label file (add_label\n"
         "                   commands for every symbol) -- load it with 'll\n"
-        "                   \"<file>\"' in the VICE monitor to debug by name.\n",
+        "                   \"<file>\"' in the VICE monitor to debug by name.\n"
+        "  --warn-unused    After assembling, warn about every symbol (label\n"
+        "                   or constant) defined but never referenced anywhere\n"
+        "                   in the program. Off by default: a typical program\n"
+        "                   that only uses part of an .include'd library will\n"
+        "                   have plenty of expected, harmless unused\n"
+        "                   library-internal symbols. Never fails the build.\n",
         prog);
+}
+
+/* Prints a warning for every symbol defined but never referenced
+ * anywhere in the program -- see --warn-unused. Opt-in, not automatic:
+ * a typical program that only uses part of an .include'd library will
+ * have plenty of genuinely-fine unused library-internal symbols (a
+ * constant defined for a routine the program never calls, say), which
+ * would otherwise bury any warning actually worth looking at under a
+ * pile of expected noise.
+ *
+ * "Used" means looked up by name from within an expression -- see
+ * parse_atom's TK_IDENT case, the only place that sets a Symbol's
+ * `used` flag. A symbol only referenced from inside a permanently-
+ * false '.if' branch (dead code that pass 2 never actually evaluates)
+ * counts as unused here, the same as a real compiler would treat code
+ * excluded by an '#ifdef'. */
+static void report_unused_symbols(void) {
+    /* alphabetical, matching the --listing/--vice-labels symbol tables */
+    int *order = malloc(sizeof(int) * symtab_count);
+    for (int i = 0; i < symtab_count; i++) order[i] = i;
+    for (int i = 0; i < symtab_count; i++) {
+        int min = i;
+        for (int j = i + 1; j < symtab_count; j++)
+            if (strcmp(symtab[order[j]].name, symtab[order[min]].name) < 0) min = j;
+        int t = order[i]; order[i] = order[min]; order[min] = t;
+    }
+    for (int i = 0; i < symtab_count; i++) {
+        Symbol *s = &symtab[order[i]];
+        if (s->used) continue;
+        if (s->first_li >= 0 && s->first_li < g_line_count) {
+            SourceLine *L = &g_lines[s->first_li];
+            set_error_file(L->filename);
+            asm_warning(L->line_no, L->raw, "Unused symbol '%s' (never referenced)", s->name);
+        } else {
+            /* Shouldn't normally happen (every symbol should have a
+             * valid first_li from define_symbol()), but degrade to a
+             * plain message with no location rather than crash the
+             * whole report over it. */
+            asm_warning(0, NULL, "Unused symbol '%s' (never referenced)", s->name);
+        }
+    }
+    free(order);
 }
 
 int main(int argc, char **argv) {
@@ -3167,6 +3225,7 @@ int main(int argc, char **argv) {
     const char *output_path = NULL;
     const char *listing_path = NULL;
     const char *vice_labels_path = NULL;
+    int warn_unused = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
@@ -3178,6 +3237,8 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--vice-labels") == 0) {
             if (i + 1 >= argc) { usage(argv[0]); return 1; }
             vice_labels_path = argv[++i];
+        } else if (strcmp(argv[i], "--warn-unused") == 0) {
+            warn_unused = 1;
         } else if (strcmp(argv[i], "--lib-dir") == 0) {
             if (i + 1 >= argc) { usage(argv[0]); return 1; }
             g_lib_dir = argv[++i];
@@ -3243,6 +3304,8 @@ int main(int argc, char **argv) {
     fclose(out);
 
     printf("Assembled %zu bytes, origin=$%04lX -> %s\n", output.len, origin2, output_path);
+
+    if (warn_unused) report_unused_symbols();
 
     /* Shared alphabetical symbol order for --listing's "Symbol table:"
      * section and/or --vice-labels below -- simple insertion-sort-free

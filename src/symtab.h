@@ -24,6 +24,10 @@ typedef struct {
                         conditional-assembly design note in assembler.h
                         for why a plain find_symbol() != NULL check isn't
                         safe for that specific question. */
+    int used;       /* set the first time this symbol is successfully
+                        looked up from within an expression (expr.c's
+                        parse_atom, TK_IDENT case) -- see
+                        --warn-unused/report_unused_symbols() in main.c */
 } Symbol;
 
 /* The symbol table and its current size, exposed directly (not through

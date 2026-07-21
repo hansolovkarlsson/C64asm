@@ -91,6 +91,11 @@ a real C64 to run it.
 - **VICE monitor label export** (`--vice-labels`) — debug by name in
   VICE (`break .main_loop` instead of `break $0a60`) instead of bare
   hex addresses; see `c64asm-reference.md` §19
+- **Unused-symbol warnings** (`--warn-unused`) — flags every label or
+  constant defined but never referenced, after assembly finishes. Off
+  by default, since a program using only part of an `.include`d
+  library will have plenty of correctly-unused library-internal
+  symbols; see `c64asm-reference.md` §20
 - **`.error`/`.warning` directives** — paired with `.ifdef`/`.ifndef`,
   turn a missing precondition (a required zero-page symbol, say) into
   one clear message right at the point of the mistake, instead of a
@@ -244,16 +249,16 @@ for worked regression suites built on it).
 ## Known limitations
 
 - **Zero-page sizing of a *forward-referenced* label** can, in rare
-  cases, differ between passes — see `c64asm-reference.md` §21 for when
+  cases, differ between passes — see `c64asm-reference.md` §22 for when
   this can matter and why it almost never does in practice
 - Macros, local labels, `.include`, and conditional assembly are all
   supported but intentionally simple: macros must be defined before
   use, `.if`/`.elif` conditions can't reference a forward-declared
   symbol, and `.if` can gate instructions/data but not which `.macro`
   gets defined or which file gets `.include`d (see `c64asm-reference.md`
-  §21 for the full list)
+  §22 for the full list)
 - Assembly can surface several independent errors from one run (see
-  `c64asm-reference.md` §20), though messages after the first can
+  `c64asm-reference.md` §21), though messages after the first can
   occasionally be downstream noise rather than genuinely separate
   problems; a handful of whole-file structural errors (missing/circular
   `.include`, a broken macro or conditional-assembly block) still stop

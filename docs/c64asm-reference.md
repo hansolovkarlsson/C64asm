@@ -14,8 +14,8 @@ for the same source file. Use whichever suits your environment.
 ## 1. Command-line usage
 
 ```
-python3 c64asm.py <input.asm> -o <output.prg> [--listing <file.lst>] [--vice-labels <file>] [--lib-dir <dir>]
-cc -O2 -o c64asm c64asm.c && ./c64asm <input.asm> -o <output.prg> [--listing <file.lst>] [--vice-labels <file>] [--lib-dir <dir>]
+python3 c64asm.py <input.asm> -o <output.prg> [--listing <file.lst>] [--vice-labels <file>] [--lib-dir <dir>] [--warn-unused]
+cc -O2 -o c64asm c64asm.c && ./c64asm <input.asm> -o <output.prg> [--listing <file.lst>] [--vice-labels <file>] [--lib-dir <dir>] [--warn-unused]
 ```
 
 | Argument | Required | Description |
@@ -25,6 +25,7 @@ cc -O2 -o c64asm c64asm.c && ./c64asm <input.asm> -o <output.prg> [--listing <fi
 | `--listing <file>` | no | Write a listing file: addresses, encoded bytes, source lines, and a final symbol table. |
 | `--vice-labels <file>` | no | Write a VICE monitor label file for debugging by name (§19). |
 | `--lib-dir <dir>` | no | Fallback search directory for `.include` (§13). See below. |
+| `--warn-unused` | no | Warn about every symbol defined but never referenced (§20). Off by default. |
 | `-h`, `--help` | no | Print a short usage message. |
 
 On success, the assembler prints the number of bytes assembled and the
@@ -37,7 +38,7 @@ Assembled 60 bytes, origin=$0801 -> hello.prg
 On error, it prints one or more messages to stderr identifying the line
 number and source text, and exits with a non-zero status. Most kinds of
 mistake are collected and reported together rather than stopping at the
-first one — see §20's "Multiple errors per run"; a handful of
+first one — see §21's "Multiple errors per run"; a handful of
 whole-file structural problems still stop assembly immediately.
 
 ```
@@ -720,7 +721,7 @@ it (`Assertion failed: Exits.size == 4`).
 
 Like `.error` (§7), `.assert` is recoverable, not fatal — several
 independent failed assertions can be collected and reported together
-in one run, the same as any other recoverable error (§20). Unlike
+in one run, the same as any other recoverable error (§21). Unlike
 `.error`, whether an `.assert` fires depends on the value of an
 expression rather than being unconditional on reaching the line, so
 `condition` is only actually checked once pass 2 begins: during pass
@@ -890,7 +891,7 @@ different directories) is still correctly recognized as one file.
   error.
 - Once `.include` is used **anywhere** in a program, every subsequent
   error message — including ones from the top-level file itself — names
-  which file it came from (see §20). A program that never uses
+  which file it came from (see §21). A program that never uses
   `.include` sees no change in its error output at all.
 
 ### `.incbin`
@@ -929,7 +930,7 @@ sprite_data:
 
 **Every error `.incbin` can produce is fatal, not recoverable** —
 deliberately different from `.byte`'s own undefined-symbol handling
-(§20). An ordinary `.byte` with an undefined symbol still emits exactly
+(§21). An ordinary `.byte` with an undefined symbol still emits exactly
 one byte (with an unknown *value*, corrected once the symbol resolves),
 so the rest of the program's addresses stay right even while that one
 error is pending. An `.incbin` problem — file not found, `offset`
@@ -1038,7 +1039,7 @@ macro or library routine's own body several `.include`s away:
 ```
 
 `.error`'s message is collected the same way any other recoverable
-error is (§20) — several independent `.error`s (two different missing
+error is (§21) — several independent `.error`s (two different missing
 zero-page symbols in two different included files, say) can all be
 reported together in one run, not just the first. It does not stop
 assembly by itself; whether assembly ultimately fails still depends on
@@ -1349,7 +1350,61 @@ VICE (cc65, for one) export labels the same way for the same reason.
 
 ---
 
-## 20. Error messages
+## 20. Unused-symbol warnings
+
+`--warn-unused` prints a warning, after assembly finishes, for every
+symbol — a label or a `=`/`.equ` constant, including `.struct` (§10)
+fields — that was defined but never referenced anywhere in the
+program:
+
+```
+$ python3 c64asm.py mygame.asm -o mygame.prg --warn-unused
+Assembled 1214 bytes, origin=$0801 -> mygame.prg
+Warning: Unused symbol 'Room.flags' (never referenced) (line 12: Room.flags = 6)
+Warning: Unused symbol 'old_helper' (never referenced) (line 88: old_helper:)
+```
+
+"Referenced" means looked up by name from within an expression —
+anywhere a value gets read, from an instruction operand to a `.byte`
+list to another symbol's own defining expression. This genuinely never
+fails the build: it's purely informational, off by default, and has no
+effect at all unless the flag is given.
+
+### Why this is opt-in, not automatic
+
+A program that only exercises part of an `.include`d library will
+have plenty of correctly-unused library-internal symbols — that's
+normal, not a mistake. Concretely: running `--warn-unused` against
+this project's own `adventure.asm` (a text-only game) reports 24
+unused symbols, almost all of them `hardware.inc` sprite/sound
+registers a text adventure has no reason to touch; against `demo.asm`
+(which uses far more of the library, but still only five keys' worth
+of `keyboard.inc`'s 192 generated constants) it's 184. Making this
+always-on would bury any warning actually worth reading under a pile
+of expected noise on nearly every program that uses the standard
+library at all — so it's a tool to reach for deliberately, not a
+running commentary on every build.
+
+### What this can and can't catch
+
+A genuinely dead label or constant — left over after a refactor, or a
+typo in a definition that quietly created a second, unused symbol
+instead of erroring — shows up directly. It's a real, if imperfect,
+signal for a specific class of mistake worth knowing about: referencing
+the *wrong* — but still valid — symbol by accident (`Room.south` where
+`Room.north` was meant, say) produces no error at all, since both
+names exist; but if the *correct* one consequently ends up never
+referenced anywhere else in the program either, `--warn-unused` will
+still flag it, which is sometimes the only hint that something's off.
+
+A symbol only referenced from inside a permanently-false `.if` branch
+(§14) counts as unused here — that code never actually runs through
+either assembly pass, the same way a real compiler wouldn't count a
+reference inside `#ifdef`-excluded code as a genuine use.
+
+---
+
+## 21. Error messages
 
 Each error is printed in the form:
 
@@ -1457,7 +1512,7 @@ Common errors:
 
 ---
 
-## 21. Known limitations
+## 22. Known limitations
 
 - **Zero-page sizing of forward-referenced labels.** The assembler picks
   zero-page vs. absolute addressing based on whether an operand's value is
@@ -1489,9 +1544,9 @@ Common errors:
   unstable or highly unstable even on real NMOS hardware, and none of
   them exist at all on non-NMOS 6502 variants.
 - **Multi-error reporting has a noise trade-off.** A single run can
-  surface several independent mistakes (see §20), but messages after
+  surface several independent mistakes (see §21), but messages after
   the first one can occasionally be downstream noise rather than
-  genuinely separate problems — see the note at the end of §20.
+  genuinely separate problems — see the note at the end of §21.
 - **`.charset lower` (§6) only controls assembled bytes, not the C64's
   actual runtime character set** — that's separate hardware state the
   assembler has no way to touch, so `.charset lower` text needs to be
@@ -1503,7 +1558,7 @@ Common errors:
 
 ---
 
-## 22. Complete example
+## 23. Complete example
 
 ```asm
 ; hello.asm - prints a message and cycles the border color

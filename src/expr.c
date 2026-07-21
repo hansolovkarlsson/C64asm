@@ -198,7 +198,7 @@ static long parse_atom(EParser *p) {
         case TK_CHAR: return (long)(unsigned char)t->text[0];
         case TK_IDENT: {
             Symbol *s = find_symbol(t->text);
-            if (s) return s->value;
+            if (s) { s->used = 1; return s->value; }
             p->undefined = 1;
             return 0;  /* placeholder value; see expr.h's note on undefined_out */
         }

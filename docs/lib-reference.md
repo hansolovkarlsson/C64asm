@@ -137,6 +137,20 @@ Assembly error: graphics.inc requires XMAX (a compile-time constant) defined bef
 2 errors.
 ```
 
+### A note on `--warn-unused` and this library
+
+`c64asm-reference.md` §20 documents `--warn-unused`, a flag that warns
+about every symbol defined but never referenced. Expect it to be noisy
+against any program built on this library: `.include`ing a file
+defines *everything* in it, whether your program uses all of it or
+not, and this library defines a lot — `keyboard.inc` alone is 192
+constants for keys most programs never check. Concretely,
+`demo.asm` reports 184 unused symbols this way, almost entirely
+`keyboard.inc` entries for keys it doesn't use; that's expected, not a
+sign anything's wrong. `--warn-unused` is still worth reaching for
+when you want it — just expect to skim past library noise to find
+anything relevant to your own code.
+
 ### A `.basic` gotcha these libraries will expose
 
 `.basic`'s generated `SYS` stub always jumps to whatever code comes

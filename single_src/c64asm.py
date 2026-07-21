@@ -302,6 +302,11 @@ MAX_COLLECTED_ERRORS = 20
 _collected_errors = []      # formatted strings, capped at MAX_COLLECTED_ERRORS
 _total_error_count = 0       # number seen, uncapped
 
+_used_symbols = set()       # every symbol name successfully looked up by
+                               # parse_atom's TK_IDENT case, across both
+                               # passes -- see --warn-unused and
+                               # report_unused_symbols() near main()
+
 
 def any_errors_recorded():
     return _total_error_count > 0
@@ -311,9 +316,10 @@ def reset_collected_errors():
     """Called once per assemble_source() run, so a test harness or any
     other caller invoking this more than once in the same Python
     process starts each run with a clean slate."""
-    global _collected_errors, _total_error_count
+    global _collected_errors, _total_error_count, _used_symbols
     _collected_errors = []
     _total_error_count = 0
+    _used_symbols = set()
 
 
 def print_all_collected_errors_and_exit():
@@ -356,13 +362,16 @@ def record_error(message, line_no=None, raw=None):
 
 
 def record_warning(message, line_no=None, raw=None):
-    """Prints a '.warning' directive's message (see that directive's
-    handling in _pass()), in the same '(line N: source text)' format
-    record_error() uses -- but, unlike record_error(), this doesn't
-    count toward the error total, doesn't stop pass 2 from running or
-    output from being written, and doesn't affect the exit status.
-    Nothing else in this assembler currently produces a warning; this
-    exists purely for the '.warning' directive itself to call."""
+    """Prints a warning message in the same '(line N: source text)'
+    format record_error() uses -- but, unlike record_error(), this
+    doesn't count toward the error total, doesn't stop pass 2 from
+    running or output from being written, and doesn't affect the exit
+    status. Two callers: the '.warning' directive's own handling in
+    _pass(), and report_unused_symbols() (--warn-unused, near main())
+    for an unused-symbol warning. Callers spanning more than one file
+    (multiple unused symbols defined in different included files, say)
+    must call _set_error_file() with the right filename before each
+    call, the same as record_error()'s own callers already have to."""
     warn = AsmError(message, line_no, raw)  # reuse AsmError's own
                                                # __str__ formatting,
                                                # without raising it
@@ -691,6 +700,7 @@ class ExprParser:
         if kind == 'ident':
             name = tok
             if name in self.symbols:
+                _used_symbols.add(name)
                 return self.symbols[name]
             self.undefined = True
             return 0  # placeholder during pass 1 / forward reference
@@ -2201,7 +2211,37 @@ def assemble_source(main_path, lib_dir=None):
                                  # load() already recorded them
     asm.load(main_path, lib_dir=lib_dir)
     origin, code = asm.assemble()
-    return origin, code, asm.listing, asm.symbols
+    return origin, code, asm.listing, asm.symbols, asm
+
+
+def report_unused_symbols(asm):
+    """Prints a warning for every symbol defined but never referenced
+    anywhere in the program -- see --warn-unused. Opt-in, not
+    automatic: a typical program that only uses part of an .include'd
+    library will have plenty of genuinely-fine unused library-internal
+    symbols (a constant defined for a routine the program never calls,
+    say), which would otherwise bury any warning actually worth
+    looking at under a pile of expected noise.
+
+    "Used" means looked up by name from within an expression -- see
+    ExprParser.parse_atom's TK_IDENT case, which is the only place
+    _used_symbols is added to. A symbol only referenced from inside a
+    permanently-false '.if' branch (dead code that pass 2 never
+    actually evaluates) counts as unused here, the same as a real
+    compiler would treat code excluded by an '#ifdef'."""
+    unused = sorted(set(asm.symbols) - _used_symbols)
+    for name in unused:
+        li = asm.symbol_first_li.get(name)
+        if li is not None and li < len(asm.lines):
+            line_no, raw, _label, _op, _operand, filename = asm.lines[li]
+            _set_error_file(filename)
+            record_warning(f"Unused symbol '{name}' (never referenced)", line_no, raw)
+        else:
+            # Shouldn't normally happen (every symbol in asm.symbols
+            # should have a matching symbol_first_li entry from
+            # define_symbol()), but degrade to a plain message with no
+            # location rather than crash the whole report over it.
+            record_warning(f"Unused symbol '{name}' (never referenced)")
 
 
 def main():
@@ -2225,6 +2265,16 @@ def main():
                               "isn't given). Lets a common library directory be "
                               "shared across separate project directories instead "
                               "of each needing its own copy.")
+    parser.add_argument('--warn-unused', action='store_true',
+                         help="After assembling, warn about every symbol "
+                              "(label or constant) defined but never "
+                              "referenced anywhere in the program. Off by "
+                              "default: a typical program that only uses "
+                              "part of an .include'd library will have "
+                              "plenty of expected, harmless unused "
+                              "library-internal symbols. Never fails the "
+                              "build -- see c64asm-reference.md's "
+                              "\"Unused-symbol warnings\" section.")
     args = parser.parse_args()
 
     # File reading (of the main file, and of anything it .include's) now
@@ -2233,7 +2283,7 @@ def main():
     # -- so there's no separate open() here to fail with a raw traceback
     # if args.input doesn't exist.
     try:
-        origin, code, listing, symbols = assemble_source(args.input, lib_dir=args.lib_dir)
+        origin, code, listing, symbols, asm = assemble_source(args.input, lib_dir=args.lib_dir)
     except AsmError as e:
         print(f"Assembly error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -2243,6 +2293,9 @@ def main():
         f.write(code)
 
     print(f"Assembled {len(code)} bytes, origin=${origin:04X} -> {args.output}")
+
+    if args.warn_unused:
+        report_unused_symbols(asm)
 
     if args.listing:
         with open(args.listing, 'w') as f:

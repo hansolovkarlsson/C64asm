@@ -52,5 +52,11 @@ void define_symbol(const char *name, long value, int line_no,
     symtab[symtab_count].name[MAX_IDENT - 1] = '\0';
     symtab[symtab_count].value = value;
     symtab[symtab_count].first_li = li;
+    symtab[symtab_count].used = 0;   /* symtab is a global array (zero-
+                                         initialized by the C standard
+                                         either way), but spelled out
+                                         here to match the other fields
+                                         above rather than relying on
+                                         that implicitly */
     symtab_count++;
 }

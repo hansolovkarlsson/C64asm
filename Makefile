@@ -9,43 +9,40 @@
 # a `cc` that behaves the same way, so this Makefile needs no changes
 # there.
 
+# Assembler
 CC      ?= cc
 CFLAGS  ?= -std=c99 -O2 -Wall -Wextra
 
+# Multi-file
 SRC_DIR := src
 BIN_DIR := bin
 SOURCES := $(wildcard $(SRC_DIR)/*.c)
 OBJECTS := $(SOURCES:.c=.o)
 TARGET  := $(BIN_DIR)/c64asm
 
+# Single-file
 SINGLE_DIR := single_src
 SINGLE_TARGET := $(SINGLE_DIR)/c64asm
 SINGLE_SOURCE := $(SINGLE_DIR)/c64asm.c
 
-LIB_DIR := lib
-
+# C64 Programs
 EXA_DIR := examples
 EXA_SRC := $(wildcard $(EXA_DIR)/*.asm)
 EXA_PRG := $(EXA_SRC:.asm=.prg)
-
-# Or use patsubst for more control
-# OBJS := $(patsubst %.c, %.o, $(SRCS))
-
-all: $(OBJS)
-
-%.o: %.c
-	@echo "Compiling $< to $@"
+LIB_DIR := lib
+AFLAGS  ?= 
+# --warn-unused
 
 
-.PHONY: all clean
+# Make
+all: $(TARGET) $(SINGLE_TARGET) $(EXA_PRG)
 
-all: $(TARGET) $(SINGLE_TARGET)
-
-# Compile C
 $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $(OBJECTS)
 
-single:$(SINGLE_TARGET)
+$(SINGLE_TARGET): $(SINGLE_SOURCE)
+	touch $(SINGLE_SOURCE)
+	$(CC) $(CFLAGS) -o $@ $(SINGLE_SOURCE)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -72,11 +69,14 @@ test:
 		python3 $(EXA_DIR)/mini6502.py "$$file"; \
 	done
 
+
 examples: $(TARGET) $(EXA_PRG)
+
+$(EXA_PRG): $(EXA_SRC)
 
 
 %.prg: %.asm
-	echo $(TARGET) $< -o $@
-	$(TARGET) $< -o $@ --lib-dir $(LIB_DIR) --listing $(<:.asm=.lst) --vice-labels $(<:.asm=.vice) >> asm.log
+	touch $<
+	$(TARGET) $< -o $@ --lib-dir $(LIB_DIR) --listing $(<:.asm=.lst) --vice-labels $(<:.asm=.vice) $(AFLAGS) >> asm.log
 
 
