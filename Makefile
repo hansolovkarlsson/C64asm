@@ -37,6 +37,11 @@ AFLAGS  ?=
 # --warn-unused-all
 
 
+DISK_DIR = disk
+DISK_FILE = $(DISK_DIR)/examples.d64
+VICE_C1541 = /Applications/vice-arm64-gtk3-3.10/bin/c1541
+
+
 # Make
 all: $(TARGET) $(SINGLE_TARGET) $(EXA_PRG)
 single: $(SINGLE_TARGET)
@@ -52,7 +57,7 @@ $(SINGLE_TARGET): $(SINGLE_SOURCE)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Cleanup
-clean: clean_examples
+clean: clean_examples clean_disk
 	rm -f $(TARGET) $(SRC_DIR)/*.o $(SINGLE_TARGET)
 
 clean_examples:
@@ -74,7 +79,7 @@ test:
 	done
 
 
-examples: $(TARGET) $(EXA_PRG)
+examples: $(TARGET) $(EXA_PRG) $(DISK_FILE)
 
 $(EXA_PRG): $(EXA_SRC)
 
@@ -82,5 +87,29 @@ $(EXA_PRG): $(EXA_SRC)
 %.prg: %.asm
 	touch $<
 	$(CASM) $< -o $@ --lib-dir $(LIB_DIR) --listing $(<:.asm=.lst) --vice-labels $(<:.asm=.vice) $(AFLAGS) >> asm.log
+	touch $< $@
 
+# Disk
+
+clean_disk:
+	rm $(DISK_FILE)
+
+disk: $(DISK_FILE)
+
+$(DISK_FILE): $(EXA_PRG)
+	@echo "creating disk $(DISK_FILE)"
+	$(VICE_C1541) -format "c64asm,1" d64  $(DISK_FILE) >> disk.log
+	@for file in $(EXA_PRG); do \
+		progname=$${file//_/-}; \
+		progname=$${progname//.prg/}; \
+		progname=$${progname//examples\//}; \
+		echo "adding file: $$file as $$progname"; \
+		$(VICE_C1541) $(DISK_FILE) -write "$$file" "$$progname" >> disk.log;\
+	done
+
+
+# /Applications/vice-arm64-gtk3-3.10/bin/c1541 -format "C64asm,1" d64 examples.d64
+# c1541 -format "disk name" id d64 "image_name.d64"
+# To write a .prg file into an existing D64 image:
+# c1541 "image_name.d64" -write "my_program.prg" "c64_filename"
 

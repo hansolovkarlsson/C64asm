@@ -13,6 +13,47 @@ this project's full regression suite before being marked done — that
 discipline is this project's own standing practice, not something
 worth repeating in every entry below.
 
+## `editor.asm`
+
+A simple, one-screen text editor — the first step toward a planned
+load/save/directory-listing follow-up, not a finished editor on its
+own: it writes directly to screen memory, which is exactly what a
+future "save" needs to read from (and a future "load" write back to),
+so there's no separate document buffer that would need its own
+conversion step added later.
+
+Reads input via `GETIN` ($FFE4), the KERNAL's own keyboard-buffer
+poll, rather than `lib/keyboard.inc`'s matrix-scanning `READ_KEY` --
+right for a full-screen editor that needs Return/Delete/cursor keys as
+ordinary keystrokes, not the single fixed key `READ_KEY` is built to
+check. This needed real verification against an authoritative source
+before writing any 6502 code, not assumed from memory: PETSCII and
+screen memory use genuinely different byte values for the same
+characters, and getting the conversion wrong would have meant garbage
+displayed for whatever was actually typed. Cursor position is tracked
+by a small row-address lookup table rather than a runtime multiply by
+40 (not a power of two, and not one of `lib/math.inc`'s own small
+non-power-of-two multipliers either) -- with only 25 possible rows,
+precomputing was both simpler and faster than deriving a new multiply
+routine for a number this specific to one screen layout.
+
+Testing this needed a real extension to `mini6502.py` itself: only
+`CHROUT`/`CHRIN` were emulated before, and `GETIN` -- essential for
+this editor's whole design -- wasn't. Added a `getin_queue` mechanism
+mirroring the existing `chrin_queue` one, and, while in there, fixed a
+related pre-existing gap where neither trap actually set the CPU's
+zero/negative flags after loading a value into `A`, which happened to
+never matter before since nothing previously branched on the result of
+a `CHRIN`/`GETIN` call the way `jsr GETIN` / `beq ...` (this editor's
+own busy-wait) depends on. Purely additive to `mini6502.py` -- nothing
+before this used `GETIN`, so there was no regression risk, confirmed
+by the full existing test suite (292 checks across all eight demos)
+passing unchanged. The editor's own regression test (31 checks) caught
+one real mistake along the way, in the test itself rather than the
+editor: an early version used $9D (cursor LEFT) where $1D (cursor
+RIGHT) was intended, which looked at first like an editor bug before
+the actual cause turned up.
+
 ## `lib/music.inc` and `music_demo.asm`
 
 A two-voice SID music player, and a real demo built on it — "Twinkle

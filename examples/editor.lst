@@ -1,0 +1,262 @@
+; c64asm listing  (origin $0801, 543 bytes)
+; CYCLES column: a plain number is a fixed cycle count; "b/b+1" means b cycles, +1 more if this instruction's indexed addressing crosses a page boundary; "2/3/4" means a branch's usual 2 (not taken) / 3 (taken) / 4 (taken, crossing a page). Blank means an illegal/undocumented opcode (.cpu 6510x) -- see c64asm-reference.md "Listing file format".
+
+ADDR  BYTES      CYCLES  SOURCE
+080D  4C 3A 08   3               .basic start
+0810  85 FB      3               sta str_ptr
+0812  84 FC      3               sty str_ptr+1
+0814  A0 00      2               ldy #$00
+0816  B1 FB      5/6             lda (str_ptr),y
+0818  F0 06      2/3/4           beq __local1_done
+081A  20 D2 FF   6               jsr CHROUT
+081D  C8         2               iny
+081E  D0 F6      2/3/4           bne __local1_loop
+0820  60         6               rts
+0821  85 02      3               sta kw_ptr
+0823  84 03      3               sty kw_ptr+1
+0825  A0 00      2               ldy #$00
+0827  B1 FD      5/6             lda (cmp_ptr),y
+0829  D1 02      5/6             cmp (kw_ptr),y
+082B  D0 07      2/3/4           bne __local2_no
+082D  C9 00      2               cmp #$00
+082F  F0 06      2/3/4           beq __local2_yes
+0831  C8         2               iny
+0832  D0 F3      2/3/4           bne __local2_loop
+0834  A9 00      2               lda #$00
+0836  60         6               rts
+0837  A9 01      2               lda #$01
+0839  60         6               rts
+083A  A9 93      2               lda #$93
+083C  20 D2 FF   6               jsr CHROUT
+083F  A9 86      2               lda #<title_msg
+0841  A0 09      2               ldy #>title_msg
+0843  20 10 08   6               jsr print_msg
+0846  A9 9A      2               lda #<instructions_msg
+0848  A0 09      2               ldy #>instructions_msg
+084A  20 10 08   6               jsr print_msg
+084D  A9 CA      2               lda #<continue_msg
+084F  A0 09      2               ldy #>continue_msg
+0851  20 10 08   6               jsr print_msg
+0854  20 CF 08   6               jsr wait_for_key
+0857  A9 93      2               lda #$93
+0859  20 D2 FF   6               jsr CHROUT
+085C  A9 00      2               lda #$00
+085E  8D 3C 03   4               sta cursor_x
+0861  8D 3D 03   4               sta cursor_y
+0864  20 D5 08   6               jsr recompute_screen_ptr
+0867  20 E9 08   6               jsr show_cursor
+086A  20 E4 FF   6               jsr GETIN
+086D  F0 FB      2/3/4           beq wait_key
+086F  48         3               pha
+0870  20 F2 08   6               jsr hide_cursor
+0873  68         4               pla
+0874  C9 85      2               cmp #$85                ; F1
+0876  F0 4A      2/3/4           beq do_quit
+0878  C9 0D      2               cmp #$0d                ; RETURN
+087A  F0 22      2/3/4           beq __local10_do_return
+087C  C9 14      2               cmp #$14                ; DEL
+087E  F0 24      2/3/4           beq __local10_do_delete
+0880  C9 11      2               cmp #$11                ; cursor down
+0882  F0 26      2/3/4           beq __local10_do_down
+0884  C9 91      2               cmp #$91                ; cursor up
+0886  F0 28      2/3/4           beq __local10_do_up
+0888  C9 1D      2               cmp #$1d                ; cursor right
+088A  F0 2A      2/3/4           beq __local10_do_right
+088C  C9 9D      2               cmp #$9d                ; cursor left
+088E  F0 2C      2/3/4           beq __local10_do_left
+0890  C9 20      2               cmp #$20
+0892  90 D3      2/3/4           bcc main_loop            ; < $20: an unhandled control code -- ignore
+0894  C9 60      2               cmp #$60
+0896  B0 CF      2/3/4           bcs main_loop            ; >= $60: not in the range this editor accepts -- ignore
+0898  20 FB 08   6               jsr insert_char
+089B  4C 67 08   3               jmp main_loop
+089E  20 0A 09   6               jsr handle_return
+08A1  4C 67 08   3               jmp main_loop
+08A4  20 1C 09   6               jsr handle_delete
+08A7  4C 67 08   3               jmp main_loop
+08AA  20 6C 09   6               jsr move_cursor_down
+08AD  4C 67 08   3               jmp main_loop
+08B0  20 7A 09   6               jsr move_cursor_up
+08B3  4C 67 08   3               jmp main_loop
+08B6  20 30 09   6               jsr move_cursor_right
+08B9  4C 67 08   3               jmp main_loop
+08BC  20 50 09   6               jsr move_cursor_left
+08BF  4C 67 08   3               jmp main_loop
+08C2  A9 93      2               lda #$93
+08C4  20 D2 FF   6               jsr CHROUT
+08C7  A9 E5      2               lda #<bye_msg
+08C9  A0 09      2               ldy #>bye_msg
+08CB  20 10 08   6               jsr print_msg
+08CE  60         6               rts
+08CF  20 E4 FF   6               jsr GETIN
+08D2  F0 FB      2/3/4           beq wait_for_key
+08D4  60         6               rts
+08D5  AE 3D 03   4               ldx cursor_y
+08D8  BD EE 09   4/5             lda screen_row_lo,x
+08DB  18         2               clc
+08DC  6D 3C 03   4               adc cursor_x
+08DF  85 F7      3               sta screen_ptr
+08E1  BD 07 0A   4/5             lda screen_row_hi,x
+08E4  69 00      2               adc #$00
+08E6  85 F8      3               sta screen_ptr+1
+08E8  60         6               rts
+08E9  A0 00      2               ldy #$00
+08EB  B1 F7      5/6             lda (screen_ptr),y
+08ED  09 80      2               ora #$80
+08EF  91 F7      6               sta (screen_ptr),y
+08F1  60         6               rts
+08F2  A0 00      2               ldy #$00
+08F4  B1 F7      5/6             lda (screen_ptr),y
+08F6  29 7F      2               and #$7f
+08F8  91 F7      6               sta (screen_ptr),y
+08FA  60         6               rts
+08FB  C9 40      2               cmp #$40
+08FD  90 03      2/3/4           bcc __local18_unchanged
+08FF  38         2               sec
+0900  E9 40      2               sbc #$40
+0902  A0 00      2               ldy #$00
+0904  91 F7      6               sta (screen_ptr),y
+0906  20 30 09   6               jsr move_cursor_right
+0909  60         6               rts
+090A  A9 00      2               lda #$00
+090C  8D 3C 03   4               sta cursor_x
+090F  AD 3D 03   4               lda cursor_y
+0912  C9 18      2               cmp #24
+0914  F0 03      2/3/4           beq __local19_recompute
+0916  EE 3D 03   6               inc cursor_y
+0919  4C D5 08   3               jmp recompute_screen_ptr
+091C  AD 3C 03   4               lda cursor_x
+091F  D0 05      2/3/4           bne __local20_can_delete
+0921  AD 3D 03   4               lda cursor_y
+0924  F0 09      2/3/4           beq __local20_nothing_to_delete
+0926  20 50 09   6               jsr move_cursor_left
+0929  A9 20      2               lda #$20
+092B  A0 00      2               ldy #$00
+092D  91 F7      6               sta (screen_ptr),y
+092F  60         6               rts
+0930  AD 3C 03   4               lda cursor_x
+0933  C9 27      2               cmp #39
+0935  D0 13      2/3/4           bne __local21_same_row
+0937  AD 3D 03   4               lda cursor_y
+093A  C9 18      2               cmp #24
+093C  D0 01      2/3/4           bne __local21_next_row
+093E  60         6               rts                      ; already at the very last cell -- stay put
+093F  A9 00      2               lda #$00
+0941  8D 3C 03   4               sta cursor_x
+0944  EE 3D 03   6               inc cursor_y
+0947  4C D5 08   3               jmp recompute_screen_ptr
+094A  EE 3C 03   6               inc cursor_x
+094D  4C D5 08   3               jmp recompute_screen_ptr
+0950  AD 3C 03   4               lda cursor_x
+0953  D0 11      2/3/4           bne __local22_same_row
+0955  AD 3D 03   4               lda cursor_y
+0958  F0 0B      2/3/4           beq __local22_at_origin           ; already at (0,0) -- stay put
+095A  CE 3D 03   6               dec cursor_y
+095D  A9 27      2               lda #39
+095F  8D 3C 03   4               sta cursor_x
+0962  4C D5 08   3               jmp recompute_screen_ptr
+0965  60         6               rts
+0966  CE 3C 03   6               dec cursor_x
+0969  4C D5 08   3               jmp recompute_screen_ptr
+096C  AD 3D 03   4               lda cursor_y
+096F  C9 18      2               cmp #24
+0971  F0 06      2/3/4           beq __local23_no_move
+0973  EE 3D 03   6               inc cursor_y
+0976  4C D5 08   3               jmp recompute_screen_ptr
+0979  60         6               rts
+097A  AD 3D 03   4               lda cursor_y
+097D  F0 06      2/3/4           beq __local24_no_move
+097F  CE 3D 03   6               dec cursor_y
+0982  4C D5 08   3               jmp recompute_screen_ptr
+0985  60         6               rts
+
+Symbol table:
+  BITMAP               = $2000
+  CHRIN                = $FFCF
+  CHROUT               = $FFD2
+  CIA1_DDRA            = $DC02
+  CIA1_DDRB            = $DC03
+  CIA1_PRA             = $DC00
+  CIA1_PRB             = $DC01
+  GETIN                = $FFE4
+  SCREEN               = $0400
+  SID_VOLUME           = $D418
+  SPRITE0_COLOR        = $D027
+  SPRITE0_X            = $D000
+  SPRITE0_Y            = $D001
+  SPRITE_ENABLE        = $D015
+  SPRITE_PTR0          = $07F8
+  SPRITE_X_EXPAND      = $D01D
+  SPRITE_X_MSB         = $D010
+  SPRITE_Y_EXPAND      = $D017
+  VIC_BG0              = $D021
+  VIC_BORDER           = $D020
+  VIC_CTRL1            = $D011
+  VIC_CTRL2            = $D016
+  VIC_MEMPTRS          = $D018
+  VIC_RASTER           = $D012
+  VOICE1_AD            = $D405
+  VOICE1_CTRL          = $D404
+  VOICE1_FREQ_HI       = $D401
+  VOICE1_FREQ_LO       = $D400
+  VOICE1_SR            = $D406
+  VOICE2_AD            = $D40C
+  VOICE2_CTRL          = $D40B
+  VOICE2_FREQ_HI       = $D408
+  VOICE2_FREQ_LO       = $D407
+  VOICE2_SR            = $D40D
+  VOICE3_AD            = $D413
+  VOICE3_CTRL          = $D412
+  VOICE3_FREQ_HI       = $D40F
+  VOICE3_FREQ_LO       = $D40E
+  VOICE3_SR            = $D414
+  __local10_do_delete  = $08A4
+  __local10_do_down    = $08AA
+  __local10_do_left    = $08BC
+  __local10_do_return  = $089E
+  __local10_do_right   = $08B6
+  __local10_do_up      = $08B0
+  __local18_unchanged  = $0902
+  __local19_recompute  = $0919
+  __local1_done        = $0820
+  __local1_loop        = $0816
+  __local20_can_delete = $0926
+  __local20_nothing_to_delete = $092F
+  __local21_next_row   = $093F
+  __local21_same_row   = $094A
+  __local22_at_origin  = $0965
+  __local22_same_row   = $0966
+  __local23_no_move    = $0979
+  __local24_no_move    = $0985
+  __local2_loop        = $0827
+  __local2_no          = $0834
+  __local2_yes         = $0837
+  bye_msg              = $09E5
+  cmp_ptr              = $00FD
+  continue_msg         = $09CA
+  cursor_x             = $033C
+  cursor_y             = $033D
+  do_quit              = $08C2
+  handle_delete        = $091C
+  handle_return        = $090A
+  hide_cursor          = $08F2
+  insert_char          = $08FB
+  instructions_msg     = $099A
+  kw_ptr               = $0002
+  main_loop            = $0867
+  move_cursor_down     = $096C
+  move_cursor_left     = $0950
+  move_cursor_right    = $0930
+  move_cursor_up       = $097A
+  print_msg            = $0810
+  recompute_screen_ptr = $08D5
+  screen_ptr           = $00F7
+  screen_row_hi        = $0A07
+  screen_row_lo        = $09EE
+  show_cursor          = $08E9
+  start                = $083A
+  str_equal            = $0821
+  str_ptr              = $00FB
+  title_msg            = $0986
+  wait_for_key         = $08CF
+  wait_key             = $086A

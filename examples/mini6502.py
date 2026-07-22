@@ -663,6 +663,7 @@ class C64Machine:
 
     CHROUT = 0xFFD2
     CHRIN = 0xFFCF
+    GETIN = 0xFFE4
 
     # Real KERNAL housekeeping touches these zero-page locations on
     # every raster/timer IRQ (roughly 60 times a second), regardless of
@@ -813,6 +814,10 @@ class C64Machine:
             self._do_chrin()
             self.cpu.pc = (self.cpu.pop_word() + 1) & 0xFFFF
             return True
+        if pc == self.GETIN:
+            self._do_getin()
+            self.cpu.pc = (self.cpu.pop_word() + 1) & 0xFFFF
+            return True
         return False
 
     def _do_chrout(self):
@@ -865,6 +870,30 @@ class C64Machine:
             self.cpu.a = queue.pop(0)
         else:
             self.cpu.a = 0x0D
+        self.cpu.set_nz(self.cpu.a)
+
+    def _do_getin(self):
+        # Real GETIN pops one byte off the KERNAL's own keyboard
+        # buffer (fed by the default keyboard IRQ handler this project
+        # doesn't otherwise emulate) and returns 0 immediately if
+        # nothing is waiting -- unlike CHRIN above, there's no
+        # "assume a blank line" fallback, since GETIN is meant to be
+        # polled in a loop, not block. A test that needs GETIN input
+        # queues PETSCII bytes in self.getin_queue first (one entry
+        # per simulated keypress, in order); this pops one per call,
+        # returning 0 once the queue's empty, exactly like a real
+        # program polling GETIN with nothing typed yet would see.
+        queue = getattr(self, 'getin_queue', None)
+        if queue:
+            self.cpu.a = queue.pop(0)
+        else:
+            self.cpu.a = 0x00
+        self.cpu.set_nz(self.cpu.a)   # real GETIN's own internal load
+                                         # sets these the normal way --
+                                         # needed here since code like
+                                         # "jsr GETIN / beq ..." depends
+                                         # on Z actually reflecting the
+                                         # value just returned in A
 
     # --- zero-page poisoning simulation --------------------------------
 

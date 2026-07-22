@@ -1,21 +1,23 @@
 ; c64asm listing  (origin $0801, 60 bytes)
+; CYCLES column: a plain number is a fixed cycle count; "b/b+1" means b cycles, +1 more if this instruction's indexed addressing crosses a page boundary; "2/3/4" means a branch's usual 2 (not taken) / 3 (taken) / 4 (taken, crossing a page). Blank means an illegal/undocumented opcode (.cpu 6510x) -- see c64asm-reference.md "Listing file format".
 
-080D  A2 00             ldx #$00
-080F  BD 30 08          lda message,x
-0812  F0 07             beq done_print
-0814  20 D2 FF          jsr CHROUT
-0817  E8                inx
-0818  4C 0F 08          jmp print_loop
-081B  A9 00             lda #BLACK
-081D  8D 20 D0          sta BORDER
-0820  EE 20 D0          inc BORDER
-0823  A2 00             ldx #$00
-0825  A0 00             ldy #$00
-0827  C8                iny
-0828  D0 FD             bne delay_inner
-082A  CA                dex
-082B  D0 F8             bne delay_outer
-082D  4C 20 08          jmp color_loop
+ADDR  BYTES      CYCLES  SOURCE
+080D  A2 00      2               ldx #$00
+080F  BD 30 08   4/5             lda message,x
+0812  F0 07      2/3/4           beq done_print
+0814  20 D2 FF   6               jsr CHROUT
+0817  E8         2               inx
+0818  4C 0F 08   3               jmp print_loop
+081B  A9 00      2               lda #BLACK
+081D  8D 20 D0   4               sta BORDER
+0820  EE 20 D0   6               inc BORDER
+0823  A2 00      2               ldx #$00
+0825  A0 00      2               ldy #$00
+0827  C8         2               iny
+0828  D0 FD      2/3/4           bne delay_inner
+082A  CA         2               dex
+082B  D0 F8      2/3/4           bne delay_outer
+082D  4C 20 08   3               jmp color_loop
 
 Symbol table:
   BLACK                = $0000

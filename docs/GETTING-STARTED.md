@@ -162,7 +162,7 @@ A few things worth noticing here, all covered in more depth in
 
 Every demo shipped with this project is a complete, working C64
 program, not a toy snippet — and the more involved ones (`demo.asm`
-through `music_demo.asm` below) have each been actually executed, not
+through `editor.asm` below) have each been actually executed, not
 just assembled, as part of this project's own testing (`hello.asm` is
 simple enough that it's verified by assembling cleanly alone). Reading
 one is often the fastest way to see a technique used for real:
@@ -181,6 +181,9 @@ one is often the fastest way to see a technique used for real:
   asset via `.incbin`, instead of hand-transcribed `.byte` data.
 - **`music_demo.asm`** — two-voice SID music via `lib/music.inc`, a
   real tune (public domain), not a single test tone.
+- **`editor.asm`** — a one-screen text editor, writing directly to
+  screen memory and reading input via `GETIN` rather than
+  `lib/keyboard.inc`'s single-key `READ_KEY`.
 
 `README.md`'s file table has a one-line description of what each one
 specifically demonstrates.

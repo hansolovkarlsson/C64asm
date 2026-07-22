@@ -200,6 +200,7 @@ builds, not just checked for a plausible-looking result.
 | `demo.asm` / `.prg` / `.lst` | Demo: exercises every standard library file together (`lib/text.inc`, `lib/input.inc`, `lib/keyboard.inc`, `lib/graphics.inc`, `lib/sound.inc`) in one small program — a visible sprite, W/A/S/D movement with a border stop and a sound on each move, Q to exit; also this project's own integration test, cross-checked across all three implementations and actually executed, not just assembled (see `lib-reference.md`) |
 | `sprites.asm` / `.prg` / `.lst` (+ `star_anim.bin`) | Demo: a 4-frame sprite animation loaded from `star_anim.bin`, an external binary asset, via `.incbin` (`c64asm-reference.md` §14) instead of hand-transcribed `.byte` data; same W/A/S/D movement and border stop as `demo.asm`'s own star, plus continuous frame-cycling independent of movement |
 | `music_demo.asm` / `.prg` / `.lst` | Demo: two-voice SID music via `lib/music.inc` — "Twinkle Twinkle Little Star" (public domain) on a sawtooth melody voice, a triangle bass line underneath, border color pulsing on the beat |
+| `editor.asm` / `.prg` / `.lst` | Demo: a simple one-screen text editor — direct screen memory writes (with PETSCII-to-screen-code conversion), a reverse-video block cursor, and full-screen cursor movement, all driven by the KERNAL's own keyboard buffer (`GETIN`) rather than `lib/keyboard.inc`'s matrix-scanning `READ_KEY`; the intended foundation for a future load/save/directory-listing follow-up, not a finished editor |
 | `bounce.asm` / `.prg` / `.lst` | Demo: a sprite bouncing around a bitmap graphics screen, raster-synced |
 | `pong.asm` / `.prg` / `.lst` | Demo: two-paddle Pong — joystick and keyboard-matrix input, ball/paddle collision, AI opponent; uses the standard library (`lib/graphics.inc`, `lib/input.inc`, `lib/sound.inc`) rather than reimplementing raster timing, input handling, and sound |
 | `adventure.asm` / `.prg` / `.lst` | Demo: a small text adventure — typed commands via `CHRIN`, a room/item/puzzle state machine, room exits stored in a `.struct`-based table (`room_exits+Exits.north,x` instead of a bare offset number) indexed via `lib/math.inc`'s `MULT_4`, with an `.assert` guarding that choice and each row individually `.tag`'d against `Exits`; uses the standard library (`lib/text.inc`, `lib/input.inc`, `lib/math.inc`) rather than reimplementing string/input handling |
@@ -248,16 +249,16 @@ form. Every file checks its own required zero-page symbols with
 `.error` (see above) right at the top, so a missing one fails with a
 specific message naming exactly what to define, not a generic
 `Undefined symbol` from somewhere inside a routine you never called
-directly. Seven of the eight programs above (`adventure.asm`,
+directly. Eight of the nine programs above (`adventure.asm`,
 `bounce.asm`, `pong.asm`, `lander.asm`, the library-focused `demo.asm`,
-`sprites.asm`, and `music_demo.asm`) are built *on* the library rather
-than duplicating it — only `hello.asm` still has everything written
-out locally, since it's deliberately meant as the simplest possible
-complete program, with no dependencies at all — see `lib-reference.md`
-(inside the zip) for the full API, required zero-page setup per file,
-and worked examples, including two smaller, even more focused demo
-programs (`demo.asm`, alongside `bounce.asm`) built specifically to
-exercise the library in relative isolation.
+`sprites.asm`, `music_demo.asm`, and `editor.asm`) are built *on* the
+library rather than duplicating it — only `hello.asm` still has
+everything written out locally, since it's deliberately meant as the
+simplest possible complete program, with no dependencies at all — see
+`lib-reference.md` (inside the zip) for the full API, required
+zero-page setup per file, and worked examples, including two smaller,
+even more focused demo programs (`demo.asm`, alongside `bounce.asm`)
+built specifically to exercise the library in relative isolation.
 
 By default, each project needs its own copy of `lib/` sitting next to
 its `.asm` files (`.include` paths resolve relative to the including
