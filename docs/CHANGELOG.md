@@ -13,6 +13,31 @@ this project's full regression suite before being marked done — that
 discipline is this project's own standing practice, not something
 worth repeating in every entry below.
 
+## `lib/math.inc`: `MULT_3`/`MULT_5`/`MULT_6`/`MULT_7`/`MULT_9`/`MULT_10`/`MULT_12`
+
+Closes a real gap `MULT_2`/`MULT_4`/`MULT_8`/`MULT_16` left open: a
+`.struct` that comes out to a non-power-of-two size — 6 bytes, like
+`c64asm-reference.md`'s own `Room` example — had no library support at
+all until now. Each is a shift-and-add (or, for `MULT_7`,
+shift-and-subtract) built from the same power-of-two shifts the
+existing macros already use — `MULT_6` is `(A*4) + (A*2)`, for
+instance. Verified against 77 real, runtime-executed test cases (7
+macros × 11 input values each, checked via `mini6502.py`) before
+shipping, not just checked for correct assembly.
+
+Unlike the power-of-two macros, these need one byte of zero page
+(`mult_scratch`) — the 6502 has no register-to-register arithmetic at
+all, so combining two shifted copies of `A` needs somewhere
+addressable to hold one of them while the other stays in `A`. There's
+deliberately no non-power-of-two `DIV_N`: dividing by an arbitrary
+small constant needs real division logic, not a short shift-and-add,
+which is a meaningfully bigger, slower thing than anything else in
+this file — seemed better to leave it out and say so than ship
+something half-baked. `c64asm-reference.md` §10's own `Room` example
+now uses `MULT_6` directly instead of noting that nothing in the
+library applied to it. See `lib/math.inc`'s own header comment for the
+complete reasoning, and `c64asm-reference.md` §10.
+
 ## Cycle counts in `--listing`
 
 Every assembled instruction in the listing file now shows how many
