@@ -1,0 +1,38 @@
+; c64disasm.py output for examples/hello.prg
+; load address $0801, 60 bytes
+; BASIC stub detected -- SYS target $080D
+; Disassembled by following code flow from the entry point(s)
+; below; anything not reached that way is shown as raw .byte
+; data, which is the correct, honest answer for a data byte,
+; if not always the most informative one. See c64disasm.py's
+; own header comment for what this can and can't follow.
+
+* = $0801
+
+; BASIC stub
+        .byte $0B, $08, $0A, $00, $9E, $32, $30, $36
+        .byte $31, $00, $00, $00
+L080D:
+        ldx #$00
+L080F:
+        lda $0830,x
+        beq L081B
+        jsr $FFD2
+        inx
+        jmp L080F
+L081B:
+        lda #$00
+        sta $D020
+L0820:
+        inc $D020
+        ldx #$00
+L0825:
+        ldy #$00
+L0827:
+        iny
+        bne L0827
+        dex
+        bne L0825
+        jmp L0820
+        .text "HELLO, C64!"
+        .byte $0D, $00

@@ -1,680 +1,678 @@
 ; c64asm listing  (origin $0801, 1791 bytes)
-; CYCLES column: a plain number is a fixed cycle count; "b/b+1" means b cycles, +1 more if this instruction's indexed addressing crosses a page boundary; "2/3/4" means a branch's usual 2 (not taken) / 3 (taken) / 4 (taken, crossing a page). Blank means an illegal/undocumented opcode (.cpu 6510x) -- see c64asm-reference.md "Listing file format".
 
-ADDR  BYTES      CYCLES  SOURCE
-080D  4C 91 09   3               .basic start   ; needed once library code (wait_frame,
-0810  AD 12 D0   4               lda VIC_RASTER
-0813  C9 FB      2               cmp #$fb
-0815  D0 F9      2/3/4           bne wait_frame
-0817  60         6               rts
-0818  A2 00      2               ldx #0                ; returned: did X bounce this frame?
-081A  A0 00      2               ldy #0                ; returned: did Y bounce this frame?
-081C  A5 04      3               lda xdir
-081E  F0 1B      2/3/4           beq __local2_move_left
-0820  E6 02      5               inc xpos              ; 16-bit increment: bump the low byte, and
-0822  D0 02      2/3/4           bne __local2_x_inc_done        ; only the high byte too if that wrapped
-0824  E6 03      5               inc xpos+1
-0826  A5 02      3               lda xpos              ; 16-bit compare against XMAX
-0828  C9 FA      2               cmp #<XMAX
-082A  D0 29      2/3/4           bne __local2_x_done
-082C  A5 03      3               lda xpos+1
-082E  C9 00      2               cmp #>XMAX
-0830  D0 23      2/3/4           bne __local2_x_done
-0832  A9 00      2               lda #0
-0834  85 04      3               sta xdir             ; hit the right edge -- reverse
-0836  A2 01      2               ldx #1
-0838  4C 55 08   3               jmp __local2_x_done
-083B  A5 02      3               lda xpos              ; 16-bit decrement: only borrow into the
-083D  D0 02      2/3/4           bne __local2_x_dec_done         ; high byte if the low byte was already 0
-083F  C6 03      5               dec xpos+1
-0841  C6 02      5               dec xpos
-0843  A5 02      3               lda xpos              ; 16-bit compare against XMIN (XMIN is
-0845  C9 18      2               cmp #<XMIN              ; ordinarily under 256, so xpos+1 will
-0847  D0 0C      2/3/4           bne __local2_x_done               ; ordinarily be checked against 0 here,
-0849  A5 03      3               lda xpos+1                  ; but this works for any XMIN value)
-084B  C9 00      2               cmp #>XMIN
-084D  D0 06      2/3/4           bne __local2_x_done
-084F  A9 01      2               lda #1
-0851  85 04      3               sta xdir             ; hit the left edge -- reverse
-0853  A2 01      2               ldx #1
-0855  A5 06      3               lda ydir
-0857  F0 11      2/3/4           beq __local2_move_up
-0859  E6 03      5               inc ypos
-085B  A5 03      3               lda ypos
-085D  C9 FF      2               cmp #YMAX
-085F  D0 17      2/3/4           bne __local2_y_done
-0861  A9 00      2               lda #0
-0863  85 06      3               sta ydir             ; hit the bottom edge -- reverse
-0865  A0 01      2               ldy #1
-0867  4C 78 08   3               jmp __local2_y_done
-086A  C6 03      5               dec ypos
-086C  A5 03      3               lda ypos
-086E  C9 32      2               cmp #YMIN
-0870  D0 06      2/3/4           bne __local2_y_done
-0872  A9 01      2               lda #1
-0874  85 06      3               sta ydir             ; hit the top edge -- reverse
-0876  A0 01      2               ldy #1
-0878  A5 02      3               lda xpos
-087A  8D 00 D0   4               sta SPRITE0_X
-087D  A5 03      3               lda xpos+1
-087F  F0 0B      2/3/4           beq __local2_msb_clear
-0881  AD 10 D0   4               lda SPRITE_X_MSB
-0884  09 01      2               ora #%00000001       ; set sprite 0's bit only -- other sprites'
-0886  8D 10 D0   4               sta SPRITE_X_MSB       ; MSB bits, if any, are left untouched
-0889  4C 94 08   3               jmp __local2_msb_done
-088C  AD 10 D0   4               lda SPRITE_X_MSB
-088F  29 FE      2               and #%11111110
-0891  8D 10 D0   4               sta SPRITE_X_MSB
-0894  A5 03      3               lda ypos
-0896  8D 01 D0   4               sta SPRITE0_Y
-0899  60         6               rts
-089A  85 FB      3               sta gfx_ptr
-089C  84 FC      3               sty gfx_ptr+1
-089E  A9 01      2               lda #%00000001
-08A0  8D 1D D0   4               sta SPRITE_X_EXPAND
-08A3  8D 17 D0   4               sta SPRITE_Y_EXPAND
-08A6  A0 00      2               ldy #$00
-08A8  B1 FB      5/6             lda (gfx_ptr),y
-08AA  8D 27 D0   4               sta SPRITE0_COLOR
-08AD  20 10 08   6               jsr wait_frame
-08B0  20 10 08   6               jsr wait_frame
-08B3  C8         2               iny
-08B4  CA         2               dex
-08B5  D0 F1      2/3/4           bne __local3_loop
-08B7  A9 00      2               lda #0
-08B9  8D 15 D0   4               sta SPRITE_ENABLE
-08BC  8D 1D D0   4               sta SPRITE_X_EXPAND
-08BF  8D 17 D0   4               sta SPRITE_Y_EXPAND
-08C2  60         6               rts
-08C3  A9 00      2               lda #%00000000
-08C5  8D 02 DC   4               sta CIA1_DDRA
-08C8  AD 00 DC   4               lda CIA1_PRA
-08CB  49 FF      2               eor #$ff
-08CD  60         6               rts
-08F6  A2 00      2               ldx #$00
-08F8  20 CF FF   6               jsr CHRIN
-08FB  C9 0D      2               cmp #$0d
-08FD  F0 08      2/3/4           beq __local6_done
-08FF  9D CE 08   5               sta input_buf,x
-0902  E8         2               inx
-0903  E0 27      2               cpx #MAX_INPUT_LEN-1
-0905  D0 F1      2/3/4           bne __local6_loop
-0907  A9 00      2               lda #$00
-0909  9D CE 08   5               sta input_buf,x
-090C  60         6               rts
-090D  85 FB      3               sta word_dest_ptr
-090F  84 FC      3               sty word_dest_ptr+1
-0911  BD CE 08   4/5             lda input_buf,x
-0914  C9 20      2               cmp #$20
-0916  D0 04      2/3/4           bne __local7_start
-0918  E8         2               inx
-0919  4C 11 09   3               jmp __local7_skip_spaces
-091C  A0 00      2               ldy #$00
-091E  BD CE 08   4/5             lda input_buf,x
-0921  F0 0F      2/3/4           beq __local7_end
-0923  C9 20      2               cmp #$20
-0925  F0 0A      2/3/4           beq __local7_space
-0927  91 FB      6               sta (word_dest_ptr),y
-0929  E8         2               inx
-092A  C8         2               iny
-092B  C0 0E      2               cpy #MAX_WORD_LEN-1
-092D  D0 EF      2/3/4           bne __local7_loop
-092F  F0 01      2/3/4           beq __local7_terminate
-0931  E8         2               inx
-0932  A9 00      2               lda #$00
-0934  91 FB      6               sta (word_dest_ptr),y
-0936  60         6               rts
-0937  A5 14      3               lda engine_playing
-0939  D0 1D      2/3/4           bne __local8_already_on
-093B  A9 00      2               lda #$00
-093D  8D 00 D4   4               sta VOICE1_FREQ_LO
-0940  A9 08      2               lda #$08
-0942  8D 01 D4   4               sta VOICE1_FREQ_HI
-0945  A9 00      2               lda #$00
-0947  8D 05 D4   4               sta VOICE1_AD
-094A  A9 F8      2               lda #$f8
-094C  8D 06 D4   4               sta VOICE1_SR
-094F  A9 81      2               lda #%10000001          ; noise waveform, gate on
-0951  8D 04 D4   4               sta VOICE1_CTRL
-0954  A9 01      2               lda #1
-0956  85 14      3               sta engine_playing
-0958  60         6               rts
-0959  A5 14      3               lda engine_playing
-095B  F0 09      2/3/4           beq __local9_already_off
-095D  A9 80      2               lda #%10000000          ; noise waveform, gate off
-095F  8D 04 D4   4               sta VOICE1_CTRL
-0962  A9 00      2               lda #0
-0964  85 14      3               sta engine_playing
-0966  60         6               rts
-0967  85 FB      3               sta str_ptr
-0969  84 FC      3               sty str_ptr+1
-096B  A0 00      2               ldy #$00
-096D  B1 FB      5/6             lda (str_ptr),y
-096F  F0 06      2/3/4           beq __local10_done
-0971  20 D2 FF   6               jsr CHROUT
-0974  C8         2               iny
-0975  D0 F6      2/3/4           bne __local10_loop
-0977  60         6               rts
-0978  85 04      3               sta kw_ptr
-097A  84 05      3               sty kw_ptr+1
-097C  A0 00      2               ldy #$00
-097E  B1 02      5/6             lda (cmp_ptr),y
-0980  D1 04      5/6             cmp (kw_ptr),y
-0982  D0 07      2/3/4           bne __local11_no
-0984  C9 00      2               cmp #$00
-0986  F0 06      2/3/4           beq __local11_yes
-0988  C8         2               iny
-0989  D0 F3      2/3/4           bne __local11_loop
-098B  A9 00      2               lda #$00
-098D  60         6               rts
-098E  A9 01      2               lda #$01
-0990  60         6               rts
-0991  A9 00      2               lda #%00000000
-0993  8D 03 DC   4               sta CIA1_DDRB
-0996  A9 0F      2               lda #$0f
-0998  8D 18 D4   4               sta SID_VOLUME
-099B  A9 00      2               lda #$00
-099D  8D 04 D4   4               sta VOICE1_CTRL
-09A0  85 14      3               sta engine_playing        ; SID_INIT leaves A=$00 -- reuse it rather
-09A2  AD 11 D0   4               lda VIC_CTRL1
-09A5  09 20      2               ora #%00100000
-09A7  8D 11 D0   4               sta VIC_CTRL1
-09AA  AD 18 D0   4               lda VIC_MEMPTRS
-09AD  29 F0      2               and #%11110000
-09AF  09 08      2               ora #((BITMAP) / 1024)
-09B1  8D 18 D0   4               sta VIC_MEMPTRS
-09B4  A9 00      2               lda #<(BITMAP)
-09B6  85 FB      3               sta gfx_ptr
-09B8  A9 20      2               lda #>(BITMAP)
-09BA  85 FC      3               sta gfx_ptr+1
-09BC  A2 20      2               ldx #32
-09BE  A9 00      2               lda #$00
-09C0  A0 00      2               ldy #$00
-09C2  91 FB      6               sta (gfx_ptr),y
-09C4  C8         2               iny
-09C5  D0 FB      2/3/4           bne __local16_clear_byte
-09C7  E6 FC      5               inc gfx_ptr+1
-09C9  CA         2               dex
-09CA  D0 F4      2/3/4           bne __local16_clear_loop
-09CC  A9 00      2               lda #<SCREEN
-09CE  85 FB      3               sta gfx_ptr
-09D0  A9 04      2               lda #>SCREEN
-09D2  85 FC      3               sta gfx_ptr+1
-09D4  A2 04      2               ldx #4
-09D6  A9 C0      2               lda #$c0
-09D8  A0 00      2               ldy #$00
-09DA  91 FB      6               sta (gfx_ptr),y
-09DC  C8         2               iny
-09DD  D0 FB      2/3/4           bne __local17_fill_byte
-09DF  E6 FC      5               inc gfx_ptr+1
-09E1  CA         2               dex
-09E2  D0 F4      2/3/4           bne __local17_fill_loop
-09E4  A9 00      2               lda #0
-09E6  8D 20 D0   4               sta VIC_BORDER
-09E9  8D 21 D0   4               sta VIC_BG0
-09EC  A9 0F      2               lda #<(SCREEN + 15)
-09EE  85 FB      3               sta ptr
-09F0  A9 04      2               lda #>(SCREEN + 15)
-09F2  85 FC      3               sta ptr+1
-09F4  A2 19      2               ldx #25
-09F6  A0 00      2               ldy #$00
-09F8  A9 50      2               lda #$50                 ; green terrain (high nibble) on black sky
-09FA  91 FB      6               sta (ptr),y
-09FC  C8         2               iny
-09FD  C0 0B      2               cpy #11
-09FF  D0 F9      2/3/4           bne draw_pad_color_byte
-0A01  18         2               clc
-0A02  A5 FB      3               lda ptr
-0A04  69 28      2               adc #40
-0A06  85 FB      3               sta ptr
-0A08  A5 FC      3               lda ptr+1
-0A0A  69 00      2               adc #0
-0A0C  85 FC      3               sta ptr+1
-0A0E  CA         2               dex
-0A0F  D0 E5      2/3/4           bne draw_pad_color_row
-0A11  A9 00      2               lda #<SCREEN
-0A13  85 FB      3               sta ptr
-0A15  A9 04      2               lda #>SCREEN
-0A17  85 FC      3               sta ptr+1
-0A19  A0 00      2               ldy #$00
-0A1B  A9 70      2               lda #$70                 ; yellow fuel bar (high nibble) on black (low nibble)
-0A1D  91 FB      6               sta (ptr),y
-0A1F  C8         2               iny
-0A20  C0 28      2               cpy #40
-0A22  D0 F9      2/3/4           bne color_fuel_row
-0A24  20 F9 0B   6               jsr draw_terrain
-0A27  20 34 0C   6               jsr init_fuel_bar
-0A2A  A9 3B      2               lda #((ship_data) / 64)
-0A2C  8D F8 07   4               sta SPRITE_PTR0
-0A2F  A9 01      2               lda #1
-0A31  8D 27 D0   4               sta SPRITE0_COLOR
-0A34  A9 80      2               lda #128
-0A36  8D 00 D0   4               sta SPRITE0_X
-0A39  A9 32      2               lda #YMIN
-0A3B  8D 01 D0   4               sta SPRITE0_Y
-0A3E  A9 01      2               lda #%00000001
-0A40  8D 15 D0   4               sta SPRITE_ENABLE
-0A43  A9 80      2               lda #128
-0A45  85 02      3               sta ship_x
-0A47  A9 32      2               lda #YMIN
-0A49  85 03      3               sta ship_y
-0A4B  A9 01      2               lda #1
-0A4D  85 04      3               sta vx_dir
-0A4F  A9 00      2               lda #0
-0A51  85 05      3               sta vx_mag
-0A53  A9 01      2               lda #1
-0A55  85 06      3               sta vy_dir
-0A57  A9 00      2               lda #0
-0A59  85 07      3               sta vy_mag
-0A5B  A9 64      2               lda #FUEL_START
-0A5D  85 08      3               sta fuel
-0A5F  A9 06      2               lda #PHYSICS_DELAY
-0A61  85 09      3               sta physics_delay
-0A63  A9 03      2               lda #FUEL_DELAY
-0A65  85 0A      3               sta fuel_delay
-0A67  20 10 08   6               jsr wait_frame
-0A6A  20 82 0A   6               jsr read_input
-0A6D  20 F1 0A   6               jsr consume_fuel
-0A70  20 11 0B   6               jsr update_engine_sound
-0A73  20 61 0B   6               jsr do_physics
-0A76  20 EE 0B   6               jsr update_sprite
-0A79  20 70 0C   6               jsr draw_fuel_bar
-0A7C  20 98 0C   6               jsr check_landing
-0A7F  4C 67 0A   3               jmp main_loop
-0A82  20 C3 08   6               jsr read_joy2
-0A85  85 0E      3               sta joy_state           ; active-HIGH (1=pressed) -- read_joy2's
-0A87  A9 00      2               lda #0
-0A89  85 0B      3               sta thrust_flag
-0A8B  A5 0E      3               lda joy_state
-0A8D  29 01      2               and #%00000001
-0A8F  D0 15      2/3/4           bne set_thrust
-0A91  78         2               sei
-0A92  A9 FF      2               lda #%11111111
-0A94  8D 02 DC   4               sta CIA1_DDRA
-0A97  A9 FD      2               lda #%11111101
-0A99  8D 00 DC   4               sta CIA1_PRA
-0A9C  AD 01 DC   4               lda CIA1_PRB
-0A9F  58         2               cli
-0AA0  49 FF      2               eor #$ff
-0AA2  29 02      2               and #%00000010
-0AA4  F0 04      2/3/4           beq no_thrust_key
-0AA6  A9 01      2               lda #1
-0AA8  85 0B      3               sta thrust_flag
-0AAA  A9 00      2               lda #0
-0AAC  85 0C      3               sta left_flag
-0AAE  A5 0E      3               lda joy_state
-0AB0  29 04      2               and #%00000100
-0AB2  D0 15      2/3/4           bne set_left
-0AB4  78         2               sei
-0AB5  A9 FF      2               lda #%11111111
-0AB7  8D 02 DC   4               sta CIA1_DDRA
-0ABA  A9 FD      2               lda #%11111101
-0ABC  8D 00 DC   4               sta CIA1_PRA
-0ABF  AD 01 DC   4               lda CIA1_PRB
-0AC2  58         2               cli
-0AC3  49 FF      2               eor #$ff
-0AC5  29 04      2               and #%00000100
-0AC7  F0 04      2/3/4           beq no_left_key
-0AC9  A9 01      2               lda #1
-0ACB  85 0C      3               sta left_flag
-0ACD  A9 00      2               lda #0
-0ACF  85 0D      3               sta right_flag
-0AD1  A5 0E      3               lda joy_state
-0AD3  29 08      2               and #%00001000
-0AD5  D0 15      2/3/4           bne set_right
-0AD7  78         2               sei
-0AD8  A9 FF      2               lda #%11111111
-0ADA  8D 02 DC   4               sta CIA1_DDRA
-0ADD  A9 FB      2               lda #%11111011
-0ADF  8D 00 DC   4               sta CIA1_PRA
-0AE2  AD 01 DC   4               lda CIA1_PRB
-0AE5  58         2               cli
-0AE6  49 FF      2               eor #$ff
-0AE8  29 04      2               and #%00000100
-0AEA  F0 04      2/3/4           beq no_right_key
-0AEC  A9 01      2               lda #1
-0AEE  85 0D      3               sta right_flag
-0AF0  60         6               rts
-0AF1  A5 08      3               lda fuel
-0AF3  D0 09      2/3/4           bne fuel_not_empty
-0AF5  A9 00      2               lda #0
-0AF7  85 0B      3               sta thrust_flag
-0AF9  85 0C      3               sta left_flag
-0AFB  85 0D      3               sta right_flag
-0AFD  60         6               rts
-0AFE  A5 0B      3               lda thrust_flag
-0B00  05 0C      3               ora left_flag
-0B02  05 0D      3               ora right_flag
-0B04  F0 0A      2/3/4           beq consume_fuel_done
-0B06  C6 0A      5               dec fuel_delay
-0B08  D0 06      2/3/4           bne consume_fuel_done
-0B0A  A9 03      2               lda #FUEL_DELAY
-0B0C  85 0A      3               sta fuel_delay
-0B0E  C6 08      5               dec fuel
-0B10  60         6               rts
-0B11  A5 0B      3               lda thrust_flag
-0B13  05 0C      3               ora left_flag
-0B15  05 0D      3               ora right_flag
-0B17  F0 03      2/3/4           beq engine_should_stop
-0B19  4C 37 09   3               jmp engine_sound_on
-0B1C  4C 59 09   3               jmp engine_sound_off
-0B1F  A6 06      3               ldx vy_dir
-0B21  EC 2A 0E   4               cpx accel_want_dir
-0B24  F0 11      2/3/4           beq accel_v_same
-0B26  A5 07      3               lda vy_mag
-0B28  D0 0A      2/3/4           bne accel_v_decrement
-0B2A  AD 2A 0E   4               lda accel_want_dir
-0B2D  85 06      3               sta vy_dir
-0B2F  A9 01      2               lda #1
-0B31  85 07      3               sta vy_mag
-0B33  60         6               rts
-0B34  C6 07      5               dec vy_mag
-0B36  60         6               rts
-0B37  A5 07      3               lda vy_mag
-0B39  C9 02      2               cmp #MAX_V
-0B3B  F0 02      2/3/4           beq accel_v_done
-0B3D  E6 07      5               inc vy_mag
-0B3F  60         6               rts
-0B40  A6 04      3               ldx vx_dir
-0B42  EC 2A 0E   4               cpx accel_want_dir
-0B45  F0 11      2/3/4           beq accel_h_same
-0B47  A5 05      3               lda vx_mag
-0B49  D0 0A      2/3/4           bne accel_h_decrement
-0B4B  AD 2A 0E   4               lda accel_want_dir
-0B4E  85 04      3               sta vx_dir
-0B50  A9 01      2               lda #1
-0B52  85 05      3               sta vx_mag
-0B54  60         6               rts
-0B55  C6 05      5               dec vx_mag
-0B57  60         6               rts
-0B58  A5 05      3               lda vx_mag
-0B5A  C9 02      2               cmp #MAX_V
-0B5C  F0 02      2/3/4           beq accel_h_done
-0B5E  E6 05      5               inc vx_mag
-0B60  60         6               rts
-0B61  C6 09      5               dec physics_delay
-0B63  F0 03      2/3/4           beq physics_tick
-0B65  4C ED 0B   3               jmp physics_done
-0B68  A9 06      2               lda #PHYSICS_DELAY
-0B6A  85 09      3               sta physics_delay
-0B6C  A5 0B      3               lda thrust_flag
-0B6E  D0 0B      2/3/4           bne v_want_up
-0B70  A9 01      2               lda #1
-0B72  8D 2A 0E   4               sta accel_want_dir
-0B75  20 1F 0B   6               jsr accel_v
-0B78  4C 83 0B   3               jmp v_move
-0B7B  A9 00      2               lda #0
-0B7D  8D 2A 0E   4               sta accel_want_dir
-0B80  20 1F 0B   6               jsr accel_v
-0B83  A5 06      3               lda vy_dir
-0B85  F0 0A      2/3/4           beq v_moving_up
-0B87  A5 03      3               lda ship_y
-0B89  18         2               clc
-0B8A  65 07      3               adc vy_mag
-0B8C  85 03      3               sta ship_y
-0B8E  4C A4 0B   3               jmp h_accel
-0B91  A5 03      3               lda ship_y
-0B93  38         2               sec
-0B94  E5 07      3               sbc vy_mag
-0B96  85 03      3               sta ship_y
-0B98  C9 32      2               cmp #YMIN
-0B9A  B0 08      2/3/4           bcs h_accel
-0B9C  A9 32      2               lda #YMIN
-0B9E  85 03      3               sta ship_y
-0BA0  A9 00      2               lda #0
-0BA2  85 07      3               sta vy_mag
-0BA4  A5 0C      3               lda left_flag
-0BA6  D0 0D      2/3/4           bne h_want_left
-0BA8  A5 0D      3               lda right_flag
-0BAA  D0 14      2/3/4           bne h_want_right
-0BAC  A5 05      3               lda vx_mag
-0BAE  F0 18      2/3/4           beq h_move
-0BB0  C6 05      5               dec vx_mag
-0BB2  4C C8 0B   3               jmp h_move
-0BB5  A9 00      2               lda #0
-0BB7  8D 2A 0E   4               sta accel_want_dir
-0BBA  20 40 0B   6               jsr accel_h
-0BBD  4C C8 0B   3               jmp h_move
-0BC0  A9 01      2               lda #1
-0BC2  8D 2A 0E   4               sta accel_want_dir
-0BC5  20 40 0B   6               jsr accel_h
-0BC8  A5 04      3               lda vx_dir
-0BCA  F0 12      2/3/4           beq h_moving_left
-0BCC  A5 02      3               lda ship_x
-0BCE  18         2               clc
-0BCF  65 05      3               adc vx_mag
-0BD1  85 02      3               sta ship_x
-0BD3  C9 FA      2               cmp #XMAX
-0BD5  90 16      2/3/4           bcc physics_done
-0BD7  A9 FA      2               lda #XMAX
-0BD9  85 02      3               sta ship_x
-0BDB  4C ED 0B   3               jmp physics_done
-0BDE  A5 02      3               lda ship_x
-0BE0  38         2               sec
-0BE1  E5 05      3               sbc vx_mag
-0BE3  85 02      3               sta ship_x
-0BE5  C9 18      2               cmp #XMIN
-0BE7  B0 04      2/3/4           bcs physics_done
-0BE9  A9 18      2               lda #XMIN
-0BEB  85 02      3               sta ship_x
-0BED  60         6               rts
-0BEE  A5 02      3               lda ship_x
-0BF0  8D 00 D0   4               sta SPRITE0_X
-0BF3  A5 03      3               lda ship_y
-0BF5  8D 01 D0   4               sta SPRITE0_Y
-0BF8  60         6               rts
-0BF9  A2 00      2               ldx #$00
-0BFB  8A         2               txa
-0BFC  0A         2               asl a
-0BFD  A8         2               tay
-0BFE  B9 DA 0D   4/5             lda terrain_addr,y
-0C01  85 FB      3               sta ptr
-0C03  B9 DB 0D   4/5             lda terrain_addr+1,y
-0C06  85 FC      3               sta ptr+1
-0C08  A9 19      2               lda #25
-0C0A  38         2               sec
-0C0B  FD B2 0D   4/5             sbc terrain_row,x
-0C0E  85 0F      3               sta rows_remaining
-0C10  A9 FF      2               lda #$ff
-0C12  A0 00      2               ldy #$00
-0C14  91 FB      6               sta (ptr),y
-0C16  C8         2               iny
-0C17  C0 08      2               cpy #8
-0C19  D0 F9      2/3/4           bne draw_terrain_byte
-0C1B  48         3               pha                       ; save $ff -- about to clobber A for the 16-bit add
-0C1C  18         2               clc
-0C1D  A5 FB      3               lda ptr
-0C1F  69 40      2               adc #<320                 ; advance one full row down (40 cols * 8 bytes)
-0C21  85 FB      3               sta ptr
-0C23  A5 FC      3               lda ptr+1
-0C25  69 01      2               adc #>320
-0C27  85 FC      3               sta ptr+1
-0C29  68         4               pla
-0C2A  C6 0F      5               dec rows_remaining
-0C2C  D0 E4      2/3/4           bne draw_terrain_row
-0C2E  E8         2               inx
-0C2F  E0 28      2               cpx #40
-0C31  D0 C8      2/3/4           bne draw_terrain_loop
-0C33  60         6               rts
-0C34  A9 00      2               lda #<BITMAP
-0C36  85 FB      3               sta ptr
-0C38  A9 20      2               lda #>BITMAP
-0C3A  85 FC      3               sta ptr+1
-0C3C  A9 32      2               lda #(FUEL_START/2)
-0C3E  C9 29      2               cmp #41
-0C40  90 02      2/3/4           bcc init_fuel_cols_ok
-0C42  A9 28      2               lda #40
-0C44  85 11      3               sta last_fuel_cols
-0C46  AA         2               tax
-0C47  A0 00      2               ldy #$00
-0C49  A9 FF      2               lda #$ff
-0C4B  91 FB      6               sta (ptr),y
-0C4D  C8         2               iny
-0C4E  C0 08      2               cpy #8
-0C50  D0 F9      2/3/4           bne init_fuel_byte
-0C52  18         2               clc
-0C53  A5 FB      3               lda ptr
-0C55  69 08      2               adc #8
-0C57  85 FB      3               sta ptr
-0C59  A5 FC      3               lda ptr+1
-0C5B  69 00      2               adc #0
-0C5D  85 FC      3               sta ptr+1
-0C5F  CA         2               dex
-0C60  D0 E5      2/3/4           bne init_fuel_col
-0C62  38         2               sec
-0C63  A5 FB      3               lda ptr
-0C65  E9 08      2               sbc #8
-0C67  85 12      3               sta fuel_ptr
-0C69  A5 FC      3               lda ptr+1
-0C6B  E9 00      2               sbc #0
-0C6D  85 13      3               sta fuel_ptr+1
-0C6F  60         6               rts
-0C70  A5 08      3               lda fuel
-0C72  4A         2               lsr a
-0C73  C9 29      2               cmp #41
-0C75  90 02      2/3/4           bcc fuel_cols_check_ok
-0C77  A9 28      2               lda #40
-0C79  C5 11      3               cmp last_fuel_cols
-0C7B  F0 1A      2/3/4           beq draw_fuel_done
-0C7D  85 11      3               sta last_fuel_cols
-0C7F  A0 00      2               ldy #$00
-0C81  A9 00      2               lda #$00
-0C83  91 12      6               sta (fuel_ptr),y
-0C85  C8         2               iny
-0C86  C0 08      2               cpy #8
-0C88  D0 F9      2/3/4           bne clear_one_fuel_col
-0C8A  38         2               sec
-0C8B  A5 12      3               lda fuel_ptr
-0C8D  E9 08      2               sbc #8
-0C8F  85 12      3               sta fuel_ptr
-0C91  A5 13      3               lda fuel_ptr+1
-0C93  E9 00      2               sbc #0
-0C95  85 13      3               sta fuel_ptr+1
-0C97  60         6               rts
-0C98  A5 02      3               lda ship_x
-0C9A  38         2               sec
-0C9B  E9 18      2               sbc #XMIN
-0C9D  4A         2               lsr a
-0C9E  4A         2               lsr a
-0C9F  4A         2               lsr a
-0CA0  AA         2               tax
-0CA1  BD B2 0D   4/5             lda terrain_row,x
-0CA4  85 0F      3               sta ground_row_here
-0CA6  0A         2               asl a
-0CA7  0A         2               asl a
-0CA8  0A         2               asl a
-0CA9  18         2               clc
-0CAA  69 32      2               adc #YMIN
-0CAC  85 10      3               sta ground_y_here
-0CAE  A5 03      3               lda ship_y
-0CB0  C5 10      3               cmp ground_y_here
-0CB2  90 75      2/3/4           bcc check_landing_done
-0CB4  A5 10      3               lda ground_y_here
-0CB6  85 03      3               sta ship_y
-0CB8  20 EE 0B   6               jsr update_sprite
-0CBB  A5 0F      3               lda ground_row_here
-0CBD  C9 14      2               cmp #PAD_ROW
-0CBF  D0 3B      2/3/4           bne do_crash
-0CC1  A5 07      3               lda vy_mag
-0CC3  C9 03      2               cmp #SAFE_V+1
-0CC5  B0 35      2/3/4           bcs do_crash
-0CC7  A5 05      3               lda vx_mag
-0CC9  C9 03      2               cmp #SAFE_V+1
-0CCB  B0 2F      2/3/4           bcs do_crash
-0CCD  AD 11 D0   4               lda VIC_CTRL1
-0CD0  29 DF      2               and #%11011111
-0CD2  8D 11 D0   4               sta VIC_CTRL1
-0CD5  A9 14      2               lda #$14
-0CD7  8D 18 D0   4               sta VIC_MEMPTRS
-0CDA  A9 93      2               lda #$93
-0CDC  20 D2 FF   6               jsr CHROUT
-0CDF  A9 2B      2               lda #<msg_success1
-0CE1  A0 0E      2               ldy #>msg_success1
-0CE3  20 67 09   6               jsr print_msg
-0CE6  A9 4A      2               lda #<msg_success2
-0CE8  A0 0E      2               ldy #>msg_success2
-0CEA  20 67 09   6               jsr print_msg
-0CED  A9 80      2               lda #%10000000            ; make sure the engine sound is off --
-0CEF  8D 04 D4   4               sta VOICE1_CTRL            ; thrust might have been held right up
-0CF2  A9 00      2               lda #0                      ; to touchdown
-0CF4  85 14      3               sta engine_playing
-0CF6  20 55 0D   6               jsr play_success_melody
-0CF9  4C 1F 0D   3               jmp show_try_again
-0CFC  20 2A 0D   6               jsr show_explosion
-0CFF  AD 11 D0   4               lda VIC_CTRL1
-0D02  29 DF      2               and #%11011111
-0D04  8D 11 D0   4               sta VIC_CTRL1
-0D07  A9 14      2               lda #$14
-0D09  8D 18 D0   4               sta VIC_MEMPTRS
-0D0C  A9 93      2               lda #$93
-0D0E  20 D2 FF   6               jsr CHROUT
-0D11  A9 5B      2               lda #<msg_crash1
-0D13  A0 0E      2               ldy #>msg_crash1
-0D15  20 67 09   6               jsr print_msg
-0D18  A9 69      2               lda #<msg_crash2
-0D1A  A0 0E      2               ldy #>msg_crash2
-0D1C  20 67 09   6               jsr print_msg
-0D1F  A9 87      2               lda #<msg_try_again
-0D21  A0 0E      2               ldy #>msg_try_again
-0D23  20 67 09   6               jsr print_msg
-0D26  4C 9A 0D   3               jmp wait_for_restart
-0D29  60         6               rts
-0D2A  20 59 09   6               jsr engine_sound_off
-0D2D  A9 00      2               lda #$00
-0D2F  8D 04 D4   4               sta VOICE1_CTRL
-0D32  A9 00      2               lda #$00
-0D34  8D 00 D4   4               sta VOICE1_FREQ_LO
-0D37  A9 04      2               lda #$04
-0D39  8D 01 D4   4               sta VOICE1_FREQ_HI
-0D3C  A9 0F      2               lda #$0f
-0D3E  8D 05 D4   4               sta VOICE1_AD
-0D41  A9 00      2               lda #$00
-0D43  8D 06 D4   4               sta VOICE1_SR
-0D46  A9 81      2               lda #%10000001
-0D48  8D 04 D4   4               sta VOICE1_CTRL
-0D4B  A2 08      2               ldx #8
-0D4D  A9 9E      2               lda #<explosion_colors
-0D4F  A0 0E      2               ldy #>explosion_colors
-0D51  20 9A 08   6               jsr sprite0_explode
-0D54  60         6               rts
-0D55  A2 00      2               ldx #$00
-0D57  A9 00      2               lda #$00
-0D59  8D 04 D4   4               sta VOICE1_CTRL             ; gate off first (fresh retrigger)
-0D5C  BD A6 0E   4/5             lda melody_freq_lo,x
-0D5F  8D 00 D4   4               sta VOICE1_FREQ_LO
-0D62  BD AB 0E   4/5             lda melody_freq_hi,x
-0D65  8D 01 D4   4               sta VOICE1_FREQ_HI
-0D68  A9 00      2               lda #$00
-0D6A  8D 05 D4   4               sta VOICE1_AD                 ; attack 0, decay 0 -- snappy onset
-0D6D  A9 A0      2               lda #$a0
-0D6F  8D 06 D4   4               sta VOICE1_SR                  ; sustain 10 (holds while gated), release 0
-0D72  A9 11      2               lda #%00010001                  ; triangle waveform, gate on
-0D74  8D 04 D4   4               sta VOICE1_CTRL
-0D77  20 10 08   6               jsr wait_frame
-0D7A  20 10 08   6               jsr wait_frame
-0D7D  20 10 08   6               jsr wait_frame
-0D80  20 10 08   6               jsr wait_frame
-0D83  20 10 08   6               jsr wait_frame
-0D86  20 10 08   6               jsr wait_frame
-0D89  A9 10      2               lda #%00010000              ; triangle waveform, gate off
-0D8B  8D 04 D4   4               sta VOICE1_CTRL
-0D8E  20 10 08   6               jsr wait_frame
-0D91  20 10 08   6               jsr wait_frame
-0D94  E8         2               inx
-0D95  E0 05      2               cpx #5
-0D97  D0 BE      2/3/4           bne melody_loop
-0D99  60         6               rts
-0D9A  78         2               sei
-0D9B  A9 FF      2               lda #%11111111
-0D9D  8D 02 DC   4               sta CIA1_DDRA
-0DA0  A9 F7      2               lda #%11110111
-0DA2  8D 00 DC   4               sta CIA1_PRA
-0DA5  AD 01 DC   4               lda CIA1_PRB
-0DA8  58         2               cli
-0DA9  49 FF      2               eor #$ff
-0DAB  29 02      2               and #%00000010
-0DAD  F0 EB      2/3/4           beq wait_for_restart
-0DAF  4C 91 09   3               jmp start
+080D  4C 91 09          .basic start   ; needed once library code (wait_frame,
+0810  AD 12 D0          lda VIC_RASTER
+0813  C9 FB             cmp #$fb
+0815  D0 F9             bne wait_frame
+0817  60                rts
+0818  A2 00             ldx #0                ; returned: did X bounce this frame?
+081A  A0 00             ldy #0                ; returned: did Y bounce this frame?
+081C  A5 04             lda xdir
+081E  F0 1B             beq __local2_move_left
+0820  E6 02             inc xpos              ; 16-bit increment: bump the low byte, and
+0822  D0 02             bne __local2_x_inc_done        ; only the high byte too if that wrapped
+0824  E6 03             inc xpos+1
+0826  A5 02             lda xpos              ; 16-bit compare against XMAX
+0828  C9 FA             cmp #<XMAX
+082A  D0 29             bne __local2_x_done
+082C  A5 03             lda xpos+1
+082E  C9 00             cmp #>XMAX
+0830  D0 23             bne __local2_x_done
+0832  A9 00             lda #0
+0834  85 04             sta xdir             ; hit the right edge -- reverse
+0836  A2 01             ldx #1
+0838  4C 55 08          jmp __local2_x_done
+083B  A5 02             lda xpos              ; 16-bit decrement: only borrow into the
+083D  D0 02             bne __local2_x_dec_done         ; high byte if the low byte was already 0
+083F  C6 03             dec xpos+1
+0841  C6 02             dec xpos
+0843  A5 02             lda xpos              ; 16-bit compare against XMIN (XMIN is
+0845  C9 18             cmp #<XMIN              ; ordinarily under 256, so xpos+1 will
+0847  D0 0C             bne __local2_x_done               ; ordinarily be checked against 0 here,
+0849  A5 03             lda xpos+1                  ; but this works for any XMIN value)
+084B  C9 00             cmp #>XMIN
+084D  D0 06             bne __local2_x_done
+084F  A9 01             lda #1
+0851  85 04             sta xdir             ; hit the left edge -- reverse
+0853  A2 01             ldx #1
+0855  A5 06             lda ydir
+0857  F0 11             beq __local2_move_up
+0859  E6 03             inc ypos
+085B  A5 03             lda ypos
+085D  C9 FF             cmp #YMAX
+085F  D0 17             bne __local2_y_done
+0861  A9 00             lda #0
+0863  85 06             sta ydir             ; hit the bottom edge -- reverse
+0865  A0 01             ldy #1
+0867  4C 78 08          jmp __local2_y_done
+086A  C6 03             dec ypos
+086C  A5 03             lda ypos
+086E  C9 32             cmp #YMIN
+0870  D0 06             bne __local2_y_done
+0872  A9 01             lda #1
+0874  85 06             sta ydir             ; hit the top edge -- reverse
+0876  A0 01             ldy #1
+0878  A5 02             lda xpos
+087A  8D 00 D0          sta SPRITE0_X
+087D  A5 03             lda xpos+1
+087F  F0 0B             beq __local2_msb_clear
+0881  AD 10 D0          lda SPRITE_X_MSB
+0884  09 01             ora #%00000001       ; set sprite 0's bit only -- other sprites'
+0886  8D 10 D0          sta SPRITE_X_MSB       ; MSB bits, if any, are left untouched
+0889  4C 94 08          jmp __local2_msb_done
+088C  AD 10 D0          lda SPRITE_X_MSB
+088F  29 FE             and #%11111110
+0891  8D 10 D0          sta SPRITE_X_MSB
+0894  A5 03             lda ypos
+0896  8D 01 D0          sta SPRITE0_Y
+0899  60                rts
+089A  85 FB             sta gfx_ptr
+089C  84 FC             sty gfx_ptr+1
+089E  A9 01             lda #%00000001
+08A0  8D 1D D0          sta SPRITE_X_EXPAND
+08A3  8D 17 D0          sta SPRITE_Y_EXPAND
+08A6  A0 00             ldy #$00
+08A8  B1 FB             lda (gfx_ptr),y
+08AA  8D 27 D0          sta SPRITE0_COLOR
+08AD  20 10 08          jsr wait_frame
+08B0  20 10 08          jsr wait_frame
+08B3  C8                iny
+08B4  CA                dex
+08B5  D0 F1             bne __local3_loop
+08B7  A9 00             lda #0
+08B9  8D 15 D0          sta SPRITE_ENABLE
+08BC  8D 1D D0          sta SPRITE_X_EXPAND
+08BF  8D 17 D0          sta SPRITE_Y_EXPAND
+08C2  60                rts
+08C3  A9 00             lda #%00000000
+08C5  8D 02 DC          sta CIA1_DDRA
+08C8  AD 00 DC          lda CIA1_PRA
+08CB  49 FF             eor #$ff
+08CD  60                rts
+08F6  A2 00             ldx #$00
+08F8  20 CF FF          jsr CHRIN
+08FB  C9 0D             cmp #$0d
+08FD  F0 08             beq __local6_done
+08FF  9D CE 08          sta input_buf,x
+0902  E8                inx
+0903  E0 27             cpx #MAX_INPUT_LEN-1
+0905  D0 F1             bne __local6_loop
+0907  A9 00             lda #$00
+0909  9D CE 08          sta input_buf,x
+090C  60                rts
+090D  85 FB             sta word_dest_ptr
+090F  84 FC             sty word_dest_ptr+1
+0911  BD CE 08          lda input_buf,x
+0914  C9 20             cmp #$20
+0916  D0 04             bne __local7_start
+0918  E8                inx
+0919  4C 11 09          jmp __local7_skip_spaces
+091C  A0 00             ldy #$00
+091E  BD CE 08          lda input_buf,x
+0921  F0 0F             beq __local7_end
+0923  C9 20             cmp #$20
+0925  F0 0A             beq __local7_space
+0927  91 FB             sta (word_dest_ptr),y
+0929  E8                inx
+092A  C8                iny
+092B  C0 0E             cpy #MAX_WORD_LEN-1
+092D  D0 EF             bne __local7_loop
+092F  F0 01             beq __local7_terminate
+0931  E8                inx
+0932  A9 00             lda #$00
+0934  91 FB             sta (word_dest_ptr),y
+0936  60                rts
+0937  A5 14             lda engine_playing
+0939  D0 1D             bne __local8_already_on
+093B  A9 00             lda #$00
+093D  8D 00 D4          sta VOICE1_FREQ_LO
+0940  A9 08             lda #$08
+0942  8D 01 D4          sta VOICE1_FREQ_HI
+0945  A9 00             lda #$00
+0947  8D 05 D4          sta VOICE1_AD
+094A  A9 F8             lda #$f8
+094C  8D 06 D4          sta VOICE1_SR
+094F  A9 81             lda #%10000001          ; noise waveform, gate on
+0951  8D 04 D4          sta VOICE1_CTRL
+0954  A9 01             lda #1
+0956  85 14             sta engine_playing
+0958  60                rts
+0959  A5 14             lda engine_playing
+095B  F0 09             beq __local9_already_off
+095D  A9 80             lda #%10000000          ; noise waveform, gate off
+095F  8D 04 D4          sta VOICE1_CTRL
+0962  A9 00             lda #0
+0964  85 14             sta engine_playing
+0966  60                rts
+0967  85 FB             sta str_ptr
+0969  84 FC             sty str_ptr+1
+096B  A0 00             ldy #$00
+096D  B1 FB             lda (str_ptr),y
+096F  F0 06             beq __local10_done
+0971  20 D2 FF          jsr CHROUT
+0974  C8                iny
+0975  D0 F6             bne __local10_loop
+0977  60                rts
+0978  85 04             sta kw_ptr
+097A  84 05             sty kw_ptr+1
+097C  A0 00             ldy #$00
+097E  B1 02             lda (cmp_ptr),y
+0980  D1 04             cmp (kw_ptr),y
+0982  D0 07             bne __local11_no
+0984  C9 00             cmp #$00
+0986  F0 06             beq __local11_yes
+0988  C8                iny
+0989  D0 F3             bne __local11_loop
+098B  A9 00             lda #$00
+098D  60                rts
+098E  A9 01             lda #$01
+0990  60                rts
+0991  A9 00             lda #%00000000
+0993  8D 03 DC          sta CIA1_DDRB
+0996  A9 0F             lda #$0f
+0998  8D 18 D4          sta SID_VOLUME
+099B  A9 00             lda #$00
+099D  8D 04 D4          sta VOICE1_CTRL
+09A0  85 14             sta engine_playing        ; SID_INIT leaves A=$00 -- reuse it rather
+09A2  AD 11 D0          lda VIC_CTRL1
+09A5  09 20             ora #%00100000
+09A7  8D 11 D0          sta VIC_CTRL1
+09AA  AD 18 D0          lda VIC_MEMPTRS
+09AD  29 F0             and #%11110000
+09AF  09 08             ora #((BITMAP) / 1024)
+09B1  8D 18 D0          sta VIC_MEMPTRS
+09B4  A9 00             lda #<(BITMAP)
+09B6  85 FB             sta gfx_ptr
+09B8  A9 20             lda #>(BITMAP)
+09BA  85 FC             sta gfx_ptr+1
+09BC  A2 20             ldx #32
+09BE  A9 00             lda #$00
+09C0  A0 00             ldy #$00
+09C2  91 FB             sta (gfx_ptr),y
+09C4  C8                iny
+09C5  D0 FB             bne __local16_clear_byte
+09C7  E6 FC             inc gfx_ptr+1
+09C9  CA                dex
+09CA  D0 F4             bne __local16_clear_loop
+09CC  A9 00             lda #<SCREEN
+09CE  85 FB             sta gfx_ptr
+09D0  A9 04             lda #>SCREEN
+09D2  85 FC             sta gfx_ptr+1
+09D4  A2 04             ldx #4
+09D6  A9 C0             lda #$c0
+09D8  A0 00             ldy #$00
+09DA  91 FB             sta (gfx_ptr),y
+09DC  C8                iny
+09DD  D0 FB             bne __local17_fill_byte
+09DF  E6 FC             inc gfx_ptr+1
+09E1  CA                dex
+09E2  D0 F4             bne __local17_fill_loop
+09E4  A9 00             lda #0
+09E6  8D 20 D0          sta VIC_BORDER
+09E9  8D 21 D0          sta VIC_BG0
+09EC  A9 0F             lda #<(SCREEN + 15)
+09EE  85 FB             sta ptr
+09F0  A9 04             lda #>(SCREEN + 15)
+09F2  85 FC             sta ptr+1
+09F4  A2 19             ldx #25
+09F6  A0 00             ldy #$00
+09F8  A9 50             lda #$50                 ; green terrain (high nibble) on black sky
+09FA  91 FB             sta (ptr),y
+09FC  C8                iny
+09FD  C0 0B             cpy #11
+09FF  D0 F9             bne draw_pad_color_byte
+0A01  18                clc
+0A02  A5 FB             lda ptr
+0A04  69 28             adc #40
+0A06  85 FB             sta ptr
+0A08  A5 FC             lda ptr+1
+0A0A  69 00             adc #0
+0A0C  85 FC             sta ptr+1
+0A0E  CA                dex
+0A0F  D0 E5             bne draw_pad_color_row
+0A11  A9 00             lda #<SCREEN
+0A13  85 FB             sta ptr
+0A15  A9 04             lda #>SCREEN
+0A17  85 FC             sta ptr+1
+0A19  A0 00             ldy #$00
+0A1B  A9 70             lda #$70                 ; yellow fuel bar (high nibble) on black (low nibble)
+0A1D  91 FB             sta (ptr),y
+0A1F  C8                iny
+0A20  C0 28             cpy #40
+0A22  D0 F9             bne color_fuel_row
+0A24  20 F9 0B          jsr draw_terrain
+0A27  20 34 0C          jsr init_fuel_bar
+0A2A  A9 3B             lda #((ship_data) / 64)
+0A2C  8D F8 07          sta SPRITE_PTR0
+0A2F  A9 01             lda #1
+0A31  8D 27 D0          sta SPRITE0_COLOR
+0A34  A9 80             lda #128
+0A36  8D 00 D0          sta SPRITE0_X
+0A39  A9 32             lda #YMIN
+0A3B  8D 01 D0          sta SPRITE0_Y
+0A3E  A9 01             lda #%00000001
+0A40  8D 15 D0          sta SPRITE_ENABLE
+0A43  A9 80             lda #128
+0A45  85 02             sta ship_x
+0A47  A9 32             lda #YMIN
+0A49  85 03             sta ship_y
+0A4B  A9 01             lda #1
+0A4D  85 04             sta vx_dir
+0A4F  A9 00             lda #0
+0A51  85 05             sta vx_mag
+0A53  A9 01             lda #1
+0A55  85 06             sta vy_dir
+0A57  A9 00             lda #0
+0A59  85 07             sta vy_mag
+0A5B  A9 64             lda #FUEL_START
+0A5D  85 08             sta fuel
+0A5F  A9 06             lda #PHYSICS_DELAY
+0A61  85 09             sta physics_delay
+0A63  A9 03             lda #FUEL_DELAY
+0A65  85 0A             sta fuel_delay
+0A67  20 10 08          jsr wait_frame
+0A6A  20 82 0A          jsr read_input
+0A6D  20 F1 0A          jsr consume_fuel
+0A70  20 11 0B          jsr update_engine_sound
+0A73  20 61 0B          jsr do_physics
+0A76  20 EE 0B          jsr update_sprite
+0A79  20 70 0C          jsr draw_fuel_bar
+0A7C  20 98 0C          jsr check_landing
+0A7F  4C 67 0A          jmp main_loop
+0A82  20 C3 08          jsr read_joy2
+0A85  85 0E             sta joy_state           ; active-HIGH (1=pressed) -- read_joy2's
+0A87  A9 00             lda #0
+0A89  85 0B             sta thrust_flag
+0A8B  A5 0E             lda joy_state
+0A8D  29 01             and #%00000001
+0A8F  D0 15             bne set_thrust
+0A91  78                sei
+0A92  A9 FF             lda #%11111111
+0A94  8D 02 DC          sta CIA1_DDRA
+0A97  A9 FD             lda #%11111101
+0A99  8D 00 DC          sta CIA1_PRA
+0A9C  AD 01 DC          lda CIA1_PRB
+0A9F  58                cli
+0AA0  49 FF             eor #$ff
+0AA2  29 02             and #%00000010
+0AA4  F0 04             beq no_thrust_key
+0AA6  A9 01             lda #1
+0AA8  85 0B             sta thrust_flag
+0AAA  A9 00             lda #0
+0AAC  85 0C             sta left_flag
+0AAE  A5 0E             lda joy_state
+0AB0  29 04             and #%00000100
+0AB2  D0 15             bne set_left
+0AB4  78                sei
+0AB5  A9 FF             lda #%11111111
+0AB7  8D 02 DC          sta CIA1_DDRA
+0ABA  A9 FD             lda #%11111101
+0ABC  8D 00 DC          sta CIA1_PRA
+0ABF  AD 01 DC          lda CIA1_PRB
+0AC2  58                cli
+0AC3  49 FF             eor #$ff
+0AC5  29 04             and #%00000100
+0AC7  F0 04             beq no_left_key
+0AC9  A9 01             lda #1
+0ACB  85 0C             sta left_flag
+0ACD  A9 00             lda #0
+0ACF  85 0D             sta right_flag
+0AD1  A5 0E             lda joy_state
+0AD3  29 08             and #%00001000
+0AD5  D0 15             bne set_right
+0AD7  78                sei
+0AD8  A9 FF             lda #%11111111
+0ADA  8D 02 DC          sta CIA1_DDRA
+0ADD  A9 FB             lda #%11111011
+0ADF  8D 00 DC          sta CIA1_PRA
+0AE2  AD 01 DC          lda CIA1_PRB
+0AE5  58                cli
+0AE6  49 FF             eor #$ff
+0AE8  29 04             and #%00000100
+0AEA  F0 04             beq no_right_key
+0AEC  A9 01             lda #1
+0AEE  85 0D             sta right_flag
+0AF0  60                rts
+0AF1  A5 08             lda fuel
+0AF3  D0 09             bne fuel_not_empty
+0AF5  A9 00             lda #0
+0AF7  85 0B             sta thrust_flag
+0AF9  85 0C             sta left_flag
+0AFB  85 0D             sta right_flag
+0AFD  60                rts
+0AFE  A5 0B             lda thrust_flag
+0B00  05 0C             ora left_flag
+0B02  05 0D             ora right_flag
+0B04  F0 0A             beq consume_fuel_done
+0B06  C6 0A             dec fuel_delay
+0B08  D0 06             bne consume_fuel_done
+0B0A  A9 03             lda #FUEL_DELAY
+0B0C  85 0A             sta fuel_delay
+0B0E  C6 08             dec fuel
+0B10  60                rts
+0B11  A5 0B             lda thrust_flag
+0B13  05 0C             ora left_flag
+0B15  05 0D             ora right_flag
+0B17  F0 03             beq engine_should_stop
+0B19  4C 37 09          jmp engine_sound_on
+0B1C  4C 59 09          jmp engine_sound_off
+0B1F  A6 06             ldx vy_dir
+0B21  EC 2A 0E          cpx accel_want_dir
+0B24  F0 11             beq accel_v_same
+0B26  A5 07             lda vy_mag
+0B28  D0 0A             bne accel_v_decrement
+0B2A  AD 2A 0E          lda accel_want_dir
+0B2D  85 06             sta vy_dir
+0B2F  A9 01             lda #1
+0B31  85 07             sta vy_mag
+0B33  60                rts
+0B34  C6 07             dec vy_mag
+0B36  60                rts
+0B37  A5 07             lda vy_mag
+0B39  C9 02             cmp #MAX_V
+0B3B  F0 02             beq accel_v_done
+0B3D  E6 07             inc vy_mag
+0B3F  60                rts
+0B40  A6 04             ldx vx_dir
+0B42  EC 2A 0E          cpx accel_want_dir
+0B45  F0 11             beq accel_h_same
+0B47  A5 05             lda vx_mag
+0B49  D0 0A             bne accel_h_decrement
+0B4B  AD 2A 0E          lda accel_want_dir
+0B4E  85 04             sta vx_dir
+0B50  A9 01             lda #1
+0B52  85 05             sta vx_mag
+0B54  60                rts
+0B55  C6 05             dec vx_mag
+0B57  60                rts
+0B58  A5 05             lda vx_mag
+0B5A  C9 02             cmp #MAX_V
+0B5C  F0 02             beq accel_h_done
+0B5E  E6 05             inc vx_mag
+0B60  60                rts
+0B61  C6 09             dec physics_delay
+0B63  F0 03             beq physics_tick
+0B65  4C ED 0B          jmp physics_done
+0B68  A9 06             lda #PHYSICS_DELAY
+0B6A  85 09             sta physics_delay
+0B6C  A5 0B             lda thrust_flag
+0B6E  D0 0B             bne v_want_up
+0B70  A9 01             lda #1
+0B72  8D 2A 0E          sta accel_want_dir
+0B75  20 1F 0B          jsr accel_v
+0B78  4C 83 0B          jmp v_move
+0B7B  A9 00             lda #0
+0B7D  8D 2A 0E          sta accel_want_dir
+0B80  20 1F 0B          jsr accel_v
+0B83  A5 06             lda vy_dir
+0B85  F0 0A             beq v_moving_up
+0B87  A5 03             lda ship_y
+0B89  18                clc
+0B8A  65 07             adc vy_mag
+0B8C  85 03             sta ship_y
+0B8E  4C A4 0B          jmp h_accel
+0B91  A5 03             lda ship_y
+0B93  38                sec
+0B94  E5 07             sbc vy_mag
+0B96  85 03             sta ship_y
+0B98  C9 32             cmp #YMIN
+0B9A  B0 08             bcs h_accel
+0B9C  A9 32             lda #YMIN
+0B9E  85 03             sta ship_y
+0BA0  A9 00             lda #0
+0BA2  85 07             sta vy_mag
+0BA4  A5 0C             lda left_flag
+0BA6  D0 0D             bne h_want_left
+0BA8  A5 0D             lda right_flag
+0BAA  D0 14             bne h_want_right
+0BAC  A5 05             lda vx_mag
+0BAE  F0 18             beq h_move
+0BB0  C6 05             dec vx_mag
+0BB2  4C C8 0B          jmp h_move
+0BB5  A9 00             lda #0
+0BB7  8D 2A 0E          sta accel_want_dir
+0BBA  20 40 0B          jsr accel_h
+0BBD  4C C8 0B          jmp h_move
+0BC0  A9 01             lda #1
+0BC2  8D 2A 0E          sta accel_want_dir
+0BC5  20 40 0B          jsr accel_h
+0BC8  A5 04             lda vx_dir
+0BCA  F0 12             beq h_moving_left
+0BCC  A5 02             lda ship_x
+0BCE  18                clc
+0BCF  65 05             adc vx_mag
+0BD1  85 02             sta ship_x
+0BD3  C9 FA             cmp #XMAX
+0BD5  90 16             bcc physics_done
+0BD7  A9 FA             lda #XMAX
+0BD9  85 02             sta ship_x
+0BDB  4C ED 0B          jmp physics_done
+0BDE  A5 02             lda ship_x
+0BE0  38                sec
+0BE1  E5 05             sbc vx_mag
+0BE3  85 02             sta ship_x
+0BE5  C9 18             cmp #XMIN
+0BE7  B0 04             bcs physics_done
+0BE9  A9 18             lda #XMIN
+0BEB  85 02             sta ship_x
+0BED  60                rts
+0BEE  A5 02             lda ship_x
+0BF0  8D 00 D0          sta SPRITE0_X
+0BF3  A5 03             lda ship_y
+0BF5  8D 01 D0          sta SPRITE0_Y
+0BF8  60                rts
+0BF9  A2 00             ldx #$00
+0BFB  8A                txa
+0BFC  0A                asl a
+0BFD  A8                tay
+0BFE  B9 DA 0D          lda terrain_addr,y
+0C01  85 FB             sta ptr
+0C03  B9 DB 0D          lda terrain_addr+1,y
+0C06  85 FC             sta ptr+1
+0C08  A9 19             lda #25
+0C0A  38                sec
+0C0B  FD B2 0D          sbc terrain_row,x
+0C0E  85 0F             sta rows_remaining
+0C10  A9 FF             lda #$ff
+0C12  A0 00             ldy #$00
+0C14  91 FB             sta (ptr),y
+0C16  C8                iny
+0C17  C0 08             cpy #8
+0C19  D0 F9             bne draw_terrain_byte
+0C1B  48                pha                       ; save $ff -- about to clobber A for the 16-bit add
+0C1C  18                clc
+0C1D  A5 FB             lda ptr
+0C1F  69 40             adc #<320                 ; advance one full row down (40 cols * 8 bytes)
+0C21  85 FB             sta ptr
+0C23  A5 FC             lda ptr+1
+0C25  69 01             adc #>320
+0C27  85 FC             sta ptr+1
+0C29  68                pla
+0C2A  C6 0F             dec rows_remaining
+0C2C  D0 E4             bne draw_terrain_row
+0C2E  E8                inx
+0C2F  E0 28             cpx #40
+0C31  D0 C8             bne draw_terrain_loop
+0C33  60                rts
+0C34  A9 00             lda #<BITMAP
+0C36  85 FB             sta ptr
+0C38  A9 20             lda #>BITMAP
+0C3A  85 FC             sta ptr+1
+0C3C  A9 32             lda #(FUEL_START/2)
+0C3E  C9 29             cmp #41
+0C40  90 02             bcc init_fuel_cols_ok
+0C42  A9 28             lda #40
+0C44  85 11             sta last_fuel_cols
+0C46  AA                tax
+0C47  A0 00             ldy #$00
+0C49  A9 FF             lda #$ff
+0C4B  91 FB             sta (ptr),y
+0C4D  C8                iny
+0C4E  C0 08             cpy #8
+0C50  D0 F9             bne init_fuel_byte
+0C52  18                clc
+0C53  A5 FB             lda ptr
+0C55  69 08             adc #8
+0C57  85 FB             sta ptr
+0C59  A5 FC             lda ptr+1
+0C5B  69 00             adc #0
+0C5D  85 FC             sta ptr+1
+0C5F  CA                dex
+0C60  D0 E5             bne init_fuel_col
+0C62  38                sec
+0C63  A5 FB             lda ptr
+0C65  E9 08             sbc #8
+0C67  85 12             sta fuel_ptr
+0C69  A5 FC             lda ptr+1
+0C6B  E9 00             sbc #0
+0C6D  85 13             sta fuel_ptr+1
+0C6F  60                rts
+0C70  A5 08             lda fuel
+0C72  4A                lsr a
+0C73  C9 29             cmp #41
+0C75  90 02             bcc fuel_cols_check_ok
+0C77  A9 28             lda #40
+0C79  C5 11             cmp last_fuel_cols
+0C7B  F0 1A             beq draw_fuel_done
+0C7D  85 11             sta last_fuel_cols
+0C7F  A0 00             ldy #$00
+0C81  A9 00             lda #$00
+0C83  91 12             sta (fuel_ptr),y
+0C85  C8                iny
+0C86  C0 08             cpy #8
+0C88  D0 F9             bne clear_one_fuel_col
+0C8A  38                sec
+0C8B  A5 12             lda fuel_ptr
+0C8D  E9 08             sbc #8
+0C8F  85 12             sta fuel_ptr
+0C91  A5 13             lda fuel_ptr+1
+0C93  E9 00             sbc #0
+0C95  85 13             sta fuel_ptr+1
+0C97  60                rts
+0C98  A5 02             lda ship_x
+0C9A  38                sec
+0C9B  E9 18             sbc #XMIN
+0C9D  4A                lsr a
+0C9E  4A                lsr a
+0C9F  4A                lsr a
+0CA0  AA                tax
+0CA1  BD B2 0D          lda terrain_row,x
+0CA4  85 0F             sta ground_row_here
+0CA6  0A                asl a
+0CA7  0A                asl a
+0CA8  0A                asl a
+0CA9  18                clc
+0CAA  69 32             adc #YMIN
+0CAC  85 10             sta ground_y_here
+0CAE  A5 03             lda ship_y
+0CB0  C5 10             cmp ground_y_here
+0CB2  90 75             bcc check_landing_done
+0CB4  A5 10             lda ground_y_here
+0CB6  85 03             sta ship_y
+0CB8  20 EE 0B          jsr update_sprite
+0CBB  A5 0F             lda ground_row_here
+0CBD  C9 14             cmp #PAD_ROW
+0CBF  D0 3B             bne do_crash
+0CC1  A5 07             lda vy_mag
+0CC3  C9 03             cmp #SAFE_V+1
+0CC5  B0 35             bcs do_crash
+0CC7  A5 05             lda vx_mag
+0CC9  C9 03             cmp #SAFE_V+1
+0CCB  B0 2F             bcs do_crash
+0CCD  AD 11 D0          lda VIC_CTRL1
+0CD0  29 DF             and #%11011111
+0CD2  8D 11 D0          sta VIC_CTRL1
+0CD5  A9 14             lda #$14
+0CD7  8D 18 D0          sta VIC_MEMPTRS
+0CDA  A9 93             lda #$93
+0CDC  20 D2 FF          jsr CHROUT
+0CDF  A9 2B             lda #<msg_success1
+0CE1  A0 0E             ldy #>msg_success1
+0CE3  20 67 09          jsr print_msg
+0CE6  A9 4A             lda #<msg_success2
+0CE8  A0 0E             ldy #>msg_success2
+0CEA  20 67 09          jsr print_msg
+0CED  A9 80             lda #%10000000            ; make sure the engine sound is off --
+0CEF  8D 04 D4          sta VOICE1_CTRL            ; thrust might have been held right up
+0CF2  A9 00             lda #0                      ; to touchdown
+0CF4  85 14             sta engine_playing
+0CF6  20 55 0D          jsr play_success_melody
+0CF9  4C 1F 0D          jmp show_try_again
+0CFC  20 2A 0D          jsr show_explosion
+0CFF  AD 11 D0          lda VIC_CTRL1
+0D02  29 DF             and #%11011111
+0D04  8D 11 D0          sta VIC_CTRL1
+0D07  A9 14             lda #$14
+0D09  8D 18 D0          sta VIC_MEMPTRS
+0D0C  A9 93             lda #$93
+0D0E  20 D2 FF          jsr CHROUT
+0D11  A9 5B             lda #<msg_crash1
+0D13  A0 0E             ldy #>msg_crash1
+0D15  20 67 09          jsr print_msg
+0D18  A9 69             lda #<msg_crash2
+0D1A  A0 0E             ldy #>msg_crash2
+0D1C  20 67 09          jsr print_msg
+0D1F  A9 87             lda #<msg_try_again
+0D21  A0 0E             ldy #>msg_try_again
+0D23  20 67 09          jsr print_msg
+0D26  4C 9A 0D          jmp wait_for_restart
+0D29  60                rts
+0D2A  20 59 09          jsr engine_sound_off
+0D2D  A9 00             lda #$00
+0D2F  8D 04 D4          sta VOICE1_CTRL
+0D32  A9 00             lda #$00
+0D34  8D 00 D4          sta VOICE1_FREQ_LO
+0D37  A9 04             lda #$04
+0D39  8D 01 D4          sta VOICE1_FREQ_HI
+0D3C  A9 0F             lda #$0f
+0D3E  8D 05 D4          sta VOICE1_AD
+0D41  A9 00             lda #$00
+0D43  8D 06 D4          sta VOICE1_SR
+0D46  A9 81             lda #%10000001
+0D48  8D 04 D4          sta VOICE1_CTRL
+0D4B  A2 08             ldx #8
+0D4D  A9 9E             lda #<explosion_colors
+0D4F  A0 0E             ldy #>explosion_colors
+0D51  20 9A 08          jsr sprite0_explode
+0D54  60                rts
+0D55  A2 00             ldx #$00
+0D57  A9 00             lda #$00
+0D59  8D 04 D4          sta VOICE1_CTRL             ; gate off first (fresh retrigger)
+0D5C  BD A6 0E          lda melody_freq_lo,x
+0D5F  8D 00 D4          sta VOICE1_FREQ_LO
+0D62  BD AB 0E          lda melody_freq_hi,x
+0D65  8D 01 D4          sta VOICE1_FREQ_HI
+0D68  A9 00             lda #$00
+0D6A  8D 05 D4          sta VOICE1_AD                 ; attack 0, decay 0 -- snappy onset
+0D6D  A9 A0             lda #$a0
+0D6F  8D 06 D4          sta VOICE1_SR                  ; sustain 10 (holds while gated), release 0
+0D72  A9 11             lda #%00010001                  ; triangle waveform, gate on
+0D74  8D 04 D4          sta VOICE1_CTRL
+0D77  20 10 08          jsr wait_frame
+0D7A  20 10 08          jsr wait_frame
+0D7D  20 10 08          jsr wait_frame
+0D80  20 10 08          jsr wait_frame
+0D83  20 10 08          jsr wait_frame
+0D86  20 10 08          jsr wait_frame
+0D89  A9 10             lda #%00010000              ; triangle waveform, gate off
+0D8B  8D 04 D4          sta VOICE1_CTRL
+0D8E  20 10 08          jsr wait_frame
+0D91  20 10 08          jsr wait_frame
+0D94  E8                inx
+0D95  E0 05             cpx #5
+0D97  D0 BE             bne melody_loop
+0D99  60                rts
+0D9A  78                sei
+0D9B  A9 FF             lda #%11111111
+0D9D  8D 02 DC          sta CIA1_DDRA
+0DA0  A9 F7             lda #%11110111
+0DA2  8D 00 DC          sta CIA1_PRA
+0DA5  AD 01 DC          lda CIA1_PRB
+0DA8  58                cli
+0DA9  49 FF             eor #$ff
+0DAB  29 02             and #%00000010
+0DAD  F0 EB             beq wait_for_restart
+0DAF  4C 91 09          jmp start
 
 Symbol table:
   BITMAP               = $2000

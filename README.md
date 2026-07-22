@@ -155,13 +155,40 @@ unzip c64asm-split-src.zip && make
 ./c64asm <input.asm> -o <output.prg> [--listing <file.lst>] [--lib-dir <dir>]
 ```
 
+## Disassembler
+
+`c64disasm.py` goes the other way — a `.prg` file back into
+`c64asm.py`-compatible source:
+
+```
+python3 c64disasm.py yourfile.prg -o yourfile.asm [--entry $ADDR]
+```
+
+It follows actual code flow from the program's entry point (auto-
+detected from a BASIC stub's `SYS` target, or the load address itself,
+or an explicit `--entry` you provide) rather than blindly decoding
+byte by byte — branches, jumps, and calls get followed recursively,
+and anything never reached that way is shown as plain `.byte` data
+rather than guessed at as an instruction. This is deliberately a
+single Python tool, not matched across three implementations the way
+`c64asm.py` itself is — see `c64disasm.py`'s own header comment for
+the full reasoning, the algorithm, and its known limitations
+(computed/indirect jumps and jump tables chief among them).
+
+Its own correctness test is disassembling and then reassembling every
+`.prg` this project ships — all of them, including the illegal-opcode
+demo, byte-for-byte identical to the original across all three `c64asm`
+builds, not just checked for a plausible-looking result.
+
 ## Project structure
 
 | File | What it is |
 |---|---|
+| `GETTING-STARTED.md` | **Start here** — a short, example-driven walkthrough from nothing to a running C64 program |
 | `c64asm.py` | The assembler, Python implementation |
 | `c64asm.c` | The assembler, single-file portable C99 implementation |
 | `c64asm-split-src.zip` | The same assembler split into one file per concern, heavily commented, with a `Makefile` — for reading, not a different implementation (see `ARCHITECTURE.md`) |
+| `c64disasm.py` | **Disassembler** — turns a `.prg` back into `c64asm.py`-compatible source, following actual code flow rather than blind byte-by-byte decoding (see "Disassembler" above) |
 | `ARCHITECTURE.md` | Guide to the split-source project's module layout |
 | `CHANGELOG.md` | **Project history** — every notable feature and fix, newest first, with pointers into the docs below for the full detail on each |
 | `c64asm-reference.md` | **Assembler syntax reference** — labels, expressions, addressing-mode syntax, macros, local labels, `.include`/`.incbin`, conditional assembly, every directive, error messages, VICE label export, CLI usage |

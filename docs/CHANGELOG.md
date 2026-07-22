@@ -13,6 +13,54 @@ this project's full regression suite before being marked done — that
 discipline is this project's own standing practice, not something
 worth repeating in every entry below.
 
+## `c64disasm.py`
+
+A disassembler — the other direction from everything else in this
+project, turning a `.prg` back into `c64asm.py`-compatible source. A
+genuinely different problem from assembling: a raw binary doesn't say
+which of its bytes are meant to be executed as instructions and which
+are data that just happens to sit in the same address space, so this
+follows actual code flow from the program's entry point (branches,
+jumps, and calls, recursively) rather than blindly decoding byte by
+byte, and shows anything never reached that way as plain `.byte` data
+— the honest answer for a data byte, even when it isn't the most
+informative one. Also detects and reconstructs printable PETSCII text
+runs as readable `.text "..."` lines, self-verified against `c64asm.py`'s
+own encoding function before ever being used, so a wrong guess simply
+falls back to `.byte` instead of risking incorrect output.
+
+Deliberately a single Python tool, not matched across three
+implementations the way `c64asm.py` itself is — see `c64disasm.py`'s
+own header comment for the full reasoning. Its correctness test is
+disassembling and reassembling every `.prg` this project ships — seven
+real demos plus the illegal-opcode showcase — and confirming
+byte-for-byte identical output to the original across all three
+`c64asm` builds, not a synthetic test written to be easy to pass. One
+real bug came up during that testing and was fixed before shipping:
+an early version generated a `jsr $FFD2`-style KERNAL call as a
+reference to a *generated* label that was never actually defined
+anywhere in the output, since the real target address falls well
+outside the disassembled file's own range — now any jump/call/branch
+target outside the file becomes a plain hex address instead of an
+undefined symbol. See `README.md`'s "Disassembler" section.
+
+## `GETTING-STARTED.md`
+
+A short, example-driven walkthrough distinct from `c64asm-
+reference.md`'s exhaustive syntax reference — three verified,
+runnable examples (a minimal border-color program, a deliberate error
+to show the error-reporting format, and a standard-library "hello
+world" using `lib/text.inc`) building from nothing to a working
+program, then a map pointing at the rest of the project's
+documentation. Every example and command in it was actually run
+before being written down, including the multi-file build commands
+for all three implementations — one of which surfaced a real bug in
+the example itself (a bare `.basic` with no explicit label, placed
+right before a `.include`, silently jumped into the library's own
+code instead of the program's), which became the guide's own
+explanation of that exact gotcha rather than a mistake quietly fixed
+and forgotten.
+
 ## `lib/math.inc`: `MULT_3`/`MULT_5`/`MULT_6`/`MULT_7`/`MULT_9`/`MULT_10`/`MULT_12`
 
 Closes a real gap `MULT_2`/`MULT_4`/`MULT_8`/`MULT_16` left open: a
