@@ -13,6 +13,35 @@ this project's full regression suite before being marked done — that
 discipline is this project's own standing practice, not something
 worth repeating in every entry below.
 
+## `lib/music.inc` and `music_demo.asm`
+
+A two-voice SID music player, and a real demo built on it — "Twinkle
+Twinkle Little Star" (public domain; the melody is the 18th-century
+French folk tune "Ah! vous dirai-je, maman"), a sawtooth melody voice
+over a triangle bass line, border color pulsing on the beat. The
+library provides the sequencer (`MUSIC_INIT`, `music_tick` called once
+per frame, `music_stop`); the actual note data — frequency and
+duration tables for each voice — is the caller's own, the same way
+`sound.inc` doesn't provide its own sound effects, only the mechanism
+to play one. Frequencies were computed directly from the equal-
+temperament/PAL-SID-clock formula rather than transcribed from a
+reference table, and the demo's own regression test (103 checks)
+recomputes every expected frequency independently, rather than
+checking the assembled program's SID register writes against numbers
+copied from the same place the `.asm` file's own data came from — a
+transcription mistake in either the source data or the test would
+actually be caught this way, not hidden by both sides agreeing by
+construction. Confirmed correct frequency and gate-on/off state for
+all 48 melody notes and all 6 bass notes, in order, including the
+melody correctly looping back to its first note after a full cycle.
+`wait_frame` is written fresh in the demo itself rather than pulling
+in `graphics.inc` for it, which would otherwise mean satisfying nine
+zero-page/RAM requirements this demo has no other use for. Also added
+the previously-missing voice 2 and voice 3 SID register constants
+(`VOICE2_FREQ_LO` and friends) to `hardware.inc`, matching voice 1's
+own existing naming — only voice 1 had been needed by anything before
+now. See `lib-reference.md` and `README.md`'s file table.
+
 ## `c64disasm.py`
 
 A disassembler — the other direction from everything else in this

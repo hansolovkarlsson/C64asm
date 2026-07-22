@@ -76,6 +76,16 @@ add_label $D404 .VOICE1_CTRL
 add_label $D401 .VOICE1_FREQ_HI
 add_label $D400 .VOICE1_FREQ_LO
 add_label $D406 .VOICE1_SR
+add_label $D40C .VOICE2_AD
+add_label $D40B .VOICE2_CTRL
+add_label $D408 .VOICE2_FREQ_HI
+add_label $D407 .VOICE2_FREQ_LO
+add_label $D40D .VOICE2_SR
+add_label $D413 .VOICE3_AD
+add_label $D412 .VOICE3_CTRL
+add_label $D40F .VOICE3_FREQ_HI
+add_label $D40E .VOICE3_FREQ_LO
+add_label $D414 .VOICE3_SR
 add_label $00FA .XMAX
 add_label $0018 .XMIN
 add_label $00FF .YMAX

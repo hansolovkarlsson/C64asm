@@ -1,6 +1,6 @@
 # c64asm standard library
 
-Seven `.include`-able files providing the register constants, text
+Eight `.include`-able files providing the register constants, text
 output, input handling, graphics setup, and sound effects that this
 project's own demo programs (`hello.asm`, `bounce.asm`, `pong.asm`,
 `adventure.asm`, `lander.asm`) each implemented from scratch. Everything
@@ -38,6 +38,7 @@ for the full behavior.
 | `lib/keyboard.inc` | Named `KEY_<NAME>_COL`/`KEY_<NAME>_ROW`/`KEY_<NAME>_CODE` constants for every key on the keyboard matrix (pairs with `input.inc`'s `READ_KEY`), and `wait_any_key` for a blocking "press any key" read that returns which key in A. |
 | `lib/graphics.inc` | `BITMAP_MODE_ON addr`, `BITMAP_MODE_OFF`, `CLEAR_BITMAP addr`, `SET_SCREEN_COLOR value`, `SPRITE_INIT data, color, x, y` for bitmap/sprite setup; `wait_frame` for raster-synced timing; `sprite0_bounce_step` for animating a sprite bouncing within a rectangular area; `sprite0_explode` for a caller-colored expand-flash-hide effect (an explosion, a hit, anything that needs a sprite to visibly go away). |
 | `lib/sound.inc` | `SID_INIT`, `PLAY_SOUND freq_hi, ad, sr, waveform`, `engine_sound_on`/`engine_sound_off`. |
+| `lib/music.inc` | `MUSIC_INIT melody_wave, melody_ad, melody_sr, bass_wave, bass_ad, bass_sr`, `music_tick` (call once per frame), `music_stop`. A two-voice sequencer, not a fixed sound effect — the note data (frequency/duration tables) is the caller's own, the same way this file doesn't provide the tune itself, only the player. See `music_demo.asm` for a complete, real worked example. |
 | `lib/math.inc` | `MULT_2`/`MULT_4`/`MULT_8`/`MULT_16` and `DIV_2`/`DIV_4`/`DIV_8`/`DIV_16` — multiply or (truncating, unsigned) divide A in place by a small power of two, via left/right shifts (the 6502 has no multiply or divide instruction); need no zero page. Also `MULT_3`/`MULT_5`/`MULT_6`/`MULT_7`/`MULT_9`/`MULT_10`/`MULT_12` for the smallest non-power-of-two sizes, which — unlike the power-of-two macros — need a 1-byte zero-page `mult_scratch` declared first (no non-power-of-two `DIV_N`; see the file's own header comment for why). Meant for indexing an array of `.struct`-sized records and the reverse — see `c64asm-reference.md` §10's "Indexing an array of records". |
 
 ## Using a library file

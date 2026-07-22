@@ -71,6 +71,16 @@ VOICE1_FREQ_HI = $d401
 VOICE1_CTRL    = $d404   ; bits 4-7 = waveform select, bit 0 = gate
 VOICE1_AD      = $d405   ; bits 4-7 = attack, bits 0-3 = decay
 VOICE1_SR      = $d406   ; bits 4-7 = sustain, bits 0-3 = release
+VOICE2_FREQ_LO = $d407
+VOICE2_FREQ_HI = $d408
+VOICE2_CTRL    = $d40b   ; same bit layout as VOICE1_CTRL
+VOICE2_AD      = $d40c
+VOICE2_SR      = $d40d
+VOICE3_FREQ_LO = $d40e
+VOICE3_FREQ_HI = $d40f
+VOICE3_CTRL    = $d412   ; same bit layout as VOICE1_CTRL
+VOICE3_AD      = $d413
+VOICE3_SR      = $d414
 SID_VOLUME     = $d418   ; bits 0-3 = master volume (0-15)
 
 ; --- CIA #1 (joystick port 2 and keyboard matrix) ---

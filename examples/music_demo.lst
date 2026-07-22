@@ -1,0 +1,526 @@
+; c64asm listing  (origin $0801, 890 bytes)
+; CYCLES column: a plain number is a fixed cycle count; "b/b+1" means b cycles, +1 more if this instruction's indexed addressing crosses a page boundary; "2/3/4" means a branch's usual 2 (not taken) / 3 (taken) / 4 (taken, crossing a page). Blank means an illegal/undocumented opcode (.cpu 6510x) -- see c64asm-reference.md "Listing file format".
+
+ADDR  BYTES      CYCLES  SOURCE
+080D  4C 88 09   3               .basic start
+0810  85 FB      3               sta str_ptr
+0812  84 FC      3               sty str_ptr+1
+0814  A0 00      2               ldy #$00
+0816  B1 FB      5/6             lda (str_ptr),y
+0818  F0 06      2/3/4           beq __local1_done
+081A  20 D2 FF   6               jsr CHROUT
+081D  C8         2               iny
+081E  D0 F6      2/3/4           bne __local1_loop
+0820  60         6               rts
+0821  85 02      3               sta kw_ptr
+0823  84 03      3               sty kw_ptr+1
+0825  A0 00      2               ldy #$00
+0827  B1 FD      5/6             lda (cmp_ptr),y
+0829  D1 02      5/6             cmp (kw_ptr),y
+082B  D0 07      2/3/4           bne __local2_no
+082D  C9 00      2               cmp #$00
+082F  F0 06      2/3/4           beq __local2_yes
+0831  C8         2               iny
+0832  D0 F3      2/3/4           bne __local2_loop
+0834  A9 00      2               lda #$00
+0836  60         6               rts
+0837  A9 01      2               lda #$01
+0839  60         6               rts
+083A  A9 00      2               lda #%00000000
+083C  8D 02 DC   4               sta CIA1_DDRA
+083F  AD 00 DC   4               lda CIA1_PRA
+0842  49 FF      2               eor #$ff
+0844  60         6               rts
+086D  A2 00      2               ldx #$00
+086F  20 CF FF   6               jsr CHRIN
+0872  C9 0D      2               cmp #$0d
+0874  F0 08      2/3/4           beq __local5_done
+0876  9D 45 08   5               sta input_buf,x
+0879  E8         2               inx
+087A  E0 27      2               cpx #MAX_INPUT_LEN-1
+087C  D0 F1      2/3/4           bne __local5_loop
+087E  A9 00      2               lda #$00
+0880  9D 45 08   5               sta input_buf,x
+0883  60         6               rts
+0884  85 FB      3               sta word_dest_ptr
+0886  84 FC      3               sty word_dest_ptr+1
+0888  BD 45 08   4/5             lda input_buf,x
+088B  C9 20      2               cmp #$20
+088D  D0 04      2/3/4           bne __local6_start
+088F  E8         2               inx
+0890  4C 88 08   3               jmp __local6_skip_spaces
+0893  A0 00      2               ldy #$00
+0895  BD 45 08   4/5             lda input_buf,x
+0898  F0 0F      2/3/4           beq __local6_end
+089A  C9 20      2               cmp #$20
+089C  F0 0A      2/3/4           beq __local6_space
+089E  91 FB      6               sta (word_dest_ptr),y
+08A0  E8         2               inx
+08A1  C8         2               iny
+08A2  C0 0E      2               cpy #MAX_WORD_LEN-1
+08A4  D0 EF      2/3/4           bne __local6_loop
+08A6  F0 01      2/3/4           beq __local6_terminate
+08A8  E8         2               inx
+08A9  A9 00      2               lda #$00
+08AB  91 FB      6               sta (word_dest_ptr),y
+08AD  60         6               rts
+08B6  A2 00      2               ldx #$00
+08B8  78         2               sei
+08B9  A9 FF      2               lda #%11111111
+08BB  8D 02 DC   4               sta CIA1_DDRA
+08BE  BD AE 08   4/5             lda key_col_table,x
+08C1  8D 00 DC   4               sta CIA1_PRA
+08C4  AD 01 DC   4               lda CIA1_PRB
+08C7  58         2               cli
+08C8  49 FF      2               eor #$ff             ; active-HIGH: bit=1 means that key is held
+08CA  F0 09      2/3/4           beq __local8_next_col
+08CC  A0 00      2               ldy #$00
+08CE  4A         2               lsr a
+08CF  B0 0E      2/3/4           bcs __local8_found
+08D1  C8         2               iny
+08D2  4C CE 08   3               jmp __local8_row_loop
+08D5  E8         2               inx
+08D6  E0 08      2               cpx #$08
+08D8  D0 DE      2/3/4           bne __local8_col_loop
+08DA  A2 00      2               ldx #$00
+08DC  4C B8 08   3               jmp __local8_col_loop
+08DF  8A         2               txa
+08E0  0A         2               asl a
+08E1  0A         2               asl a
+08E2  0A         2               asl a                 ; A = column_index * 8
+08E3  85 0A      3               sta key_scratch
+08E5  98         2               tya
+08E6  18         2               clc
+08E7  65 0A      3               adc key_scratch        ; A = column_index*8 + row_index
+08E9  60         6               rts
+08EA  CE 3D 03   6               dec melody_timer
+08ED  D0 03      2/3/4           bne check_bass_tick
+08EF  20 04 09   6               jsr advance_melody_note
+08F2  CE 3F 03   6               dec bass_timer
+08F5  D0 03      2/3/4           bne music_tick_done
+08F7  20 42 09   6               jsr advance_bass_note
+08FA  60         6               rts
+08FB  A9 00      2               lda #$00
+08FD  8D 04 D4   4               sta VOICE1_CTRL
+0900  8D 0B D4   4               sta VOICE2_CTRL
+0903  60         6               rts
+0904  EE 3C 03   6               inc melody_index
+0907  AD 3C 03   4               lda melody_index
+090A  C9 30      2               cmp #MELODY_LEN
+090C  D0 05      2/3/4           bne __local13_in_range
+090E  A9 00      2               lda #$00
+0910  8D 3C 03   4               sta melody_index
+0913  AE 3C 03   4               ldx melody_index
+0916  BD 39 0B   4/5             lda melody_duration,x
+0919  8D 3D 03   4               sta melody_timer
+091C  BD 09 0B   4/5             lda melody_freq_hi,x
+091F  1D D9 0A   4/5             ora melody_freq_lo,x
+0922  F0 18      2/3/4           beq __local13_rest
+0924  A9 00      2               lda #$00
+0926  8D 04 D4   4               sta VOICE1_CTRL
+0929  BD D9 0A   4/5             lda melody_freq_lo,x
+092C  8D 00 D4   4               sta VOICE1_FREQ_LO
+092F  BD 09 0B   4/5             lda melody_freq_hi,x
+0932  8D 01 D4   4               sta VOICE1_FREQ_HI
+0935  AD 40 03   4               lda melody_waveform
+0938  8D 04 D4   4               sta VOICE1_CTRL
+093B  60         6               rts
+093C  A9 00      2               lda #$00
+093E  8D 04 D4   4               sta VOICE1_CTRL
+0941  60         6               rts
+0942  EE 3E 03   6               inc bass_index
+0945  AD 3E 03   4               lda bass_index
+0948  C9 06      2               cmp #BASS_LEN
+094A  D0 05      2/3/4           bne __local14_in_range
+094C  A9 00      2               lda #$00
+094E  8D 3E 03   4               sta bass_index
+0951  AE 3E 03   4               ldx bass_index
+0954  BD 75 0B   4/5             lda bass_duration,x
+0957  8D 3F 03   4               sta bass_timer
+095A  BD 6F 0B   4/5             lda bass_freq_hi,x
+095D  1D 69 0B   4/5             ora bass_freq_lo,x
+0960  F0 18      2/3/4           beq __local14_rest
+0962  A9 00      2               lda #$00
+0964  8D 0B D4   4               sta VOICE2_CTRL
+0967  BD 69 0B   4/5             lda bass_freq_lo,x
+096A  8D 07 D4   4               sta VOICE2_FREQ_LO
+096D  BD 6F 0B   4/5             lda bass_freq_hi,x
+0970  8D 08 D4   4               sta VOICE2_FREQ_HI
+0973  AD 41 03   4               lda bass_waveform
+0976  8D 0B D4   4               sta VOICE2_CTRL
+0979  60         6               rts
+097A  A9 00      2               lda #$00
+097C  8D 0B D4   4               sta VOICE2_CTRL
+097F  60         6               rts
+0980  AD 12 D0   4               lda VIC_RASTER
+0983  C9 FB      2               cmp #$fb
+0985  D0 F9      2/3/4           bne wait_frame
+0987  60         6               rts
+0988  A9 00      2               lda #%00000000
+098A  8D 03 DC   4               sta CIA1_DDRB
+098D  A9 93      2               lda #$93
+098F  20 D2 FF   6               jsr CHROUT
+0992  A9 30      2               lda #<title_msg
+0994  A0 0A      2               ldy #>title_msg
+0996  20 10 08   6               jsr print_msg
+0999  A9 4D      2               lda #<credit_msg
+099B  A0 0A      2               ldy #>credit_msg
+099D  20 10 08   6               jsr print_msg
+09A0  A9 79      2               lda #<instructions_msg
+09A2  A0 0A      2               ldy #>instructions_msg
+09A4  20 10 08   6               jsr print_msg
+09A7  A9 A5      2               lda #<continue_msg
+09A9  A0 0A      2               ldy #>continue_msg
+09AB  20 10 08   6               jsr print_msg
+09AE  20 B6 08   6               jsr wait_any_key
+09B1  A9 93      2               lda #$93
+09B3  20 D2 FF   6               jsr CHROUT
+09B6  A9 C0      2               lda #<now_playing_msg
+09B8  A0 0A      2               ldy #>now_playing_msg
+09BA  20 10 08   6               jsr print_msg
+09BD  A9 0F      2               lda #$0f
+09BF  8D 18 D4   4               sta SID_VOLUME
+09C2  A9 00      2               lda #$00
+09C4  8D 04 D4   4               sta VOICE1_CTRL
+09C7  8D 0B D4   4               sta VOICE2_CTRL
+09CA  A9 21      2               lda #%00100001
+09CC  8D 40 03   4               sta melody_waveform
+09CF  A9 08      2               lda #$08
+09D1  8D 05 D4   4               sta VOICE1_AD
+09D4  A9 A3      2               lda #$a3
+09D6  8D 06 D4   4               sta VOICE1_SR
+09D9  A9 11      2               lda #%00010001
+09DB  8D 41 03   4               sta bass_waveform
+09DE  A9 28      2               lda #$28
+09E0  8D 0C D4   4               sta VOICE2_AD
+09E3  A9 C4      2               lda #$c4
+09E5  8D 0D D4   4               sta VOICE2_SR
+09E8  A9 FF      2               lda #$ff
+09EA  8D 3C 03   4               sta melody_index
+09ED  8D 3E 03   4               sta bass_index
+09F0  A9 01      2               lda #$01
+09F2  8D 3D 03   4               sta melody_timer
+09F5  8D 3F 03   4               sta bass_timer
+09F8  20 80 09   6               jsr wait_frame
+09FB  20 EA 08   6               jsr music_tick
+09FE  AD 3D 03   4               lda melody_timer
+0A01  C9 0F      2               cmp #15
+0A03  D0 03      2/3/4           bne check_exit
+0A05  EE 20 D0   6               inc $d020
+0A08  78         2               sei
+0A09  A9 FF      2               lda #%11111111
+0A0B  8D 02 DC   4               sta CIA1_DDRA
+0A0E  A9 7F      2               lda #KEY_Q_COL
+0A10  8D 00 DC   4               sta CIA1_PRA
+0A13  AD 01 DC   4               lda CIA1_PRB
+0A16  58         2               cli
+0A17  49 FF      2               eor #$ff
+0A19  29 40      2               and #KEY_Q_ROW
+0A1B  D0 03      2/3/4           bne do_exit
+0A1D  4C F8 09   3               jmp main_loop
+0A20  20 FB 08   6               jsr music_stop
+0A23  A9 93      2               lda #$93
+0A25  20 D2 FF   6               jsr CHROUT
+0A28  A9 D0      2               lda #<bye_msg
+0A2A  A0 0A      2               ldy #>bye_msg
+0A2C  20 10 08   6               jsr print_msg
+0A2F  60         6               rts
+
+Symbol table:
+  BASS_LEN             = $0006
+  BITMAP               = $2000
+  CHRIN                = $FFCF
+  CHROUT               = $FFD2
+  CIA1_DDRA            = $DC02
+  CIA1_DDRB            = $DC03
+  CIA1_PRA             = $DC00
+  CIA1_PRB             = $DC01
+  KEY_0_CODE           = $0023
+  KEY_0_COL            = $00EF
+  KEY_0_ROW            = $0008
+  KEY_1_CODE           = $0038
+  KEY_1_COL            = $007F
+  KEY_1_ROW            = $0001
+  KEY_2_CODE           = $003B
+  KEY_2_COL            = $007F
+  KEY_2_ROW            = $0008
+  KEY_3_CODE           = $0008
+  KEY_3_COL            = $00FD
+  KEY_3_ROW            = $0001
+  KEY_4_CODE           = $000B
+  KEY_4_COL            = $00FD
+  KEY_4_ROW            = $0008
+  KEY_5_CODE           = $0010
+  KEY_5_COL            = $00FB
+  KEY_5_ROW            = $0001
+  KEY_6_CODE           = $0013
+  KEY_6_COL            = $00FB
+  KEY_6_ROW            = $0008
+  KEY_7_CODE           = $0018
+  KEY_7_COL            = $00F7
+  KEY_7_ROW            = $0001
+  KEY_8_CODE           = $001B
+  KEY_8_COL            = $00F7
+  KEY_8_ROW            = $0008
+  KEY_9_CODE           = $0020
+  KEY_9_COL            = $00EF
+  KEY_9_ROW            = $0001
+  KEY_ASTERISK_CODE    = $0031
+  KEY_ASTERISK_COL     = $00BF
+  KEY_ASTERISK_ROW     = $0002
+  KEY_AT_CODE          = $002E
+  KEY_AT_COL           = $00DF
+  KEY_AT_ROW           = $0040
+  KEY_A_CODE           = $000A
+  KEY_A_COL            = $00FD
+  KEY_A_ROW            = $0004
+  KEY_B_CODE           = $001C
+  KEY_B_COL            = $00F7
+  KEY_B_ROW            = $0010
+  KEY_COLON_CODE       = $002D
+  KEY_COLON_COL        = $00DF
+  KEY_COLON_ROW        = $0020
+  KEY_COMMA_CODE       = $002F
+  KEY_COMMA_COL        = $00DF
+  KEY_COMMA_ROW        = $0080
+  KEY_COMMODORE_CODE   = $003D
+  KEY_COMMODORE_COL    = $007F
+  KEY_COMMODORE_ROW    = $0020
+  KEY_CRSR_LR_CODE     = $0002
+  KEY_CRSR_LR_COL      = $00FE
+  KEY_CRSR_LR_ROW      = $0004
+  KEY_CRSR_UD_CODE     = $0007
+  KEY_CRSR_UD_COL      = $00FE
+  KEY_CRSR_UD_ROW      = $0080
+  KEY_CTRL_CODE        = $003A
+  KEY_CTRL_COL         = $007F
+  KEY_CTRL_ROW         = $0004
+  KEY_C_CODE           = $0014
+  KEY_C_COL            = $00FB
+  KEY_C_ROW            = $0010
+  KEY_DEL_CODE         = $0000
+  KEY_DEL_COL          = $00FE
+  KEY_DEL_ROW          = $0001
+  KEY_D_CODE           = $0012
+  KEY_D_COL            = $00FB
+  KEY_D_ROW            = $0004
+  KEY_EQUALS_CODE      = $0035
+  KEY_EQUALS_COL       = $00BF
+  KEY_EQUALS_ROW       = $0020
+  KEY_E_CODE           = $000E
+  KEY_E_COL            = $00FD
+  KEY_E_ROW            = $0040
+  KEY_F1_CODE          = $0004
+  KEY_F1_COL           = $00FE
+  KEY_F1_ROW           = $0010
+  KEY_F3_CODE          = $0005
+  KEY_F3_COL           = $00FE
+  KEY_F3_ROW           = $0020
+  KEY_F5_CODE          = $0006
+  KEY_F5_COL           = $00FE
+  KEY_F5_ROW           = $0040
+  KEY_F7_CODE          = $0003
+  KEY_F7_COL           = $00FE
+  KEY_F7_ROW           = $0008
+  KEY_F_CODE           = $0015
+  KEY_F_COL            = $00FB
+  KEY_F_ROW            = $0020
+  KEY_G_CODE           = $001A
+  KEY_G_COL            = $00F7
+  KEY_G_ROW            = $0004
+  KEY_HOME_CODE        = $0033
+  KEY_HOME_COL         = $00BF
+  KEY_HOME_ROW         = $0008
+  KEY_H_CODE           = $001D
+  KEY_H_COL            = $00F7
+  KEY_H_ROW            = $0020
+  KEY_I_CODE           = $0021
+  KEY_I_COL            = $00EF
+  KEY_I_ROW            = $0002
+  KEY_J_CODE           = $0022
+  KEY_J_COL            = $00EF
+  KEY_J_ROW            = $0004
+  KEY_K_CODE           = $0025
+  KEY_K_COL            = $00EF
+  KEY_K_ROW            = $0020
+  KEY_LEFTARROW_CODE   = $0039
+  KEY_LEFTARROW_COL    = $007F
+  KEY_LEFTARROW_ROW    = $0002
+  KEY_LSHIFT_CODE      = $000F
+  KEY_LSHIFT_COL       = $00FD
+  KEY_LSHIFT_ROW       = $0080
+  KEY_L_CODE           = $002A
+  KEY_L_COL            = $00DF
+  KEY_L_ROW            = $0004
+  KEY_MINUS_CODE       = $002B
+  KEY_MINUS_COL        = $00DF
+  KEY_MINUS_ROW        = $0008
+  KEY_M_CODE           = $0024
+  KEY_M_COL            = $00EF
+  KEY_M_ROW            = $0010
+  KEY_N_CODE           = $0027
+  KEY_N_COL            = $00EF
+  KEY_N_ROW            = $0080
+  KEY_O_CODE           = $0026
+  KEY_O_COL            = $00EF
+  KEY_O_ROW            = $0040
+  KEY_PERIOD_CODE      = $002C
+  KEY_PERIOD_COL       = $00DF
+  KEY_PERIOD_ROW       = $0010
+  KEY_PLUS_CODE        = $0028
+  KEY_PLUS_COL         = $00DF
+  KEY_PLUS_ROW         = $0001
+  KEY_POUND_CODE       = $0030
+  KEY_POUND_COL        = $00BF
+  KEY_POUND_ROW        = $0001
+  KEY_P_CODE           = $0029
+  KEY_P_COL            = $00DF
+  KEY_P_ROW            = $0002
+  KEY_Q_CODE           = $003E
+  KEY_Q_COL            = $007F
+  KEY_Q_ROW            = $0040
+  KEY_RETURN_CODE      = $0001
+  KEY_RETURN_COL       = $00FE
+  KEY_RETURN_ROW       = $0002
+  KEY_RSHIFT_CODE      = $0034
+  KEY_RSHIFT_COL       = $00BF
+  KEY_RSHIFT_ROW       = $0010
+  KEY_RUNSTOP_CODE     = $003F
+  KEY_RUNSTOP_COL      = $007F
+  KEY_RUNSTOP_ROW      = $0080
+  KEY_R_CODE           = $0011
+  KEY_R_COL            = $00FB
+  KEY_R_ROW            = $0002
+  KEY_SEMICOLON_CODE   = $0032
+  KEY_SEMICOLON_COL    = $00BF
+  KEY_SEMICOLON_ROW    = $0004
+  KEY_SLASH_CODE       = $0037
+  KEY_SLASH_COL        = $00BF
+  KEY_SLASH_ROW        = $0080
+  KEY_SPACE_CODE       = $003C
+  KEY_SPACE_COL        = $007F
+  KEY_SPACE_ROW        = $0010
+  KEY_S_CODE           = $000D
+  KEY_S_COL            = $00FD
+  KEY_S_ROW            = $0020
+  KEY_T_CODE           = $0016
+  KEY_T_COL            = $00FB
+  KEY_T_ROW            = $0040
+  KEY_UPARROW_CODE     = $0036
+  KEY_UPARROW_COL      = $00BF
+  KEY_UPARROW_ROW      = $0040
+  KEY_U_CODE           = $001E
+  KEY_U_COL            = $00F7
+  KEY_U_ROW            = $0040
+  KEY_V_CODE           = $001F
+  KEY_V_COL            = $00F7
+  KEY_V_ROW            = $0080
+  KEY_W_CODE           = $0009
+  KEY_W_COL            = $00FD
+  KEY_W_ROW            = $0002
+  KEY_X_CODE           = $0017
+  KEY_X_COL            = $00FB
+  KEY_X_ROW            = $0080
+  KEY_Y_CODE           = $0019
+  KEY_Y_COL            = $00F7
+  KEY_Y_ROW            = $0002
+  KEY_Z_CODE           = $000C
+  KEY_Z_COL            = $00FD
+  KEY_Z_ROW            = $0010
+  MAX_INPUT_LEN        = $0028
+  MAX_WORD_LEN         = $000F
+  MELODY_LEN           = $0030
+  SCREEN               = $0400
+  SID_VOLUME           = $D418
+  SPRITE0_COLOR        = $D027
+  SPRITE0_X            = $D000
+  SPRITE0_Y            = $D001
+  SPRITE_ENABLE        = $D015
+  SPRITE_PTR0          = $07F8
+  SPRITE_X_EXPAND      = $D01D
+  SPRITE_X_MSB         = $D010
+  SPRITE_Y_EXPAND      = $D017
+  VIC_BG0              = $D021
+  VIC_BORDER           = $D020
+  VIC_CTRL1            = $D011
+  VIC_CTRL2            = $D016
+  VIC_MEMPTRS          = $D018
+  VIC_RASTER           = $D012
+  VOICE1_AD            = $D405
+  VOICE1_CTRL          = $D404
+  VOICE1_FREQ_HI       = $D401
+  VOICE1_FREQ_LO       = $D400
+  VOICE1_SR            = $D406
+  VOICE2_AD            = $D40C
+  VOICE2_CTRL          = $D40B
+  VOICE2_FREQ_HI       = $D408
+  VOICE2_FREQ_LO       = $D407
+  VOICE2_SR            = $D40D
+  VOICE3_AD            = $D413
+  VOICE3_CTRL          = $D412
+  VOICE3_FREQ_HI       = $D40F
+  VOICE3_FREQ_LO       = $D40E
+  VOICE3_SR            = $D414
+  __local13_in_range   = $0913
+  __local13_rest       = $093C
+  __local14_in_range   = $0951
+  __local14_rest       = $097A
+  __local1_done        = $0820
+  __local1_loop        = $0816
+  __local2_loop        = $0827
+  __local2_no          = $0834
+  __local2_yes         = $0837
+  __local5_done        = $087E
+  __local5_loop        = $086F
+  __local6_end         = $08A9
+  __local6_loop        = $0895
+  __local6_skip_spaces = $0888
+  __local6_space       = $08A8
+  __local6_start       = $0893
+  __local6_terminate   = $08A9
+  __local8_col_loop    = $08B8
+  __local8_found       = $08DF
+  __local8_next_col    = $08D5
+  __local8_row_loop    = $08CE
+  advance_bass_note    = $0942
+  advance_melody_note  = $0904
+  bass_duration        = $0B75
+  bass_freq_hi         = $0B6F
+  bass_freq_lo         = $0B69
+  bass_index           = $033E
+  bass_timer           = $033F
+  bass_waveform        = $0341
+  bye_msg              = $0AD0
+  check_bass_tick      = $08F2
+  check_exit           = $0A08
+  cmp_ptr              = $00FD
+  continue_msg         = $0AA5
+  credit_msg           = $0A4D
+  do_exit              = $0A20
+  extract_word         = $0884
+  input_buf            = $0845
+  instructions_msg     = $0A79
+  key_col_table        = $08AE
+  key_scratch          = $000A
+  kw_ptr               = $0002
+  main_loop            = $09F8
+  melody_duration      = $0B39
+  melody_freq_hi       = $0B09
+  melody_freq_lo       = $0AD9
+  melody_index         = $033C
+  melody_timer         = $033D
+  melody_waveform      = $0340
+  music_stop           = $08FB
+  music_tick           = $08EA
+  music_tick_done      = $08FA
+  now_playing_msg      = $0AC0
+  print_msg            = $0810
+  read_joy2            = $083A
+  read_line            = $086D
+  start                = $0988
+  str_equal            = $0821
+  str_ptr              = $00FB
+  title_msg            = $0A30
+  wait_any_key         = $08B6
+  wait_frame           = $0980
+  word_dest_ptr        = $00FB
