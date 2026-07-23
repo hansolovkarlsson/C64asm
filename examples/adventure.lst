@@ -1,4 +1,4 @@
-; c64asm listing  (origin $0801, 2620 bytes)
+; c64asm listing  (origin $0801, 2622 bytes)
 ; CYCLES column: a plain number is a fixed cycle count; "b/b+1" means b cycles, +1 more if this instruction's indexed addressing crosses a page boundary; "2/3/4" means a branch's usual 2 (not taken) / 3 (taken) / 4 (taken, crossing a page). Blank means an illegal/undocumented opcode (.cpu 6510x) -- see c64asm-reference.md "Listing file format".
 
 ADDR  BYTES      CYCLES  SOURCE
@@ -68,14 +68,14 @@ ADDR  BYTES      CYCLES  SOURCE
 08B0  20 D2 FF   6               jsr CHROUT
 08B3  A9 08      2               lda #$08
 08B5  20 D2 FF   6               jsr CHROUT
-08B8  A9 D0      2               lda #<msg_welcome1
+08B8  A9 D2      2               lda #<msg_welcome1
 08BA  A0 0C      2               ldy #>msg_welcome1
 08BC  20 10 08   6               jsr print_msg
-08BF  A9 EF      2               lda #<msg_welcome2
+08BF  A9 F1      2               lda #<msg_welcome2
 08C1  A0 0C      2               ldy #>msg_welcome2
 08C3  20 10 08   6               jsr print_msg
 08C6  20 3A 09   6               jsr describe_room
-08C9  A9 CD      2               lda #<prompt_str
+08C9  A9 CF      2               lda #<prompt_str
 08CB  A0 0C      2               ldy #>prompt_str
 08CD  20 10 08   6               jsr print_msg
 08D0  20 6D 08   6               jsr read_line
@@ -85,34 +85,34 @@ ADDR  BYTES      CYCLES  SOURCE
 08DB  20 F5 08   6               jsr dispatch
 08DE  4C C9 08   3               jmp main_loop
 08E1  A2 00      2               ldx #$00
-08E3  A9 EB      2               lda #<verb_buf
+08E3  A9 F7      2               lda #<verb_buf
 08E5  A0 0B      2               ldy #>verb_buf
 08E7  20 84 08   6               jsr extract_word
-08EA  A9 FB      2               lda #<noun_buf
-08EC  A0 0B      2               ldy #>noun_buf
+08EA  A9 07      2               lda #<noun_buf
+08EC  A0 0C      2               ldy #>noun_buf
 08EE  20 84 08   6               jsr extract_word
 08F1  60         6               rts
 08F2  6C 02 00   5               jmp (handler_vec)
-08F5  A9 EB      2               lda #<verb_buf
+08F5  A9 F7      2               lda #<verb_buf
 08F7  85 FD      3               sta cmp_ptr
 08F9  A9 0B      2               lda #>verb_buf
 08FB  85 FE      3               sta cmp_ptr+1
 08FD  A2 00      2               ldx #$00
-08FF  BD 0B 0C   4/5             lda verb_table,x
-0902  1D 0C 0C   4/5             ora verb_table+1,x
+08FF  BD 17 0C   4/5             lda verb_table,x
+0902  1D 18 0C   4/5             ora verb_table+1,x
 0905  F0 2B      2/3/4           beq dispatch_not_found       ; both bytes zero -> end-of-table marker
-0907  BD 0B 0C   4/5             lda verb_table,x
-090A  BC 0C 0C   4/5             ldy verb_table+1,x
+0907  BD 17 0C   4/5             lda verb_table,x
+090A  BC 18 0C   4/5             ldy verb_table+1,x
 090D  20 21 08   6               jsr str_equal
 0910  C9 01      2               cmp #1
 0912  D0 16      2/3/4           bne dispatch_next
-0914  A9 FB      2               lda #<noun_buf
+0914  A9 07      2               lda #<noun_buf
 0916  85 FD      3               sta cmp_ptr
-0918  A9 0B      2               lda #>noun_buf
+0918  A9 0C      2               lda #>noun_buf
 091A  85 FE      3               sta cmp_ptr+1
-091C  BD 0D 0C   4/5             lda verb_table+2,x
+091C  BD 19 0C   4/5             lda verb_table+2,x
 091F  85 02      3               sta handler_vec
-0921  BD 0E 0C   4/5             lda verb_table+3,x
+0921  BD 1A 0C   4/5             lda verb_table+3,x
 0924  85 03      3               sta handler_vec+1
 0926  20 F2 08   6               jsr call_indirect
 0929  60         6               rts
@@ -121,317 +121,317 @@ ADDR  BYTES      CYCLES  SOURCE
 092C  69 04      2               adc #4
 092E  AA         2               tax
 092F  4C FF 08   3               jmp dispatch_loop
-0932  A9 47      2               lda #<msg_dont_understand
+0932  A9 49      2               lda #<msg_dont_understand
 0934  A0 11      2               ldy #>msg_dont_understand
 0936  20 10 08   6               jsr print_msg
 0939  60         6               rts
-093A  AE D0 0B   4               ldx current_room
-093D  8A         2               txa
-093E  0A         2               asl a
-093F  A8         2               tay
-0940  B9 4F 0C   4/5             lda room_desc_table,y
-0943  48         3               pha
-0944  B9 50 0C   4/5             lda room_desc_table+1,y
-0947  A8         2               tay
-0948  68         4               pla
-0949  20 10 08   6               jsr print_msg
-094C  A2 00      2               ldx #$00
-094E  BD D4 0B   4/5             lda item_location,x
-0951  CD D0 0B   4               cmp current_room
-0954  D0 0F      2/3/4           bne describe_item_next
-0956  8A         2               txa
-0957  0A         2               asl a
-0958  A8         2               tay
-0959  B9 59 0C   4/5             lda item_here_table,y
-095C  48         3               pha
-095D  B9 5A 0C   4/5             lda item_here_table+1,y
-0960  A8         2               tay
-0961  68         4               pla
-0962  20 10 08   6               jsr print_msg
-0965  E8         2               inx
-0966  E0 03      2               cpx #3
-0968  D0 E4      2/3/4           bne describe_item_loop
-096A  AD D0 0B   4               lda current_room
-096D  C9 02      2               cmp #COTTAGE
-096F  D0 1D      2/3/4           bne skip_chest_desc
-0971  AD D1 0B   4               lda chest_open
-0974  D0 0A      2/3/4           bne chest_is_open
-0976  A9 95      2               lda #<chest_closed_msg
-0978  A0 0F      2               ldy #>chest_closed_msg
-097A  20 10 08   6               jsr print_msg
-097D  4C 8E 09   3               jmp skip_chest_desc
-0980  AD D5 0B   4               lda item_location+KEY
-0983  C9 02      2               cmp #COTTAGE
-0985  F0 07      2/3/4           beq skip_chest_desc          ; key still visible -- item loop above already announced it
-0987  A9 BB      2               lda #<chest_open_empty_msg
-0989  A0 0F      2               ldy #>chest_open_empty_msg
-098B  20 10 08   6               jsr print_msg
-098E  AD D0 0B   4               lda current_room
-0991  C9 03      2               cmp #CAVE_ENTRANCE
-0993  D0 16      2/3/4           bne skip_door_desc
-0995  AD D2 0B   4               lda door_unlocked
-0998  D0 0A      2/3/4           bne door_is_open
-099A  A9 33      2               lda #<door_locked_msg
-099C  A0 10      2               ldy #>door_locked_msg
-099E  20 10 08   6               jsr print_msg
-09A1  4C AB 09   3               jmp skip_door_desc
-09A4  A9 5F      2               lda #<door_unlocked_msg
-09A6  A0 10      2               ldy #>door_unlocked_msg
-09A8  20 10 08   6               jsr print_msg
-09AB  60         6               rts
-09AC  20 3A 09   6               jsr describe_room
-09AF  60         6               rts
-09B0  AD FB 0B   4               lda noun_buf
-09B3  D0 08      2/3/4           bne handle_go_check_words
-09B5  A9 79      2               lda #<msg_bad_direction
-09B7  A0 11      2               ldy #>msg_bad_direction
-09B9  20 10 08   6               jsr print_msg
-09BC  60         6               rts
-09BD  A9 73      2               lda #<kw_north
-09BF  A0 0C      2               ldy #>kw_north
-09C1  20 21 08   6               jsr str_equal
-09C4  C9 01      2               cmp #1
-09C6  F0 55      2/3/4           beq handle_go_north
-09C8  A9 79      2               lda #<kw_n
-09CA  A0 0C      2               ldy #>kw_n
-09CC  20 21 08   6               jsr str_equal
-09CF  C9 01      2               cmp #1
-09D1  F0 4A      2/3/4           beq handle_go_north
-09D3  A9 7B      2               lda #<kw_south
-09D5  A0 0C      2               ldy #>kw_south
-09D7  20 21 08   6               jsr str_equal
-09DA  C9 01      2               cmp #1
-09DC  F0 48      2/3/4           beq handle_go_south
-09DE  A9 81      2               lda #<kw_s
-09E0  A0 0C      2               ldy #>kw_s
-09E2  20 21 08   6               jsr str_equal
-09E5  C9 01      2               cmp #1
-09E7  F0 3D      2/3/4           beq handle_go_south
-09E9  A9 83      2               lda #<kw_east
-09EB  A0 0C      2               ldy #>kw_east
-09ED  20 21 08   6               jsr str_equal
-09F0  C9 01      2               cmp #1
-09F2  F0 3B      2/3/4           beq handle_go_east
-09F4  A9 88      2               lda #<kw_e
-09F6  A0 0C      2               ldy #>kw_e
-09F8  20 21 08   6               jsr str_equal
-09FB  C9 01      2               cmp #1
-09FD  F0 30      2/3/4           beq handle_go_east
-09FF  A9 8A      2               lda #<kw_west
-0A01  A0 0C      2               ldy #>kw_west
-0A03  20 21 08   6               jsr str_equal
-0A06  C9 01      2               cmp #1
-0A08  F0 2E      2/3/4           beq handle_go_west
-0A0A  A9 8F      2               lda #<kw_w
-0A0C  A0 0C      2               ldy #>kw_w
-0A0E  20 21 08   6               jsr str_equal
-0A11  C9 01      2               cmp #1
-0A13  F0 23      2/3/4           beq handle_go_west
-0A15  A9 79      2               lda #<msg_bad_direction
-0A17  A0 11      2               ldy #>msg_bad_direction
-0A19  20 10 08   6               jsr print_msg
-0A1C  60         6               rts
-0A1D  20 41 0A   6               jsr compute_room_exits_offset
-0A20  BD D7 0B   4/5             lda room_exits+Exits.north,x
-0A23  4C 48 0A   3               jmp do_move_check
-0A26  20 41 0A   6               jsr compute_room_exits_offset
-0A29  BD D8 0B   4/5             lda room_exits+Exits.south,x
-0A2C  4C 48 0A   3               jmp do_move_check
-0A2F  20 41 0A   6               jsr compute_room_exits_offset
-0A32  BD D9 0B   4/5             lda room_exits+Exits.east,x
-0A35  4C 48 0A   3               jmp do_move_check
-0A38  20 41 0A   6               jsr compute_room_exits_offset
-0A3B  BD DA 0B   4/5             lda room_exits+Exits.west,x
-0A3E  4C 48 0A   3               jmp do_move_check
-0A41  AD D0 0B   4               lda current_room
+093A  20 3E 0A   6               jsr compute_room_offset
+093D  BD D9 0B   4/5             lda room_data+Room.desc_ptr,x
+0940  48         3               pha
+0941  BD DA 0B   4/5             lda room_data+Room.desc_ptr+1,x
+0944  A8         2               tay
+0945  68         4               pla
+0946  20 10 08   6               jsr print_msg
+0949  A2 00      2               ldx #$00
+094B  BD D6 0B   4/5             lda item_location,x
+094E  CD D2 0B   4               cmp current_room
+0951  D0 0F      2/3/4           bne describe_item_next
+0953  8A         2               txa
+0954  0A         2               asl a
+0955  A8         2               tay
+0956  B9 5B 0C   4/5             lda item_here_table,y
+0959  48         3               pha
+095A  B9 5C 0C   4/5             lda item_here_table+1,y
+095D  A8         2               tay
+095E  68         4               pla
+095F  20 10 08   6               jsr print_msg
+0962  E8         2               inx
+0963  E0 03      2               cpx #3
+0965  D0 E4      2/3/4           bne describe_item_loop
+0967  AD D2 0B   4               lda current_room
+096A  C9 02      2               cmp #COTTAGE
+096C  D0 1D      2/3/4           bne skip_chest_desc
+096E  AD D3 0B   4               lda chest_open
+0971  D0 0A      2/3/4           bne chest_is_open
+0973  A9 97      2               lda #<chest_closed_msg
+0975  A0 0F      2               ldy #>chest_closed_msg
+0977  20 10 08   6               jsr print_msg
+097A  4C 8B 09   3               jmp skip_chest_desc
+097D  AD D7 0B   4               lda item_location+KEY
+0980  C9 02      2               cmp #COTTAGE
+0982  F0 07      2/3/4           beq skip_chest_desc          ; key still visible -- item loop above already announced it
+0984  A9 BD      2               lda #<chest_open_empty_msg
+0986  A0 0F      2               ldy #>chest_open_empty_msg
+0988  20 10 08   6               jsr print_msg
+098B  AD D2 0B   4               lda current_room
+098E  C9 03      2               cmp #CAVE_ENTRANCE
+0990  D0 16      2/3/4           bne skip_door_desc
+0992  AD D4 0B   4               lda door_unlocked
+0995  D0 0A      2/3/4           bne door_is_open
+0997  A9 35      2               lda #<door_locked_msg
+0999  A0 10      2               ldy #>door_locked_msg
+099B  20 10 08   6               jsr print_msg
+099E  4C A8 09   3               jmp skip_door_desc
+09A1  A9 61      2               lda #<door_unlocked_msg
+09A3  A0 10      2               ldy #>door_unlocked_msg
+09A5  20 10 08   6               jsr print_msg
+09A8  60         6               rts
+09A9  20 3A 09   6               jsr describe_room
+09AC  60         6               rts
+09AD  AD 07 0C   4               lda noun_buf
+09B0  D0 08      2/3/4           bne handle_go_check_words
+09B2  A9 7B      2               lda #<msg_bad_direction
+09B4  A0 11      2               ldy #>msg_bad_direction
+09B6  20 10 08   6               jsr print_msg
+09B9  60         6               rts
+09BA  A9 75      2               lda #<kw_north
+09BC  A0 0C      2               ldy #>kw_north
+09BE  20 21 08   6               jsr str_equal
+09C1  C9 01      2               cmp #1
+09C3  F0 55      2/3/4           beq handle_go_north
+09C5  A9 7B      2               lda #<kw_n
+09C7  A0 0C      2               ldy #>kw_n
+09C9  20 21 08   6               jsr str_equal
+09CC  C9 01      2               cmp #1
+09CE  F0 4A      2/3/4           beq handle_go_north
+09D0  A9 7D      2               lda #<kw_south
+09D2  A0 0C      2               ldy #>kw_south
+09D4  20 21 08   6               jsr str_equal
+09D7  C9 01      2               cmp #1
+09D9  F0 48      2/3/4           beq handle_go_south
+09DB  A9 83      2               lda #<kw_s
+09DD  A0 0C      2               ldy #>kw_s
+09DF  20 21 08   6               jsr str_equal
+09E2  C9 01      2               cmp #1
+09E4  F0 3D      2/3/4           beq handle_go_south
+09E6  A9 85      2               lda #<kw_east
+09E8  A0 0C      2               ldy #>kw_east
+09EA  20 21 08   6               jsr str_equal
+09ED  C9 01      2               cmp #1
+09EF  F0 3B      2/3/4           beq handle_go_east
+09F1  A9 8A      2               lda #<kw_e
+09F3  A0 0C      2               ldy #>kw_e
+09F5  20 21 08   6               jsr str_equal
+09F8  C9 01      2               cmp #1
+09FA  F0 30      2/3/4           beq handle_go_east
+09FC  A9 8C      2               lda #<kw_west
+09FE  A0 0C      2               ldy #>kw_west
+0A00  20 21 08   6               jsr str_equal
+0A03  C9 01      2               cmp #1
+0A05  F0 2E      2/3/4           beq handle_go_west
+0A07  A9 91      2               lda #<kw_w
+0A09  A0 0C      2               ldy #>kw_w
+0A0B  20 21 08   6               jsr str_equal
+0A0E  C9 01      2               cmp #1
+0A10  F0 23      2/3/4           beq handle_go_west
+0A12  A9 7B      2               lda #<msg_bad_direction
+0A14  A0 11      2               ldy #>msg_bad_direction
+0A16  20 10 08   6               jsr print_msg
+0A19  60         6               rts
+0A1A  20 3E 0A   6               jsr compute_room_offset
+0A1D  BD DB 0B   4/5             lda room_data+Room.north,x
+0A20  4C 4A 0A   3               jmp do_move_check
+0A23  20 3E 0A   6               jsr compute_room_offset
+0A26  BD DC 0B   4/5             lda room_data+Room.south,x
+0A29  4C 4A 0A   3               jmp do_move_check
+0A2C  20 3E 0A   6               jsr compute_room_offset
+0A2F  BD DD 0B   4/5             lda room_data+Room.east,x
+0A32  4C 4A 0A   3               jmp do_move_check
+0A35  20 3E 0A   6               jsr compute_room_offset
+0A38  BD DE 0B   4/5             lda room_data+Room.west,x
+0A3B  4C 4A 0A   3               jmp do_move_check
+0A3E  AD D2 0B   4               lda current_room
+0A41  0A         2               asl a
+0A42  85 04      3               sta mult_scratch
 0A44  0A         2               asl a
-0A45  0A         2               asl a
-0A46  AA         2               tax
-0A47  60         6               rts
-0A48  C9 FF      2               cmp #$ff
-0A4A  D0 08      2/3/4           bne move_ok
-0A4C  A9 61      2               lda #<msg_cant_go
-0A4E  A0 11      2               ldy #>msg_cant_go
-0A50  20 10 08   6               jsr print_msg
-0A53  60         6               rts
-0A54  8D D0 0B   4               sta current_room
-0A57  20 3A 09   6               jsr describe_room
-0A5A  60         6               rts
-0A5B  AD FB 0B   4               lda noun_buf
-0A5E  D0 08      2/3/4           bne take_check_words
-0A60  A9 19      2               lda #<msg_take_what
-0A62  A0 11      2               ldy #>msg_take_what
-0A64  20 10 08   6               jsr print_msg
-0A67  60         6               rts
-0A68  A9 B0      2               lda #<kw_rock
-0A6A  A0 0C      2               ldy #>kw_rock
-0A6C  20 21 08   6               jsr str_equal
-0A6F  C9 01      2               cmp #1
-0A71  D0 05      2/3/4           bne take_try_key
-0A73  A2 00      2               ldx #ROCK
-0A75  4C A0 0A   3               jmp take_item
-0A78  A9 B5      2               lda #<kw_key
-0A7A  A0 0C      2               ldy #>kw_key
-0A7C  20 21 08   6               jsr str_equal
-0A7F  C9 01      2               cmp #1
-0A81  D0 05      2/3/4           bne take_try_treasure
-0A83  A2 01      2               ldx #KEY
-0A85  4C A0 0A   3               jmp take_item
-0A88  A9 B9      2               lda #<kw_treasure
-0A8A  A0 0C      2               ldy #>kw_treasure
-0A8C  20 21 08   6               jsr str_equal
-0A8F  C9 01      2               cmp #1
-0A91  D0 05      2/3/4           bne take_unknown
-0A93  A2 02      2               ldx #TREASURE
-0A95  4C A0 0A   3               jmp take_item
-0A98  A9 FF      2               lda #<msg_take_fail
-0A9A  A0 10      2               ldy #>msg_take_fail
-0A9C  20 10 08   6               jsr print_msg
-0A9F  60         6               rts
-0AA0  BD D4 0B   4/5             lda item_location,x
-0AA3  CD D0 0B   4               cmp current_room
-0AA6  F0 08      2/3/4           beq take_ok
-0AA8  A9 FF      2               lda #<msg_take_fail
-0AAA  A0 10      2               ldy #>msg_take_fail
-0AAC  20 10 08   6               jsr print_msg
-0AAF  60         6               rts
-0AB0  A9 FE      2               lda #LOC_INV
-0AB2  9D D4 0B   5               sta item_location,x
-0AB5  8A         2               txa
-0AB6  0A         2               asl a
-0AB7  A8         2               tay
-0AB8  B9 5F 0C   4/5             lda item_take_msg_table,y
-0ABB  48         3               pha
-0ABC  B9 60 0C   4/5             lda item_take_msg_table+1,y
-0ABF  A8         2               tay
-0AC0  68         4               pla
-0AC1  20 10 08   6               jsr print_msg
-0AC4  60         6               rts
-0AC5  AD FB 0B   4               lda noun_buf
-0AC8  D0 08      2/3/4           bne open_check_words
-0ACA  A9 3B      2               lda #<msg_open_what
-0ACC  A0 11      2               ldy #>msg_open_what
-0ACE  20 10 08   6               jsr print_msg
-0AD1  60         6               rts
-0AD2  A9 C2      2               lda #<kw_chest
-0AD4  A0 0C      2               ldy #>kw_chest
-0AD6  20 21 08   6               jsr str_equal
-0AD9  C9 01      2               cmp #1
-0ADB  F0 13      2/3/4           beq handle_open_chest
-0ADD  A9 C8      2               lda #<kw_door
-0ADF  A0 0C      2               ldy #>kw_door
-0AE1  20 21 08   6               jsr str_equal
-0AE4  C9 01      2               cmp #1
-0AE6  F0 36      2/3/4           beq handle_open_door
-0AE8  A9 25      2               lda #<msg_open_nothing
-0AEA  A0 11      2               ldy #>msg_open_nothing
-0AEC  20 10 08   6               jsr print_msg
-0AEF  60         6               rts
-0AF0  AD D0 0B   4               lda current_room
-0AF3  C9 02      2               cmp #COTTAGE
-0AF5  F0 08      2/3/4           beq open_chest_here
-0AF7  A9 1A      2               lda #<msg_no_chest_here
-0AF9  A0 10      2               ldy #>msg_no_chest_here
-0AFB  20 10 08   6               jsr print_msg
-0AFE  60         6               rts
-0AFF  AD D1 0B   4               lda chest_open
-0B02  F0 08      2/3/4           beq chest_not_open_yet
-0B04  A9 E0      2               lda #<msg_chest_already_open
-0B06  A0 0F      2               ldy #>msg_chest_already_open
-0B08  20 10 08   6               jsr print_msg
-0B0B  60         6               rts
-0B0C  A9 01      2               lda #1
-0B0E  8D D1 0B   4               sta chest_open
-0B11  A9 02      2               lda #COTTAGE
-0B13  8D D5 0B   4               sta item_location+KEY        ; reveal the key
-0B16  A9 F4      2               lda #<msg_chest_opened
-0B18  A0 0F      2               ldy #>msg_chest_opened
-0B1A  20 10 08   6               jsr print_msg
-0B1D  60         6               rts
-0B1E  AD D0 0B   4               lda current_room
-0B21  C9 03      2               cmp #CAVE_ENTRANCE
-0B23  F0 08      2/3/4           beq open_door_here
-0B25  A9 E7      2               lda #<msg_no_door_here
-0B27  A0 10      2               ldy #>msg_no_door_here
-0B29  20 10 08   6               jsr print_msg
-0B2C  60         6               rts
-0B2D  AD D2 0B   4               lda door_unlocked
-0B30  F0 08      2/3/4           beq door_not_open_yet
-0B32  A9 88      2               lda #<msg_door_already_open
-0B34  A0 10      2               ldy #>msg_door_already_open
-0B36  20 10 08   6               jsr print_msg
-0B39  60         6               rts
-0B3A  AD D5 0B   4               lda item_location+KEY
-0B3D  C9 FE      2               cmp #LOC_INV
-0B3F  F0 08      2/3/4           beq door_have_key
-0B41  A9 A3      2               lda #<msg_door_locked_need_key
-0B43  A0 10      2               ldy #>msg_door_locked_need_key
-0B45  20 10 08   6               jsr print_msg
-0B48  60         6               rts
-0B49  A9 01      2               lda #1
-0B4B  8D D2 0B   4               sta door_unlocked
-0B4E  A9 04      2               lda #DARK_CAVE
-0B50  8D E3 0B   4               sta room_exits + CAVE_ENTRANCE*Exits.size + Exits.north  ; the
-0B53  A9 C1      2               lda #<msg_door_unlocked
-0B55  A0 10      2               ldy #>msg_door_unlocked
-0B57  20 10 08   6               jsr print_msg
-0B5A  60         6               rts
-0B5B  A2 00      2               ldx #$00
-0B5D  A9 00      2               lda #$00
-0B5F  8D D3 0B   4               sta inv_found_flag
-0B62  BD D4 0B   4/5             lda item_location,x
-0B65  C9 FE      2               cmp #LOC_INV
-0B67  D0 05      2/3/4           bne inv_check_next
-0B69  A9 01      2               lda #1
-0B6B  8D D3 0B   4               sta inv_found_flag
-0B6E  E8         2               inx
-0B6F  E0 03      2               cpx #3
-0B71  D0 EF      2/3/4           bne inv_check_loop
-0B73  AD D3 0B   4               lda inv_found_flag
-0B76  D0 08      2/3/4           bne inv_nonempty
-0B78  A9 84      2               lda #<msg_inventory_empty
-0B7A  A0 11      2               ldy #>msg_inventory_empty
-0B7C  20 10 08   6               jsr print_msg
-0B7F  60         6               rts
-0B80  A9 A3      2               lda #<msg_inventory_header
-0B82  A0 11      2               ldy #>msg_inventory_header
-0B84  20 10 08   6               jsr print_msg
-0B87  A2 00      2               ldx #$00
-0B89  BD D4 0B   4/5             lda item_location,x
-0B8C  C9 FE      2               cmp #LOC_INV
-0B8E  D0 0F      2/3/4           bne inv_print_next
-0B90  8A         2               txa
-0B91  0A         2               asl a
-0B92  A8         2               tay
-0B93  B9 65 0C   4/5             lda item_name_table,y
-0B96  48         3               pha
-0B97  B9 66 0C   4/5             lda item_name_table+1,y
-0B9A  A8         2               tay
-0B9B  68         4               pla
-0B9C  20 10 08   6               jsr print_msg
-0B9F  E8         2               inx
-0BA0  E0 03      2               cpx #3
-0BA2  D0 E5      2/3/4           bne inv_print_loop
-0BA4  60         6               rts
-0BA5  A9 B6      2               lda #<msg_help1
-0BA7  A0 11      2               ldy #>msg_help1
-0BA9  20 10 08   6               jsr print_msg
-0BAC  A9 C1      2               lda #<msg_help2
-0BAE  A0 11      2               ldy #>msg_help2
-0BB0  20 10 08   6               jsr print_msg
-0BB3  A9 E4      2               lda #<msg_help3
-0BB5  A0 11      2               ldy #>msg_help3
-0BB7  20 10 08   6               jsr print_msg
-0BBA  A9 05      2               lda #<msg_help4
-0BBC  A0 12      2               ldy #>msg_help4
-0BBE  20 10 08   6               jsr print_msg
-0BC1  A9 12      2               lda #<msg_help5
-0BC3  A0 12      2               ldy #>msg_help5
-0BC5  20 10 08   6               jsr print_msg
-0BC8  A9 25      2               lda #<msg_help6
-0BCA  A0 12      2               ldy #>msg_help6
-0BCC  20 10 08   6               jsr print_msg
-0BCF  60         6               rts
+0A45  18         2               clc
+0A46  65 04      3               adc mult_scratch
+0A48  AA         2               tax
+0A49  60         6               rts
+0A4A  C9 FF      2               cmp #$ff
+0A4C  D0 08      2/3/4           bne move_ok
+0A4E  A9 63      2               lda #<msg_cant_go
+0A50  A0 11      2               ldy #>msg_cant_go
+0A52  20 10 08   6               jsr print_msg
+0A55  60         6               rts
+0A56  8D D2 0B   4               sta current_room
+0A59  20 3A 09   6               jsr describe_room
+0A5C  60         6               rts
+0A5D  AD 07 0C   4               lda noun_buf
+0A60  D0 08      2/3/4           bne take_check_words
+0A62  A9 1B      2               lda #<msg_take_what
+0A64  A0 11      2               ldy #>msg_take_what
+0A66  20 10 08   6               jsr print_msg
+0A69  60         6               rts
+0A6A  A9 B2      2               lda #<kw_rock
+0A6C  A0 0C      2               ldy #>kw_rock
+0A6E  20 21 08   6               jsr str_equal
+0A71  C9 01      2               cmp #1
+0A73  D0 05      2/3/4           bne take_try_key
+0A75  A2 00      2               ldx #ROCK
+0A77  4C A2 0A   3               jmp take_item
+0A7A  A9 B7      2               lda #<kw_key
+0A7C  A0 0C      2               ldy #>kw_key
+0A7E  20 21 08   6               jsr str_equal
+0A81  C9 01      2               cmp #1
+0A83  D0 05      2/3/4           bne take_try_treasure
+0A85  A2 01      2               ldx #KEY
+0A87  4C A2 0A   3               jmp take_item
+0A8A  A9 BB      2               lda #<kw_treasure
+0A8C  A0 0C      2               ldy #>kw_treasure
+0A8E  20 21 08   6               jsr str_equal
+0A91  C9 01      2               cmp #1
+0A93  D0 05      2/3/4           bne take_unknown
+0A95  A2 02      2               ldx #TREASURE
+0A97  4C A2 0A   3               jmp take_item
+0A9A  A9 01      2               lda #<msg_take_fail
+0A9C  A0 11      2               ldy #>msg_take_fail
+0A9E  20 10 08   6               jsr print_msg
+0AA1  60         6               rts
+0AA2  BD D6 0B   4/5             lda item_location,x
+0AA5  CD D2 0B   4               cmp current_room
+0AA8  F0 08      2/3/4           beq take_ok
+0AAA  A9 01      2               lda #<msg_take_fail
+0AAC  A0 11      2               ldy #>msg_take_fail
+0AAE  20 10 08   6               jsr print_msg
+0AB1  60         6               rts
+0AB2  A9 FE      2               lda #LOC_INV
+0AB4  9D D6 0B   5               sta item_location,x
+0AB7  8A         2               txa
+0AB8  0A         2               asl a
+0AB9  A8         2               tay
+0ABA  B9 61 0C   4/5             lda item_take_msg_table,y
+0ABD  48         3               pha
+0ABE  B9 62 0C   4/5             lda item_take_msg_table+1,y
+0AC1  A8         2               tay
+0AC2  68         4               pla
+0AC3  20 10 08   6               jsr print_msg
+0AC6  60         6               rts
+0AC7  AD 07 0C   4               lda noun_buf
+0ACA  D0 08      2/3/4           bne open_check_words
+0ACC  A9 3D      2               lda #<msg_open_what
+0ACE  A0 11      2               ldy #>msg_open_what
+0AD0  20 10 08   6               jsr print_msg
+0AD3  60         6               rts
+0AD4  A9 C4      2               lda #<kw_chest
+0AD6  A0 0C      2               ldy #>kw_chest
+0AD8  20 21 08   6               jsr str_equal
+0ADB  C9 01      2               cmp #1
+0ADD  F0 13      2/3/4           beq handle_open_chest
+0ADF  A9 CA      2               lda #<kw_door
+0AE1  A0 0C      2               ldy #>kw_door
+0AE3  20 21 08   6               jsr str_equal
+0AE6  C9 01      2               cmp #1
+0AE8  F0 36      2/3/4           beq handle_open_door
+0AEA  A9 27      2               lda #<msg_open_nothing
+0AEC  A0 11      2               ldy #>msg_open_nothing
+0AEE  20 10 08   6               jsr print_msg
+0AF1  60         6               rts
+0AF2  AD D2 0B   4               lda current_room
+0AF5  C9 02      2               cmp #COTTAGE
+0AF7  F0 08      2/3/4           beq open_chest_here
+0AF9  A9 1C      2               lda #<msg_no_chest_here
+0AFB  A0 10      2               ldy #>msg_no_chest_here
+0AFD  20 10 08   6               jsr print_msg
+0B00  60         6               rts
+0B01  AD D3 0B   4               lda chest_open
+0B04  F0 08      2/3/4           beq chest_not_open_yet
+0B06  A9 E2      2               lda #<msg_chest_already_open
+0B08  A0 0F      2               ldy #>msg_chest_already_open
+0B0A  20 10 08   6               jsr print_msg
+0B0D  60         6               rts
+0B0E  A9 01      2               lda #1
+0B10  8D D3 0B   4               sta chest_open
+0B13  A9 02      2               lda #COTTAGE
+0B15  8D D7 0B   4               sta item_location+KEY        ; reveal the key
+0B18  A9 F6      2               lda #<msg_chest_opened
+0B1A  A0 0F      2               ldy #>msg_chest_opened
+0B1C  20 10 08   6               jsr print_msg
+0B1F  60         6               rts
+0B20  AD D2 0B   4               lda current_room
+0B23  C9 03      2               cmp #CAVE_ENTRANCE
+0B25  F0 08      2/3/4           beq open_door_here
+0B27  A9 E9      2               lda #<msg_no_door_here
+0B29  A0 10      2               ldy #>msg_no_door_here
+0B2B  20 10 08   6               jsr print_msg
+0B2E  60         6               rts
+0B2F  AD D4 0B   4               lda door_unlocked
+0B32  F0 08      2/3/4           beq door_not_open_yet
+0B34  A9 8A      2               lda #<msg_door_already_open
+0B36  A0 10      2               ldy #>msg_door_already_open
+0B38  20 10 08   6               jsr print_msg
+0B3B  60         6               rts
+0B3C  AD D7 0B   4               lda item_location+KEY
+0B3F  C9 FE      2               cmp #LOC_INV
+0B41  F0 08      2/3/4           beq door_have_key
+0B43  A9 A5      2               lda #<msg_door_locked_need_key
+0B45  A0 10      2               ldy #>msg_door_locked_need_key
+0B47  20 10 08   6               jsr print_msg
+0B4A  60         6               rts
+0B4B  A9 01      2               lda #1
+0B4D  8D D4 0B   4               sta door_unlocked
+0B50  A9 04      2               lda #DARK_CAVE
+0B52  8D ED 0B   4               sta room_data + CAVE_ENTRANCE*Room.size + Room.north  ; the
+0B55  A9 C3      2               lda #<msg_door_unlocked
+0B57  A0 10      2               ldy #>msg_door_unlocked
+0B59  20 10 08   6               jsr print_msg
+0B5C  60         6               rts
+0B5D  A2 00      2               ldx #$00
+0B5F  A9 00      2               lda #$00
+0B61  8D D5 0B   4               sta inv_found_flag
+0B64  BD D6 0B   4/5             lda item_location,x
+0B67  C9 FE      2               cmp #LOC_INV
+0B69  D0 05      2/3/4           bne inv_check_next
+0B6B  A9 01      2               lda #1
+0B6D  8D D5 0B   4               sta inv_found_flag
+0B70  E8         2               inx
+0B71  E0 03      2               cpx #3
+0B73  D0 EF      2/3/4           bne inv_check_loop
+0B75  AD D5 0B   4               lda inv_found_flag
+0B78  D0 08      2/3/4           bne inv_nonempty
+0B7A  A9 86      2               lda #<msg_inventory_empty
+0B7C  A0 11      2               ldy #>msg_inventory_empty
+0B7E  20 10 08   6               jsr print_msg
+0B81  60         6               rts
+0B82  A9 A5      2               lda #<msg_inventory_header
+0B84  A0 11      2               ldy #>msg_inventory_header
+0B86  20 10 08   6               jsr print_msg
+0B89  A2 00      2               ldx #$00
+0B8B  BD D6 0B   4/5             lda item_location,x
+0B8E  C9 FE      2               cmp #LOC_INV
+0B90  D0 0F      2/3/4           bne inv_print_next
+0B92  8A         2               txa
+0B93  0A         2               asl a
+0B94  A8         2               tay
+0B95  B9 67 0C   4/5             lda item_name_table,y
+0B98  48         3               pha
+0B99  B9 68 0C   4/5             lda item_name_table+1,y
+0B9C  A8         2               tay
+0B9D  68         4               pla
+0B9E  20 10 08   6               jsr print_msg
+0BA1  E8         2               inx
+0BA2  E0 03      2               cpx #3
+0BA4  D0 E5      2/3/4           bne inv_print_loop
+0BA6  60         6               rts
+0BA7  A9 B8      2               lda #<msg_help1
+0BA9  A0 11      2               ldy #>msg_help1
+0BAB  20 10 08   6               jsr print_msg
+0BAE  A9 C3      2               lda #<msg_help2
+0BB0  A0 11      2               ldy #>msg_help2
+0BB2  20 10 08   6               jsr print_msg
+0BB5  A9 E6      2               lda #<msg_help3
+0BB7  A0 11      2               ldy #>msg_help3
+0BB9  20 10 08   6               jsr print_msg
+0BBC  A9 07      2               lda #<msg_help4
+0BBE  A0 12      2               ldy #>msg_help4
+0BC0  20 10 08   6               jsr print_msg
+0BC3  A9 14      2               lda #<msg_help5
+0BC5  A0 12      2               ldy #>msg_help5
+0BC7  20 10 08   6               jsr print_msg
+0BCA  A9 27      2               lda #<msg_help6
+0BCC  A0 12      2               ldy #>msg_help6
+0BCE  20 10 08   6               jsr print_msg
+0BD1  60         6               rts
 
 Symbol table:
   BITMAP               = $2000
@@ -445,11 +445,6 @@ Symbol table:
   CLEARING             = $0000
   COTTAGE              = $0002
   DARK_CAVE            = $0004
-  Exits.east           = $0002
-  Exits.north          = $0000
-  Exits.size           = $0004
-  Exits.south          = $0001
-  Exits.west           = $0003
   FOREST               = $0001
   KEY                  = $0001
   LOC_INV              = $00FE
@@ -457,6 +452,12 @@ Symbol table:
   MAX_INPUT_LEN        = $0028
   MAX_WORD_LEN         = $000F
   ROCK                 = $0000
+  Room.desc_ptr        = $0000
+  Room.east            = $0004
+  Room.north           = $0002
+  Room.size            = $0006
+  Room.south           = $0003
+  Room.west            = $0005
   SCREEN               = $0400
   SID_VOLUME           = $D418
   SPRITE0_COLOR        = $D027
@@ -503,143 +504,143 @@ Symbol table:
   __local6_start       = $0893
   __local6_terminate   = $08A9
   call_indirect        = $08F2
-  chest_closed_msg     = $0F95
-  chest_is_open        = $0980
-  chest_not_open_yet   = $0B0C
-  chest_open           = $0BD1
-  chest_open_empty_msg = $0FBB
+  chest_closed_msg     = $0F97
+  chest_is_open        = $097D
+  chest_not_open_yet   = $0B0E
+  chest_open           = $0BD3
+  chest_open_empty_msg = $0FBD
   cmp_ptr              = $00FD
-  compute_room_exits_offset = $0A41
-  current_room         = $0BD0
-  describe_item_loop   = $094E
-  describe_item_next   = $0965
+  compute_room_offset  = $0A3E
+  current_room         = $0BD2
+  describe_item_loop   = $094B
+  describe_item_next   = $0962
   describe_room        = $093A
   dispatch             = $08F5
   dispatch_loop        = $08FF
   dispatch_next        = $092A
   dispatch_not_found   = $0932
-  do_move_check        = $0A48
-  door_have_key        = $0B49
-  door_is_open         = $09A4
-  door_locked_msg      = $1033
-  door_not_open_yet    = $0B3A
-  door_unlocked        = $0BD2
-  door_unlocked_msg    = $105F
+  do_move_check        = $0A4A
+  door_have_key        = $0B4B
+  door_is_open         = $09A1
+  door_locked_msg      = $1035
+  door_not_open_yet    = $0B3C
+  door_unlocked        = $0BD4
+  door_unlocked_msg    = $1061
   extract_word         = $0884
-  handle_go            = $09B0
-  handle_go_check_words = $09BD
-  handle_go_east       = $0A2F
-  handle_go_north      = $0A1D
-  handle_go_south      = $0A26
-  handle_go_west       = $0A38
-  handle_help          = $0BA5
-  handle_inventory     = $0B5B
-  handle_look          = $09AC
-  handle_open          = $0AC5
-  handle_open_chest    = $0AF0
-  handle_open_door     = $0B1E
-  handle_take          = $0A5B
+  handle_go            = $09AD
+  handle_go_check_words = $09BA
+  handle_go_east       = $0A2C
+  handle_go_north      = $0A1A
+  handle_go_south      = $0A23
+  handle_go_west       = $0A35
+  handle_help          = $0BA7
+  handle_inventory     = $0B5D
+  handle_look          = $09A9
+  handle_open          = $0AC7
+  handle_open_chest    = $0AF2
+  handle_open_door     = $0B20
+  handle_take          = $0A5D
   handler_vec          = $0002
   input_buf            = $0845
-  inv_check_loop       = $0B62
-  inv_check_next       = $0B6E
-  inv_found_flag       = $0BD3
-  inv_nonempty         = $0B80
-  inv_print_loop       = $0B89
-  inv_print_next       = $0B9F
-  item_here_table      = $0C59
-  item_location        = $0BD4
-  item_name_table      = $0C65
-  item_take_msg_table  = $0C5F
-  key_here_msg         = $0ECC
-  key_name_msg         = $0F80
-  key_take_msg         = $0F25
-  kw_chest             = $0CC2
-  kw_door              = $0CC8
-  kw_e                 = $0C88
-  kw_east              = $0C83
-  kw_get               = $0C96
-  kw_go                = $0C70
-  kw_help              = $0CAB
-  kw_i                 = $0CA9
-  kw_inventory         = $0C9F
-  kw_key               = $0CB5
-  kw_look              = $0C6B
-  kw_n                 = $0C79
-  kw_north             = $0C73
-  kw_open              = $0C9A
+  inv_check_loop       = $0B64
+  inv_check_next       = $0B70
+  inv_found_flag       = $0BD5
+  inv_nonempty         = $0B82
+  inv_print_loop       = $0B8B
+  inv_print_next       = $0BA1
+  item_here_table      = $0C5B
+  item_location        = $0BD6
+  item_name_table      = $0C67
+  item_take_msg_table  = $0C61
+  key_here_msg         = $0ECE
+  key_name_msg         = $0F82
+  key_take_msg         = $0F27
+  kw_chest             = $0CC4
+  kw_door              = $0CCA
+  kw_e                 = $0C8A
+  kw_east              = $0C85
+  kw_get               = $0C98
+  kw_go                = $0C72
+  kw_help              = $0CAD
+  kw_i                 = $0CAB
+  kw_inventory         = $0CA1
+  kw_key               = $0CB7
+  kw_look              = $0C6D
+  kw_n                 = $0C7B
+  kw_north             = $0C75
+  kw_open              = $0C9C
   kw_ptr               = $0002
-  kw_rock              = $0CB0
-  kw_s                 = $0C81
-  kw_south             = $0C7B
-  kw_take              = $0C91
-  kw_treasure          = $0CB9
-  kw_w                 = $0C8F
-  kw_west              = $0C8A
+  kw_rock              = $0CB2
+  kw_s                 = $0C83
+  kw_south             = $0C7D
+  kw_take              = $0C93
+  kw_treasure          = $0CBB
+  kw_w                 = $0C91
+  kw_west              = $0C8C
   main_loop            = $08C9
-  move_ok              = $0A54
-  msg_bad_direction    = $1179
-  msg_cant_go          = $1161
-  msg_chest_already_open = $0FE0
-  msg_chest_opened     = $0FF4
-  msg_dont_understand  = $1147
-  msg_door_already_open = $1088
-  msg_door_locked_need_key = $10A3
-  msg_door_unlocked    = $10C1
-  msg_help1            = $11B6
-  msg_help2            = $11C1
-  msg_help3            = $11E4
-  msg_help4            = $1205
-  msg_help5            = $1212
-  msg_help6            = $1225
-  msg_inventory_empty  = $1184
-  msg_inventory_header = $11A3
-  msg_no_chest_here    = $101A
-  msg_no_door_here     = $10E7
-  msg_open_nothing     = $1125
-  msg_open_what        = $113B
-  msg_take_fail        = $10FF
-  msg_take_what        = $1119
-  msg_welcome1         = $0CD0
-  msg_welcome2         = $0CEF
-  noun_buf             = $0BFB
-  open_check_words     = $0AD2
-  open_chest_here      = $0AFF
-  open_door_here       = $0B2D
+  move_ok              = $0A56
+  msg_bad_direction    = $117B
+  msg_cant_go          = $1163
+  msg_chest_already_open = $0FE2
+  msg_chest_opened     = $0FF6
+  msg_dont_understand  = $1149
+  msg_door_already_open = $108A
+  msg_door_locked_need_key = $10A5
+  msg_door_unlocked    = $10C3
+  msg_help1            = $11B8
+  msg_help2            = $11C3
+  msg_help3            = $11E6
+  msg_help4            = $1207
+  msg_help5            = $1214
+  msg_help6            = $1227
+  msg_inventory_empty  = $1186
+  msg_inventory_header = $11A5
+  msg_no_chest_here    = $101C
+  msg_no_door_here     = $10E9
+  msg_open_nothing     = $1127
+  msg_open_what        = $113D
+  msg_take_fail        = $1101
+  msg_take_what        = $111B
+  msg_welcome1         = $0CD2
+  msg_welcome2         = $0CF1
+  mult_scratch         = $0004
+  noun_buf             = $0C07
+  open_check_words     = $0AD4
+  open_chest_here      = $0B01
+  open_door_here       = $0B2F
   print_msg            = $0810
-  prompt_str           = $0CCD
+  prompt_str           = $0CCF
   read_joy2            = $083A
   read_line            = $086D
-  rock_here_msg        = $0EB5
-  rock_name_msg        = $0F78
-  rock_take_msg        = $0F0E
-  room0                = $0BD7
-  room0_desc           = $0D20
-  room1                = $0BDB
-  room1_desc           = $0D8F
-  room2                = $0BDF
-  room2_desc           = $0DF7
-  room3                = $0BE3
-  room3_desc           = $0E35
-  room4                = $0BE7
-  room4_desc           = $0E75
-  room_desc_table      = $0C4F
-  room_exits           = $0BD7
-  skip_chest_desc      = $098E
-  skip_door_desc       = $09AB
+  rock_here_msg        = $0EB7
+  rock_name_msg        = $0F7A
+  rock_take_msg        = $0F10
+  room0                = $0BD9
+  room0_desc           = $0D22
+  room1                = $0BDF
+  room1_desc           = $0D91
+  room2                = $0BE5
+  room2_desc           = $0DF9
+  room3                = $0BEB
+  room3_desc           = $0E37
+  room4                = $0BF1
+  room4_desc           = $0E77
+  room_data            = $0BD9
+  skip_chest_desc      = $098B
+  skip_door_desc       = $09A8
   start                = $08AE
   str_equal            = $0821
   str_ptr              = $00FB
-  take_check_words     = $0A68
-  take_item            = $0AA0
-  take_ok              = $0AB0
-  take_try_key         = $0A78
-  take_try_treasure    = $0A88
-  take_unknown         = $0A98
+  take_check_words     = $0A6A
+  take_item            = $0AA2
+  take_ok              = $0AB2
+  take_try_key         = $0A7A
+  take_try_treasure    = $0A8A
+  take_unknown         = $0A9A
   tokenize             = $08E1
-  treasure_here_msg    = $0EE2
-  treasure_name_msg    = $0F87
-  treasure_take_msg    = $0F38
-  verb_buf             = $0BEB
-  verb_table           = $0C0B
+  treasure_here_msg    = $0EE4
+  treasure_name_msg    = $0F89
+  treasure_take_msg    = $0F3A
+  verb_buf             = $0BF7
+  verb_table           = $0C17
   word_dest_ptr        = $00FB

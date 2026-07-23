@@ -34,11 +34,16 @@
 ; printed message -- stays here, since none of that is reusable across
 ; other programs the way the underlying string/input primitives are.
 ;
-; room_exits (see that table's own comment, further down) uses
-; '.struct' (c64asm-reference.md section 9) for named field access --
-; room_exits+Exits.north instead of a bare offset number, or the four
-; entirely separate exit_north/exit_south/exit_east/exit_west arrays
-; this table used to be before '.struct' existed.
+; room_data (see that table's own comment, further down) uses
+; '.struct' (c64asm-reference.md section 10) for named field access --
+; room_data+Room.north instead of a bare offset number. A room's
+; description pointer and its four exits used to be two separate
+; tables (room_desc_table, a plain word array, and room_exits, a
+; 4-byte Exits struct per room) indexed two different ways -- combined
+; into one 6-byte Room struct once lib/math.inc grew a MULT_6 to index
+; it with, since a non-power-of-two record size had no matching macro
+; before that. See compute_room_offset's own comment, further down,
+; for the indexing this relies on.
 
         .basic start   ; auto-emits `jmp start` right after the loader
                           ; stub -- needed because the .include lines
@@ -65,6 +70,12 @@ kw_ptr        = $02   ; str_equal's "right" side (the candidate keyword)
 handler_vec   = $02   ; indirect-call target (only set after str_equal
                         ; has already returned, so this never collides
                         ; with kw_ptr being in use)
+mult_scratch  = $04   ; lib/math.inc's own scratch byte, needed by
+                        ; MULT_6 specifically (unlike MULT_4, which
+                        ; needed none) -- see that file's own header
+                        ; comment for why. A single free byte within
+                        ; the already-documented $02-$06 range above,
+                        ; not a new one
 
         .include "lib/text.inc"
         .include "lib/input.inc"
@@ -198,13 +209,10 @@ dispatch_not_found:
 ; Prints the current room's base description, then any items lying in
 ; it, then room-specific chest/door status (rooms 2 and 3 only).
 describe_room:
-        ldx current_room
-        txa
-        asl a
-        tay
-        lda room_desc_table,y
+        jsr compute_room_offset
+        lda room_data+Room.desc_ptr,x
         pha
-        lda room_desc_table+1,y
+        lda room_data+Room.desc_ptr+1,x
         tay
         pla
         jsr print_msg
@@ -322,34 +330,36 @@ handle_go_check_words:
         rts
 
 handle_go_north:
-        jsr compute_room_exits_offset
-        lda room_exits+Exits.north,x
+        jsr compute_room_offset
+        lda room_data+Room.north,x
         jmp do_move_check
 handle_go_south:
-        jsr compute_room_exits_offset
-        lda room_exits+Exits.south,x
+        jsr compute_room_offset
+        lda room_data+Room.south,x
         jmp do_move_check
 handle_go_east:
-        jsr compute_room_exits_offset
-        lda room_exits+Exits.east,x
+        jsr compute_room_offset
+        lda room_data+Room.east,x
         jmp do_move_check
 handle_go_west:
-        jsr compute_room_exits_offset
-        lda room_exits+Exits.west,x
+        jsr compute_room_offset
+        lda room_data+Room.west,x
         jmp do_move_check
 
-; Computes X := current_room * Exits.size, for indexing into
-; room_exits (see that table's own comment, further down, for the
-; layout this relies on).
-.assert Exits.size == 4, "compute_room_exits_offset uses MULT_4 -- switch to a different MULT_N (lib/math.inc) if Exits ever changes shape"
-compute_room_exits_offset:
+; Computes X := current_room * Room.size, for indexing into room_data
+; (see that table's own comment, further down, for the layout this
+; relies on) -- both for the four exits above and describe_room's own
+; use of this same routine to find a room's description pointer.
+.assert Room.size == 6, "compute_room_offset uses MULT_6 -- switch to a different MULT_N (lib/math.inc) if Room ever changes shape"
+compute_room_offset:
         lda current_room
-        MULT_4                 ; A := current_room * 4 -- relies on
-                                  ; Exits.size being exactly 4, the
+        MULT_6                 ; A := current_room * 6 -- relies on
+                                  ; Room.size being exactly 6, the
                                   ; .assert just above turns a
                                   ; forgotten update into a clear
                                   ; assembly-time error instead of
-                                  ; silently wrong room navigation at
+                                  ; silently wrong room navigation (or
+                                  ; a wrong room description) at
                                   ; runtime -- see c64asm-reference.md
                                   ; section 10's "Indexing an array of
                                   ; records" for the full pattern this
@@ -503,8 +513,8 @@ door_have_key:
         lda #1
         sta door_unlocked
         lda #DARK_CAVE
-        sta room_exits + CAVE_ENTRANCE*Exits.size + Exits.north  ; the
-                                                                     ; connection now exists
+        sta room_data + CAVE_ENTRANCE*Room.size + Room.north  ; the
+                                                                  ; connection now exists
         lda #<msg_door_unlocked
         ldy #>msg_door_unlocked
         jsr print_msg
@@ -591,42 +601,50 @@ inv_found_flag: .byte 0
 item_location:
         .byte CLEARING, LOC_NONE, DARK_CAVE
 
-; Each room's exits, one struct-sized (4-byte) record per room --
-; replaces what used to be four separate parallel arrays (exit_north,
-; exit_south, exit_east, exit_west, one per direction instead of one
-; per room). $ff = no exit that way. room_exits + CAVE_ENTRANCE*Exits.size
-; + Exits.north starts as $ff (door locked) and is patched to DARK_CAVE
+; Each room's description pointer and its four exits, one struct-sized
+; (6-byte) record per room -- replaces what used to be two separate
+; tables (room_desc_table, a plain word array, and room_exits, its own
+; 4-byte-per-room Exits struct), combined once lib/math.inc grew a
+; MULT_6 to index a 6-byte record with; see this file's own top-of-file
+; comment for why a 6-byte record had no matching macro before that.
+; $ff = no exit that way. room_data + CAVE_ENTRANCE*Room.size +
+; Room.north starts as $ff (door locked) and is patched to DARK_CAVE
 ; once unlocked -- see the door-unlock handler above.
-.struct Exits
+.struct Room
+        .word desc_ptr
         .byte north, south, east, west
 .endstruct
 ; Each row below is individually .tag'd -- .struct (section 10) alone
-; only guarantees Exits itself is 4 fields; it says nothing about
-; whether any *particular* row here actually has 4 values. Before
-; .tag existed, a mistyped row (three values instead of four, say)
-; assembled cleanly with no warning at all, silently shifting every
-; room after it by one byte -- this is exactly that mistake, made
-; impossible: room_exits itself still resolves to the very first
-; tagged row's own address (nothing emits between the label and
-; "room0: .tag Exits" below), and compute_room_exits_offset's
-; MULT_4-based indexing keeps working completely unchanged, since
-; these five tagged rows are still exactly as contiguous as one plain
-; room_exits: table always was.
-;                    north    south          east            west
-room_exits:
-room0: .tag Exits
+; only guarantees Room itself is 6 fields; it says nothing about
+; whether any *particular* row here actually has all of them, in the
+; right order. Before .tag existed, a mistyped row assembled cleanly
+; with no warning at all, silently shifting every room after it -- this
+; is exactly that mistake, made impossible: room_data itself still
+; resolves to the very first tagged row's own address (nothing emits
+; between the label and "room0: .tag Room" below), and
+; compute_room_offset's MULT_6-based indexing keeps working completely
+; unchanged, since these five tagged rows are still exactly as
+; contiguous as one plain room_data: table always was.
+;                                    north    south          east            west
+room_data:
+room0: .tag Room
+        .word room0_desc
         .byte        FOREST,  $ff,           COTTAGE,        $ff             ; CLEARING
 .endtag
-room1: .tag Exits
+room1: .tag Room
+        .word room1_desc
         .byte        $ff,     CLEARING,      CAVE_ENTRANCE,  $ff             ; FOREST
 .endtag
-room2: .tag Exits
+room2: .tag Room
+        .word room2_desc
         .byte        $ff,     $ff,           $ff,            CLEARING        ; COTTAGE
 .endtag
-room3: .tag Exits
+room3: .tag Room
+        .word room3_desc
         .byte        $ff,     $ff,           $ff,            FOREST          ; CAVE_ENTRANCE
 .endtag
-room4: .tag Exits
+room4: .tag Room
+        .word room4_desc
         .byte        $ff,     CAVE_ENTRANCE, $ff,            $ff             ; DARK_CAVE
 .endtag
 
@@ -655,9 +673,8 @@ verb_table:
         .word kw_help,      handle_help
         .word $0000, $0000
 
-; --- lookup tables (indexed by room*2 or item*2) ---
-room_desc_table:
-        .word room0_desc, room1_desc, room2_desc, room3_desc, room4_desc
+; --- lookup tables (indexed by item*2 -- room_data above is now
+; indexed by compute_room_offset's own MULT_6, not room*2) ---
 item_here_table:
         .word rock_here_msg, key_here_msg, treasure_here_msg
 item_take_msg_table:

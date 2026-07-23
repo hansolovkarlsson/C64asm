@@ -676,7 +676,8 @@ The 6502 has no multiply instruction, but multiplying by a small
 power-of-two constant is just repeated left shifts — `lib/math.inc`
 (part of the standard library, `c64asm-stdlib.zip`) spells this out as
 `MULT_2`/`MULT_4`/`MULT_8`/`MULT_16`, one macro per shift count, so the
-common cases don't need re-deriving by hand each time:
+common cases don't need re-deriving by hand each time. As a generic
+illustration, for a struct whose size happens to be a power of two:
 
 ```asm
         .include "lib/math.inc"
@@ -700,14 +701,13 @@ compute_room_exits_offset:
         ; ... lda room_exits+Exits.north,x
 ```
 
-This is this project's own `adventure.asm`, close to verbatim — see
-that file for the real, complete, tested version. The `.assert` is
-doing real work here, not just decoration: `MULT_4` bakes in the
-assumption that `Exits.size` is exactly 4 (two left shifts), and
-nothing about changing `Exits`'s field list would otherwise fail
-assembly — it would just silently compute the wrong offset and
-misbehave at runtime, the exact class of bug `.assert` (§11) exists to
-turn into a clear, immediate, assembly-time error instead.
+The `.assert` is doing real work here, not just decoration: `MULT_4`
+bakes in the assumption that `Exits.size` is exactly 4 (two left
+shifts), and nothing about changing `Exits`'s field list would
+otherwise fail assembly — it would just silently compute the wrong
+offset and misbehave at runtime, the exact class of bug `.assert`
+(§11) exists to turn into a clear, immediate, assembly-time error
+instead.
 
 `lib/math.inc` also has the reverse operation, `DIV_2`/`DIV_4`/
 `DIV_8`/`DIV_16` — for going the other way, from a byte offset back to
@@ -717,13 +717,13 @@ commonly needed than `MULT_N` — usually you already know the index and
 want the offset, not the reverse — but the same `.assert`-guarded
 pairing applies if you do need it.
 
-`Room.size` (this section's own worked example, above) is
-6 bytes, not a power of two — `lib/math.inc` also has
-`MULT_3`/`MULT_5`/`MULT_6`/`MULT_7`/`MULT_9`/`MULT_10`/`MULT_12` for
-exactly this: the small non-power-of-two sizes a realistic struct is
-likely to come out to. Indexing an array of `Room` records looks the
-same as `Exits`'s own example above, just with `MULT_6` in place of
-`MULT_4`:
+Not every struct comes out to a power-of-two size, though — `Room`
+(this section's own worked example, above) is 6 bytes.
+`lib/math.inc` also has `MULT_3`/`MULT_5`/`MULT_6`/`MULT_7`/`MULT_9`/
+`MULT_10`/`MULT_12` for exactly this: the small non-power-of-two sizes
+a realistic struct is likely to come out to. Indexing an array of
+`Room` records looks the same as `Exits`'s own example above, just
+with `MULT_6` in place of `MULT_4`:
 
 ```asm
 .assert Room.size == 6, "compute_room_offset uses MULT_6"
@@ -734,6 +734,14 @@ compute_room_offset:
         rts
         ; ... lda room_data+Room.north,x
 ```
+
+This is this project's own `adventure.asm`, close to verbatim (there,
+`room_index` is called `current_room`, and `Room` also carries each
+room's description pointer, `Room.desc_ptr`, alongside its four exits
+-- one combined 6-byte record rather than the two separate tables,
+one of them `Exits`-shaped, this used to be before `MULT_6` existed to
+index a 6-byte one with) — see that file for the real, complete,
+tested version, and `CHANGELOG.md` for the consolidation itself.
 
 Unlike `MULT_2`/`MULT_4`/`MULT_8`/`MULT_16`, these need one byte of
 zero page (`mult_scratch`) declared before `lib/math.inc` is

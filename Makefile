@@ -83,14 +83,14 @@ test:
 
 examples: $(TARGET) $(EXA_PRG) $(DISK_FILE)
 
-$(EXA_PRG): $(EXA_SRC)
-
+$(EXA_PRG):
 
 %.prg: %.asm
 	@touch $<
 	@echo "$(CASM) $< -o $@"
 	@$(CASM) $< -o $@ --lib-dir $(LIB_DIR) --listing $(<:.asm=.lst) --vice-labels $(<:.asm=.vice) $(AFLAGS) >> asm.log
-	@touch $< $@
+	@touch $@
+
 
 # Disk
 

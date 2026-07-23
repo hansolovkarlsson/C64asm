@@ -13,6 +13,39 @@ this project's full regression suite before being marked done — that
 discipline is this project's own standing practice, not something
 worth repeating in every entry below.
 
+## `adventure.asm`: combined room description and exits into one `Room` struct
+
+A loose end closed, sitting unaddressed since `MULT_6` first made it
+viable: `room_desc_table` (a plain word array, one description pointer
+per room, indexed by `room*2`) and `room_exits` (its own 4-byte
+`Exits`-struct-per-room table, indexed via `MULT_4`) are now one
+6-byte `Room` struct per room (`desc_ptr` plus the four exits),
+indexed by a single `compute_room_offset` using `MULT_6`. This was
+deliberately deferred back when `.struct`/`.tag` were first added to
+this file, specifically because `Exits` (4 bytes) had a matching
+power-of-two macro and a combined 6-byte record didn't -- adding
+`MULT_6` closed that gap.
+
+Needed one new thing this file hadn't needed before: `MULT_6` (unlike
+`MULT_4`) needs one byte of zero page (`mult_scratch`), which this
+file didn't have declared. Rather than expand this program's own
+already-documented zero-page footprint, used a single free byte that
+had already been reserved but was previously unused within it (`$04`,
+inside the existing `$02-$06` range) -- see this file's own header
+comment for the full reasoning. `c64asm-reference.md` §10's own
+worked example was also corrected: it had been claiming the *old*
+`Exits`/`MULT_4` version was "this project's own `adventure.asm`,
+close to verbatim," which stopped being true the moment this shipped;
+that claim now correctly points at the `Room`/`MULT_6` version instead,
+with the `Exits`/`MULT_4` example kept only as a generic illustration
+of the power-of-two case, not tied to any specific file.
+
+Confirmed behaviorally identical via the full existing regression
+suite, including the complete win-condition playthrough -- this was a
+pure internal data-layout refactor, not a gameplay change, and the
+full suite passing unmodified is exactly what should be expected of
+one.
+
 ## `editor.asm`: RUN/STOP cancels F3/F4/F5's own prompts
 
 F3 (save), F4 (delete), and F5 (load) can now all be backed out of
