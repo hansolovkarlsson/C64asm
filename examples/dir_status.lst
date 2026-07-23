@@ -1,0 +1,170 @@
+; c64asm listing  (origin $0801, 393 bytes)
+; CYCLES column: a plain number is a fixed cycle count; "b/b+1" means b cycles, +1 more if this instruction's indexed addressing crosses a page boundary; "2/3/4" means a branch's usual 2 (not taken) / 3 (taken) / 4 (taken, crossing a page). Blank means an illegal/undocumented opcode (.cpu 6510x) -- see c64asm-reference.md "Listing file format".
+
+ADDR  BYTES      CYCLES  SOURCE
+080D  4C 3A 08   3               .basic start
+0810  85 FB      3               sta str_ptr
+0812  84 FC      3               sty str_ptr+1
+0814  A0 00      2               ldy #$00
+0816  B1 FB      5/6             lda (str_ptr),y
+0818  F0 06      2/3/4           beq __local1_done
+081A  20 D2 FF   6               jsr CHROUT
+081D  C8         2               iny
+081E  D0 F6      2/3/4           bne __local1_loop
+0820  60         6               rts
+0821  85 02      3               sta kw_ptr
+0823  84 03      3               sty kw_ptr+1
+0825  A0 00      2               ldy #$00
+0827  B1 FD      5/6             lda (cmp_ptr),y
+0829  D1 02      5/6             cmp (kw_ptr),y
+082B  D0 07      2/3/4           bne __local2_no
+082D  C9 00      2               cmp #$00
+082F  F0 06      2/3/4           beq __local2_yes
+0831  C8         2               iny
+0832  D0 F3      2/3/4           bne __local2_loop
+0834  A9 00      2               lda #$00
+0836  60         6               rts
+0837  A9 01      2               lda #$01
+0839  60         6               rts
+083A  A9 93      2               lda #$93
+083C  20 D2 FF   6               jsr CHROUT
+083F  A9 D1      2               lda #<title_msg
+0841  A0 08      2               ldy #>title_msg
+0843  20 10 08   6               jsr print_msg
+0846  A9 00      2               lda #$00                   ; no filename needed for the
+0848  A2 8A      2               ldx #<empty_name
+084A  A0 09      2               ldy #>empty_name
+084C  20 BD FF   6               jsr SETNAM
+084F  A9 0F      2               lda #$0f                   ; logical file 15
+0851  A2 08      2               ldx #$08                   ; device 8
+0853  A0 0F      2               ldy #$0f                    ; secondary address 15 = command
+0855  20 BA FF   6               jsr SETLFS
+0858  20 C0 FF   6               jsr OPEN
+085B  90 12      2/3/4           bcc open_ok
+085D  48         3               pha
+085E  A9 2D      2               lda #<open_failed_msg
+0860  A0 09      2               ldy #>open_failed_msg
+0862  20 10 08   6               jsr print_msg
+0865  68         4               pla
+0866  20 B4 08   6               jsr print_hex_byte
+0869  A9 0D      2               lda #13
+086B  20 D2 FF   6               jsr CHROUT
+086E  60         6               rts
+086F  A9 E6      2               lda #<open_ok_msg
+0871  A0 08      2               ldy #>open_ok_msg
+0873  20 10 08   6               jsr print_msg
+0876  A2 0F      2               ldx #$0f
+0878  20 C6 FF   6               jsr CHKIN
+087B  A9 00      2               lda #$00
+087D  8D 3C 03   4               sta byte_count
+0880  20 B7 FF   6               jsr READST
+0883  F0 03      2/3/4           beq __local9_read_one
+0885  4C 9F 08   3               jmp read_done
+0888  20 CF FF   6               jsr CHRIN
+088B  20 D2 FF   6               jsr CHROUT              ; print the status message as text --
+088E  EE 3C 03   6               inc byte_count
+0891  AD 3C 03   4               lda byte_count
+0894  C9 40      2               cmp #64                  ; a real status message is short;
+0896  D0 E8      2/3/4           bne read_loop              ; cap well above what's expected,
+0898  A9 66      2               lda #<stopped_cap_msg
+089A  A0 09      2               ldy #>stopped_cap_msg
+089C  20 10 08   6               jsr print_msg
+089F  20 CC FF   6               jsr CLRCHN
+08A2  A9 0F      2               lda #$0f
+08A4  20 C3 FF   6               jsr CLOSE
+08A7  A9 0D      2               lda #13
+08A9  20 D2 FF   6               jsr CHROUT
+08AC  A9 84      2               lda #<done_msg
+08AE  A0 09      2               ldy #>done_msg
+08B0  20 10 08   6               jsr print_msg
+08B3  60         6               rts
+08B4  48         3               pha
+08B5  4A         2               lsr a
+08B6  4A         2               lsr a
+08B7  4A         2               lsr a
+08B8  4A         2               lsr a
+08B9  20 C3 08   6               jsr print_hex_nibble
+08BC  68         4               pla
+08BD  29 0F      2               and #$0f
+08BF  20 C3 08   6               jsr print_hex_nibble
+08C2  60         6               rts
+08C3  C9 0A      2               cmp #10
+08C5  90 03      2/3/4           bcc __local14_digit
+08C7  18         2               clc
+08C8  69 07      2               adc #$07
+08CA  18         2               clc
+08CB  69 30      2               adc #$30
+08CD  20 D2 FF   6               jsr CHROUT
+08D0  60         6               rts
+
+Symbol table:
+  BITMAP               = $2000
+  CHKIN                = $FFC6
+  CHRIN                = $FFCF
+  CHROUT               = $FFD2
+  CIA1_DDRA            = $DC02
+  CIA1_DDRB            = $DC03
+  CIA1_PRA             = $DC00
+  CIA1_PRB             = $DC01
+  CLOSE                = $FFC3
+  CLRCHN               = $FFCC
+  OPEN                 = $FFC0
+  READST               = $FFB7
+  SCREEN               = $0400
+  SETLFS               = $FFBA
+  SETNAM               = $FFBD
+  SID_VOLUME           = $D418
+  SPRITE0_COLOR        = $D027
+  SPRITE0_X            = $D000
+  SPRITE0_Y            = $D001
+  SPRITE_ENABLE        = $D015
+  SPRITE_PTR0          = $07F8
+  SPRITE_X_EXPAND      = $D01D
+  SPRITE_X_MSB         = $D010
+  SPRITE_Y_EXPAND      = $D017
+  VIC_BG0              = $D021
+  VIC_BORDER           = $D020
+  VIC_CTRL1            = $D011
+  VIC_CTRL2            = $D016
+  VIC_MEMPTRS          = $D018
+  VIC_RASTER           = $D012
+  VOICE1_AD            = $D405
+  VOICE1_CTRL          = $D404
+  VOICE1_FREQ_HI       = $D401
+  VOICE1_FREQ_LO       = $D400
+  VOICE1_SR            = $D406
+  VOICE2_AD            = $D40C
+  VOICE2_CTRL          = $D40B
+  VOICE2_FREQ_HI       = $D408
+  VOICE2_FREQ_LO       = $D407
+  VOICE2_SR            = $D40D
+  VOICE3_AD            = $D413
+  VOICE3_CTRL          = $D412
+  VOICE3_FREQ_HI       = $D40F
+  VOICE3_FREQ_LO       = $D40E
+  VOICE3_SR            = $D414
+  __local14_digit      = $08CA
+  __local1_done        = $0820
+  __local1_loop        = $0816
+  __local2_loop        = $0827
+  __local2_no          = $0834
+  __local2_yes         = $0837
+  __local9_read_one    = $0888
+  byte_count           = $033C
+  cmp_ptr              = $00FD
+  done_msg             = $0984
+  empty_name           = $098A
+  kw_ptr               = $0002
+  open_failed_msg      = $092D
+  open_ok              = $086F
+  open_ok_msg          = $08E6
+  print_hex_byte       = $08B4
+  print_hex_nibble     = $08C3
+  print_msg            = $0810
+  read_done            = $089F
+  read_loop            = $0880
+  start                = $083A
+  stopped_cap_msg      = $0966
+  str_equal            = $0821
+  str_ptr              = $00FB
+  title_msg            = $08D1

@@ -44,20 +44,22 @@ VICE_C1541 = /Applications/vice-arm64-gtk3-3.10/bin/c1541
 
 # Make
 all: $(TARGET) $(SINGLE_TARGET) $(EXA_PRG)
+
+bin: $(TARGET)
 single: $(SINGLE_TARGET)
 
 $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $(OBJECTS)
 
 $(SINGLE_TARGET): $(SINGLE_SOURCE)
-	touch $(SINGLE_SOURCE)
+	@touch $(SINGLE_SOURCE)
 	$(CC) $(CFLAGS) -o $@ $(SINGLE_SOURCE)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Cleanup
-clean: clean_examples clean_disk
+clean: clean_examples 
 	rm -f $(TARGET) $(SRC_DIR)/*.o $(SINGLE_TARGET)
 
 clean_examples:
@@ -66,15 +68,15 @@ clean_examples:
 
 # Assembly files to PRG
 # 	@for file in $(EXA_PRG); do \
-# 		new_file=$${file%.txt}.md; \
-# 		echo "Converting $$file to $$new_file"; \
+# 		@new_file=$${file%.txt}.md; \
+# 		@echo "Converting $$file to $$new_file"; \
 # 		mv "$$file" "$$new_file"; \
 # 	done
 
 
 test: 
 	@for file in $(EXA_PRG); do \
-		echo "*** TESTING $$file ***"; \
+		@echo "*** TESTING $$file ***"; \
 		python3 $(EXA_DIR)/mini6502.py "$$file"; \
 	done
 
@@ -85,9 +87,10 @@ $(EXA_PRG): $(EXA_SRC)
 
 
 %.prg: %.asm
-	touch $<
-	$(CASM) $< -o $@ --lib-dir $(LIB_DIR) --listing $(<:.asm=.lst) --vice-labels $(<:.asm=.vice) $(AFLAGS) >> asm.log
-	touch $< $@
+	@touch $<
+	@echo "$(CASM) $< -o $@"
+	@$(CASM) $< -o $@ --lib-dir $(LIB_DIR) --listing $(<:.asm=.lst) --vice-labels $(<:.asm=.vice) $(AFLAGS) >> asm.log
+	@touch $< $@
 
 # Disk
 
@@ -97,8 +100,9 @@ clean_disk:
 disk: $(DISK_FILE)
 
 $(DISK_FILE): $(EXA_PRG)
-	@echo "creating disk $(DISK_FILE)"
-	$(VICE_C1541) -format "c64asm,1" d64  $(DISK_FILE) >> disk.log
+	@echo "Creating disk $(DISK_FILE)"
+	@-rm $(DISK_FILE)
+	@$(VICE_C1541) -format "c64asm,1" d64  $(DISK_FILE) >> disk.log
 	@for file in $(EXA_PRG); do \
 		progname=$${file//_/-}; \
 		progname=$${progname//.prg/}; \

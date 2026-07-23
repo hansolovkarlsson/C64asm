@@ -13,6 +13,313 @@ this project's full regression suite before being marked done — that
 discipline is this project's own standing practice, not something
 worth repeating in every entry below.
 
+## `editor.asm`: RUN/STOP cancels F3/F4/F5's own prompts
+
+F3 (save), F4 (delete), and F5 (load) can now all be backed out of
+mid-prompt without side effects, not just by pressing RETURN with
+nothing typed. The C64 keyboard has no key labeled ESC; RUN/STOP
+(PETSCII $03, also reachable as Ctrl+C) is the conventional C64
+equivalent for "abort this," so that's what cancels here too --
+during the filename prompt itself, and during F4's own Y/N
+confirmation. Implemented by forcing the typed-length counter to zero
+and falling into the same exit point an empty RETURN already uses, so
+every caller's existing cancellation check handles it without any
+separate code path. Confirmed RUN/STOP remains harmless during
+ordinary typing in the main editing loop, where it isn't checked for
+at all and simply falls through to being ignored like any other
+unhandled control code, the same as before this change.
+
+## `editor.asm`: F4 (delete), and fixed saving over an existing file
+
+Two related changes, both built on the same mechanism. First, the
+fix: loading a file, editing it, and saving under the same name
+wasn't actually updating the file on disk at all -- real, well-
+documented CBM DOS behavior, not a bug in the KERNAL calls themselves.
+The drive refuses to write to a filename that already exists (a real
+`63, FILE EXISTS` error) unless told otherwise. CBM DOS offers a
+shortcut for this (`@0:name,S,W`, "save and replace"), but it has a
+well-documented data-corruption bug on original 1541 firmware, fixed
+only in later revisions (the 1541-II and 1571) -- not something a
+program can detect or route around at the KERNAL call level, and
+serious enough that CBM DOS references consistently recommend against
+it. Fixed instead by `SCRATCH`ing the existing file first, then
+writing fresh -- two plain, well-understood operations instead of the
+buggy shortcut.
+
+Second, F4: a delete command, built directly on that same `SCRATCH`
+mechanism now that it exists. Unlike F2 (new) and F5 (load), which
+overwrite the in-memory document without confirmation, F4 asks first
+(Y/N) -- deleting a file from disk has no "just reload it" recovery
+path the way an unsaved screen does, so the difference in stakes is
+real, not just an inconsistency for its own sake.
+
+A real, exact-value parsing bug came up while building this, caught
+by testing against a genuinely wrong case rather than only the happy
+path: the command channel's response to a SCRATCH command reports the
+count of files actually deleted as a zero-padded two-digit field
+(`01,FILES SCRATCHED,00,00` for none, `...,04,00` for four), and an
+early version only checked for a bare `0` immediately followed by a
+comma -- which never actually appears, since the field is always two
+digits, so `"00"` was being misread as a nonzero count. The practical
+effect: deleting a file that didn't exist was reported as `DELETED.`
+instead of `FILE NOT FOUND.` Fixed by checking that both digits are
+zero, which is what the field format actually guarantees. Testing this
+meant extending `mini6502.py`'s command-channel simulation to actually
+process a SCRATCH command against `self.disk_files` (removing the
+matching entry and reporting a real count) rather than just returning
+a fixed status string, which is also what made the original
+overwrite bug possible to reproduce and verify fixed in the first
+place, rather than assumed.
+
+See `editor.asm`'s own header comment for the complete reasoning,
+including why deleting a file briefly interrupted mid-operation can
+still lose data (an inherent tradeoff of avoiding the buggier "@0:"
+shortcut, not a flaw specific to this approach).
+
+## `editor.asm`: F2 (new file)
+
+The last of the five functions planned for this editor: F2 clears the
+document back to blank and resets the cursor to (0,0), reusing the
+same 4×240-byte loop shape `write_screen_to_file`/`read_file_to_screen`
+already established for touching exactly the 960-byte editable area
+(rows 0-23) and nothing else, so it can't disturb the status line the
+same way an early version of the save code once did. No confirmation
+prompt before clearing -- deliberately consistent with F5 (load),
+which already overwrites the current document without asking first;
+adding a confirmation only here would be a second, inconsistent rule
+rather than a genuinely safer one. The status line's help text is
+abbreviated to `F7=DIR` (from `F7=DIRECTORY`) to fit all five commands
+in the 40-column row; the intro screen, which wraps naturally through
+ordinary `PRINT`/`CHROUT`, still spells it out in full.
+
+## Fixed: directory listing needs secondary address 0, not an arbitrary data channel
+
+Root cause found and fixed, confirmed against real hardware via
+`dir_sa_test.asm`: the special "$" directory request only produces a
+well-formed listing when opened with secondary address 0 (matching
+BASIC's own `LOAD"$",8`) -- unlike an ordinary file, where any value
+2-14 works equally well as a data channel. `dir_demo.asm`,
+`dir_raw.asm`, and `editor.asm`'s own directory code all used
+secondary address 4, based on the general data-channel rule, which
+was never actually correct for this specific request. Real hardware
+showed exactly this: secondary address 0 returned the expected
+`01 04 01 01 00 00 12 22...`; both 2 and 4 returned the same garbage
+(`41 00` then a repeating 4-byte pattern), with `READST` never once
+flagging an error the entire time -- which is what made this
+genuinely hard to isolate rather than obviously wrong, and why it took
+three rounds of narrowing (a raw byte dump, a drive-health check over
+the command channel, then a direct secondary-address comparison) to
+actually pin down instead of guessing.
+
+Fixed the secondary address in all three files, and while there,
+ported `dir_demo.asm`/`dir_raw.asm`'s other two fixes back into
+`editor.asm`'s own directory code, which had never received them: it
+now checks `OPEN`'s carry flag instead of assuming success, stops the
+text-reading loop cleanly on `READST` rather than potentially hanging
+on a missing terminator, and sends an explicit reverse-off after every
+line.
+
+The more important fix is in `mini6502.py` itself, not just this
+project's own three `.asm` files: its virtual disk simulation didn't
+distinguish directory reads by secondary address at all before this,
+which is exactly why the original bug passed every test here and only
+surfaced on real hardware. `_do_open` now only generates the
+well-formed listing for secondary address 0; any other secondary
+address with a "$" filename is modeled as a file that isn't there
+(immediate EOF), not by reproducing the exact garbage bytes seen on
+one real drive, since those specific bytes aren't something to treat
+as a general, portable guarantee -- what matters for testing purposes
+is that the wrong secondary address reliably does NOT produce a
+well-formed listing, which this now enforces. Confirmed this actually
+closes the gap by deliberately reverting the secondary address back to
+4 and checking that the existing test suite now fails clearly instead
+of passing -- it did, which is what "a test that would have caught
+this" actually means, not just adding assertions and hoping.
+
+## `dir_sa_test.asm`
+
+A third diagnostic tool, testing a specific assumption that was never
+actually verified: `dir_demo.asm`/`dir_raw.asm` always opened the "$"
+directory request with secondary address 4, based on the general rule
+that any value 2-14 is a valid data channel for an ordinary file --
+but that rule describes reading a normal file, and this project never
+actually confirmed the special "$" directory request behaves the same
+way regardless of which secondary address is used. It was assumed,
+not verified -- worth naming plainly, since `dir_status.asm` just
+confirmed the drive itself is healthy ("00, OK,00,00"), which rules
+out "no drive" as the explanation for `dir_raw.asm`'s garbage output
+and points at exactly this kind of narrower, previously-unchecked
+assumption instead. Notably, BASIC's own `LOAD"$",8` uses secondary
+address 0 specifically, not an arbitrary data channel number.
+
+Opens the directory with secondary addresses 0, 2, and 4 in turn and
+prints the first 8 bytes each one returns, side by side, so they can
+be compared directly rather than tested one at a time across separate
+program runs.
+
+## `dir_status.asm`
+
+Another diagnostic tool: reads and prints the drive's own status
+message off the command channel (secondary address 15), independent
+of any directory-specific logic. Built directly in response to
+`dir_raw.asm`'s real-hardware output -- "41 00" instead of the
+expected "01 04" load address, then a tight repeating 4-byte pattern
+for a full 128-byte dump, with `READST` never once flagging an error
+the whole time. That combination -- the KERNAL apparently believing
+the read is going fine while returning nonsense -- points away from a
+parsing bug in this project's own code and toward the drive itself, or
+how it's responding, which is exactly what the command channel exists
+to report directly: every real disk operation writes its own result
+there, whether or not a program asks for it, and a healthy drive
+answers with a recognizable status string with no filename needed to
+read it at all.
+
+Testing this needed mini6502.py to grow actual command-channel
+simulation (`drive_status`) -- secondary address 15 didn't do anything
+special before this file needed it to.
+
+Still an open, unresolved question: what this tool reports on the
+actual hardware in question, and what that says about where the real
+problem is.
+
+## `dir_raw.asm`
+
+A diagnostic tool, not a feature: dumps the raw bytes `OPEN`/`CHRIN`
+return for a directory listing, in hex, with no interpretation at all.
+Built because `dir_demo.asm`'s actual behavior on real hardware/VICE
+("8192" printed, then two pi characters, then a hang) matched neither
+its expected error message nor a well-formed listing, and `dir_demo`'s
+own output -- which only ever shows its *interpretation* of the
+bytes -- can't distinguish "the KERNAL returned something unexpected"
+from "the parsing logic is misreading otherwise-correct data." This
+shows the unfiltered truth instead: whether `OPEN`'s carry flag came
+back set or clear, `READST` before any read, and every byte actually
+returned, so the point where reality diverges from expectation is
+visible directly rather than guessed at.
+
+A real bug turned up while building this diagnostic tool itself, which
+is worth calling out precisely because a diagnostic tool with its own
+undetected bug is actively worse than no tool at all: an early version
+read `READST`'s value, then called `PRINT` (which clobbers `A`
+internally) before actually printing that value, producing
+self-contradictory output ("STOPPED -- READST NONZERO: 00" -- nonzero
+and 00 in the same line) that would have pointed straight at a wrong
+conclusion. Fixed by saving the value across the `PRINT` call, the
+same technique already used correctly for the `OPEN` error code right
+next to it; the new regression test specifically checks the reported
+value is real, not just present.
+
+Still an open question, not a resolved one: whether what this tool
+shows will actually explain `dir_demo.asm`'s behavior on real
+hardware. That's the next thing to find out.
+
+## `dir_demo.asm`
+
+`editor.asm`'s disk directory listing, pulled out into its own
+standalone program -- reported issues with `editor.asm` on real
+hardware/VICE prompted breaking the problem down into smaller pieces
+that are easier to test and debug in isolation, starting with this
+one. Not a new feature so much as a diagnostic step: the smallest
+program that can show whether something's actually wrong with how
+this project reads a disk directory, separate from everything else
+`editor.asm` does.
+
+Re-reading the directory code for this surfaced two real gaps, both
+invisible against mini6502.py's own virtual disk specifically because
+that simulation's `OPEN` always succeeds and its generated listing is
+always well-formed: the code never checked whether `OPEN` actually
+succeeded (real `OPEN` signals failure via the carry flag -- no drive
+present, no disk in it, device not responding -- and skipping that
+check is exactly how a failed `OPEN` turns into reading garbage or
+hanging instead of a clear error), and the text-reading loop had no
+way to stop early if a stream ended before a `$00` terminator ever
+arrived. Testing either gap needed mini6502.py to grow the ability to
+simulate a missing drive (`device_present`) and a deliberately
+malformed listing, neither of which existed before -- see
+`mini6502.py`'s own `_do_open` comment. Also added an explicit
+"reverse off" after every line, so the disk name line's own
+reverse-video code can't visually carry into the rest of the listing
+regardless of whether a real drive already sends one itself, which
+public documentation on this specific point turned out to be
+ambiguous about.
+
+Whether these two fixes were the actual cause of what was seen on real
+hardware isn't confirmed yet -- this is a step in an ongoing
+back-and-forth, not a closed loop. If they turn out to help,
+`editor.asm`'s own directory code should get the same fixes next.
+
+## `editor.asm`: fixed F5 and F7 key codes
+
+F5 did nothing, and F7 triggered load instead of the directory
+listing. The actual bug: the four unshifted C64 function keys are
+sequential PETSCII codes with no gaps -- F1=$85, F3=$86, F5=$87,
+F7=$88 -- but the code used $88 for F5 (which is really F7) and $8A
+for F7 (which is really shifted-F3/F4, not a key this editor even
+listens for). Found from real use on hardware/VICE, not by this
+project's own testing: the regression test used the exact same wrong
+values the implementation did, so both agreed with each other and
+neither caught the mismatch against the real keyboard. Re-verified the
+correct codes against the same authoritative source used originally,
+fixed both the code and the test's key constants, and added a new
+check that presses each function key's real code in isolation and
+confirms only its own intended action fires -- specifically so a
+mistake shaped like this one can't pass silently again. See
+`editor.asm`'s own header comment for the corrected key list.
+
+## `editor.asm`: load, save, and directory listing
+
+Real KERNAL disk I/O (`SETLFS`/`SETNAM`/`OPEN`/`CHKIN`/`CHKOUT`/
+`CLRCHN`/`CLOSE`/`READST`, plus `CHRIN`/`CHROUT`'s file-redirected
+behavior) added to the one-screen text editor, saving and loading the
+document as a SEQ file and parsing a real disk directory listing's
+byte format for F7. New status line (row 24; the editable area is now
+rows 0-23, down from all 25) shows help text by default, a filename
+prompt for F3/F5, and a one-line result ("SAVED.", "FILE NOT FOUND.",
+"CANCELLED.") after each operation.
+
+This is genuinely new ground for the project: every exact register
+convention (`SETNAM`'s X=pointer-low/Y=pointer-high in particular,
+easy to get backwards) and the directory listing's own byte structure
+(a fake load address, then one BASIC-program-style "line" per file --
+link pointer, a line number doubling as the block count, null-
+terminated text) were verified against multiple independent,
+authoritative sources before any 6502 code was written, not assumed
+from memory.
+
+**On testing**: this project has no way to test against a real IEC bus
+or drive — mini6502.py's own emulation has never simulated disk
+hardware. Rather than ship untested disk I/O, mini6502.py gained a
+virtual file system trapping every KERNAL call this needed (see that
+file's own header comment on `disk_files`), which is what the editor's
+61-check regression test (up from 31) runs against. That's a real,
+useful check — it confirms this program's own KERNAL call sequence,
+register usage, and byte-for-byte file/directory-listing contents
+match documented KERNAL conventions — but it is **not** the same as
+testing against a real 1541 or VICE, which is still the right final
+check before trusting this with anything you'd mind losing. That
+boundary is documented directly in both `editor.asm`'s and
+`mini6502.py`'s own header comments, not just here.
+
+One real, meaningful bug came up during testing, not a cosmetic one: an
+early version of `write_screen_to_file` copied the entire 1000-byte
+screen, which meant saving a document also saved whatever was on the
+status line at that exact moment — including, in one actual test run,
+the tail end of the "SAVE AS:" prompt and the filename just typed into
+it, baked directly into the saved file's own content. Fixed by
+narrowing both the save and load copy loops to the 960-byte editable
+area (rows 0-23) only, matching the row-24-is-not-part-of-the-document
+design the status line itself introduced. `mini6502.py`'s own `_do_open`
+was also adjusted after an initial design flaw: the first version only
+flagged a missing file once something tried to read it, which left an
+awkward ambiguity between "empty file" and "not found" for a caller
+checking status right after `OPEN`; it now flags this immediately,
+which is both simpler to model and simpler for `editor.asm`'s own load
+logic to check.
+
+See `README.md`'s file table and `editor.asm`'s own header comment for
+the complete picture, including the exact SEQ filename-suffix
+convention (`,S,W`/`,S,R`) and what F7's directory listing shows.
+
 ## `editor.asm`
 
 A simple, one-screen text editor — the first step toward a planned

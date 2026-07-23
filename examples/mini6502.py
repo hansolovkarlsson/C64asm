@@ -644,6 +644,26 @@ for _c in range(0x20, 0x7F):
 del _c
 
 
+class _VirtualFile:
+    """One open logical file, as tracked by the virtual disk simulation
+    in C64Machine (see that class's own __init__ for the bigger
+    picture). mode is 'read', 'write', or 'directory' -- 'directory' is
+    just a 'read' of generated listing bytes rather than a real file's
+    contents, built once at OPEN time (see _generate_directory_listing).
+    name is the filename with any ",S,W"/",S,R" (or similar) suffix
+    already stripped off, i.e. the same key C64Machine.disk_files
+    itself uses."""
+
+    def __init__(self, mode, name, data=b''):
+        self.mode = mode
+        self.name = name
+        if mode in ('read', 'directory'):
+            self.data = data
+            self.pos = 0
+        else:
+            self.write_buffer = bytearray()
+
+
 class C64Machine:
     """Wraps a CPU6502 with just enough C64-specific behavior to run
     this project's own demo and library code and check it did the
@@ -664,6 +684,14 @@ class C64Machine:
     CHROUT = 0xFFD2
     CHRIN = 0xFFCF
     GETIN = 0xFFE4
+    READST = 0xFFB7
+    SETLFS = 0xFFBA
+    SETNAM = 0xFFBD
+    OPEN = 0xFFC0
+    CLOSE = 0xFFC3
+    CHKIN = 0xFFC6
+    CHKOUT = 0xFFC9
+    CLRCHN = 0xFFCC
 
     # Real KERNAL housekeeping touches these zero-page locations on
     # every raster/timer IRQ (roughly 60 times a second), regardless of
@@ -723,6 +751,56 @@ class C64Machine:
         self._rng_state = 0xACE1     # small deterministic PRNG for the
                                        # "garbage" poisoned bytes, so a test
                                        # run is reproducible
+
+        # --- virtual disk / KERNAL file I/O simulation -----------------
+        # A simplified model of SETLFS/SETNAM/OPEN/CHKIN/CHKOUT/CLRCHN/
+        # CLOSE/READST, plus CHRIN/CHROUT's own file-redirected behavior
+        # (see _do_chrin/_do_chrout) -- enough to verify a program's own
+        # KERNAL call sequence, register usage, and byte-for-byte file
+        # contents are correct, matched against publicly documented
+        # KERNAL conventions. This is NOT a real IEC bus/1541 simulation
+        # -- there's no serial bus protocol, no device-not-present
+        # timing, no real disk block layout. A program that passes every
+        # check here is verified against the *documented contract* those
+        # KERNAL calls make, not against a real drive; testing against
+        # VICE or real hardware is still the right final check for
+        # anything that actually does disk I/O.
+        self.disk_files = {}          # filename (str, no ",S,W"/",S,R"
+                                        # suffix) -> bytes -- the virtual
+                                        # disk's contents; a test can
+                                        # pre-populate this before a
+                                        # simulated LOAD, or inspect it
+                                        # after a simulated SAVE
+        self.disk_name = "VIRTUAL DISK"  # used only when generating a
+                                            # simulated directory listing
+        self.device_present = True     # set False to simulate no drive
+                                          # at all -- see _do_open
+        self.drive_status = "00, OK,00,00\r"   # what the command channel
+                                                  # (secondary address 15)
+                                                  # reports -- a real 1541
+                                                  # says something like
+                                                  # "73,CBM DOS V2.6
+                                                  # 1541,00,00" right after
+                                                  # power-on/reset; a test
+                                                  # can set this to a
+                                                  # different message to
+                                                  # simulate a real drive
+                                                  # error being reported
+        self._pending_lfs = None       # (logical_file_num, device, sa)
+                                          # from the most recent SETLFS
+        self._pending_name = None      # filename string from the most
+                                          # recent SETNAM
+        self._open_files = {}          # logical_file_num -> _VirtualFile
+        self._channel_in = None        # logical_file_num currently the
+                                          # input channel, or None for the
+                                          # keyboard (see CHKIN/CLRCHN)
+        self._channel_out = None       # logical_file_num currently the
+                                          # output channel, or None for
+                                          # the screen (see CHKOUT/CLRCHN)
+        self._io_status = 0x00         # READST's own return value --
+                                          # real READST clears this back
+                                          # to 0 once read, which is why
+                                          # _do_readst does the same
 
         self.cpu.read_byte = self._read_byte
         self.cpu.write_byte = self._write_byte
@@ -818,10 +896,54 @@ class C64Machine:
             self._do_getin()
             self.cpu.pc = (self.cpu.pop_word() + 1) & 0xFFFF
             return True
+        if pc == self.READST:
+            self._do_readst()
+            self.cpu.pc = (self.cpu.pop_word() + 1) & 0xFFFF
+            return True
+        if pc == self.SETLFS:
+            self._do_setlfs()
+            self.cpu.pc = (self.cpu.pop_word() + 1) & 0xFFFF
+            return True
+        if pc == self.SETNAM:
+            self._do_setnam()
+            self.cpu.pc = (self.cpu.pop_word() + 1) & 0xFFFF
+            return True
+        if pc == self.OPEN:
+            self._do_open()
+            self.cpu.pc = (self.cpu.pop_word() + 1) & 0xFFFF
+            return True
+        if pc == self.CLOSE:
+            self._do_close()
+            self.cpu.pc = (self.cpu.pop_word() + 1) & 0xFFFF
+            return True
+        if pc == self.CHKIN:
+            self._do_chkin()
+            self.cpu.pc = (self.cpu.pop_word() + 1) & 0xFFFF
+            return True
+        if pc == self.CHKOUT:
+            self._do_chkout()
+            self.cpu.pc = (self.cpu.pop_word() + 1) & 0xFFFF
+            return True
+        if pc == self.CLRCHN:
+            self._do_clrchn()
+            self.cpu.pc = (self.cpu.pop_word() + 1) & 0xFFFF
+            return True
         return False
 
     def _do_chrout(self):
         b = self.cpu.a
+        if self._channel_out is not None:
+            # Output redirected to an open file (CHKOUT) -- append the
+            # raw byte to that file's own write buffer instead of the
+            # screen. Real CHROUT doesn't distinguish "printing" from
+            # "writing a file byte" at all; it's the same call either
+            # way, just a different destination based on the current
+            # output channel -- this mirrors that directly rather than
+            # having two separate code paths pretend to be one call.
+            vf = self._open_files.get(self._channel_out)
+            if vf is not None and vf.mode == 'write':
+                vf.write_buffer.append(b)
+            return
         self.output_raw.append(b)
         if b == 0x93:
             self.output_text.append('\x0c')   # clear screen, represented
@@ -861,6 +983,23 @@ class C64Machine:
         # relies on -- nothing further to do here.
 
     def _do_chrin(self):
+        if self._channel_in is not None:
+            # Input redirected to an open file (CHKIN) -- pop the next
+            # byte from that file's own buffer instead of the keyboard.
+            # See _do_readst for the matching EOF-flagging half of this.
+            vf = self._open_files.get(self._channel_in)
+            if vf is not None and vf.mode in ('read', 'directory'):
+                if vf.pos < len(vf.data):
+                    self.cpu.a = vf.data[vf.pos]
+                    vf.pos += 1
+                    if vf.pos >= len(vf.data):
+                        self._io_status |= 0x40   # EOF, the same bit
+                                                      # real READST uses
+                else:
+                    self.cpu.a = 0x00
+                    self._io_status |= 0x40
+                self.cpu.set_nz(self.cpu.a)
+                return
         # No real screen editor to read a line from -- a test that
         # needs CHRIN input queues bytes in self.chrin_queue first, and
         # this pops one per call, returning $0D (return) once the
@@ -894,6 +1033,201 @@ class C64Machine:
                                          # "jsr GETIN / beq ..." depends
                                          # on Z actually reflecting the
                                          # value just returned in A
+
+    def _do_readst(self):
+        # Real READST clears the status back to 0 once read -- a well-
+        # known KERNAL quirk (save the value if you need to check it
+        # more than once). See _do_chrin for the EOF bit this reports.
+        self.cpu.a = self._io_status
+        self.cpu.set_nz(self.cpu.a)
+        self._io_status = 0x00
+
+    def _do_setlfs(self):
+        # A=logical file number, X=device number, Y=secondary address.
+        # Just remembers the triple for the OPEN that follows -- doesn't
+        # touch A/X/Y further, matching real SETLFS.
+        self._pending_lfs = (self.cpu.a, self.cpu.x, self.cpu.y)
+
+    def _do_setnam(self):
+        # A=name length, X=pointer low byte, Y=pointer high byte.
+        # The name bytes in memory are PETSCII, but for the $20-$5F
+        # range this project's own keyboard input (_do_getin) and
+        # editor.asm's own typing both stay within, PETSCII and ASCII
+        # are identical -- so a plain ASCII decode is exact here, not
+        # an approximation.
+        length = self.cpu.a
+        ptr = self.cpu.x | (self.cpu.y << 8)
+        raw = bytes(self.cpu.memory[(ptr + i) & 0xFFFF] for i in range(length))
+        self._pending_name = raw.decode('ascii', errors='replace')
+
+    def _parse_filename(self):
+        """Splits self._pending_name into (base_name, mode), stripping
+        a ",S,W"/",S,R"/",W"/",R" -style suffix the same way real CBM
+        DOS does -- 'write' if a ",W" appears anywhere in the name,
+        'read' otherwise (the default direction when nothing says
+        otherwise, matching a plain ",S" or no suffix at all)."""
+        name = self._pending_name or ''
+        parts = name.split(',')
+        base = parts[0]
+        mode = 'write' if any(p.strip() == 'W' for p in parts[1:]) else 'read'
+        return base, mode
+
+    def _generate_directory_listing(self):
+        """Builds the exact byte structure a real 1541 sends for
+        LOAD"$",8 / OPEN+CHRIN -- see
+        https://www.pagetable.com/?p=273 for the format this follows:
+        a fake 2-byte load address, then one BASIC-program-style
+        "line" per entry (a link pointer, a line number doubling as
+        the block count, null-terminated text), ending in a 2-byte
+        $0000 link pointer. Built from self.disk_files, which a test
+        populates directly rather than this simulating real disk
+        block/BAM layout."""
+        out = bytearray([0x01, 0x04])   # fake load address ($0401)
+
+        def add_line(line_number, text_bytes):
+            # link pointer: any non-zero placeholder works, since
+            # nothing on the reading side uses it for real addressing,
+            # only checks "zero means end of listing"
+            out.extend([0x01, 0x01])
+            out.append(line_number & 0xFF)
+            out.append((line_number >> 8) & 0xFF)
+            out.extend(text_bytes)
+            out.append(0x00)
+
+        name_text = bytearray([0x12])   # reverse video on
+        name_text.extend(f'"{self.disk_name}" 00 2a'.upper().encode('ascii'))
+        add_line(0, name_text)
+
+        for fname, data in self.disk_files.items():
+            blocks = max(1, (len(data) + 253) // 254)
+            text = f'   "{fname}"'.encode('ascii')
+            text += b' ' * max(0, 20 - len(text))
+            text += b'seq'.upper()
+            add_line(blocks, text)
+
+        add_line(664, b'BLOCKS FREE.')
+        out.extend([0x00, 0x00])   # end of listing
+        return bytes(out)
+
+    def _do_open(self):
+        # self.device_present (default True) lets a test simulate the
+        # drive not being there at all -- no disk image attached in
+        # VICE, device powered off, etc. -- which real OPEN reports by
+        # setting carry and an error code in A, rather than the
+        # program discovering it only once CHRIN starts returning
+        # nonsense. A program that never checks carry after OPEN has
+        # no way to tell the difference between this and success.
+        if not self.device_present:
+            self.cpu.set_flag(FLAG_C, True)
+            self.cpu.a = 0x05   # DEVICE NOT PRESENT, real KERNAL's own code
+            self._io_status |= 0x80
+            return
+        self.cpu.set_flag(FLAG_C, False)
+        if self._pending_lfs is None:
+            self._io_status |= 0x80   # no SETLFS -- treat as a device error
+            return
+        lfn, device, sa = self._pending_lfs
+        name = self._pending_name or ''
+        if sa == 15:
+            # The command channel -- every real disk operation reports
+            # its own result here, whether or not a program asks for
+            # it, and reading it needs no filename at all (a real
+            # OPEN 15,8,15 has nothing after the second 15). A test
+            # can set self.drive_status to something other than the
+            # default "everything's fine" message to simulate an
+            # actual drive error being reported this way instead.
+            #
+            # A SCRATCH command ("S0:filename", the standard, safe way
+            # to delete a file -- see editor.asm's own header comment
+            # on why this project deliberately doesn't use the
+            # "@0:filename,S,W" save-and-replace shortcut instead,
+            # given that mechanism's well-documented data-corruption
+            # bug on the original 1541) is handled specially here too:
+            # this project's editor only ever sends an exact filename,
+            # never a wildcard pattern, so this doesn't attempt
+            # wildcard matching -- just an exact, case-sensitive name
+            # lookup in self.disk_files, removed if present. The
+            # response format (errcode, message, count, 00) matches a
+            # real drive's own, with the count being the actual thing
+            # a caller needs to check: 0 means nothing matched.
+            if name.upper().startswith('S0:') or name.upper().startswith('S:'):
+                target = name.split(':', 1)[1]
+                if target in self.disk_files:
+                    del self.disk_files[target]
+                    count = 1
+                else:
+                    count = 0
+                response = f"01,FILES SCRATCHED,{count:02d},00\r"
+                self._open_files[lfn] = _VirtualFile(
+                    'read', '$command', response.encode('ascii'))
+                return
+            self._open_files[lfn] = _VirtualFile(
+                'read', '$command', self.drive_status.encode('ascii'))
+            return
+        if name == '$' or name.startswith('$,') or name.startswith('$='):
+            if sa != 0:
+                # Confirmed against real hardware, not assumed: the
+                # special "$" directory request only produces the
+                # well-formed BASIC-program-style listing when opened
+                # with secondary address 0, matching BASIC's own
+                # LOAD"$",8 -- unlike an ordinary file, where any
+                # value 2-14 works equally well as a data channel. An
+                # earlier version of this simulation didn't enforce
+                # this at all, which is exactly why a real bug (this
+                # project's own directory-reading code using secondary
+                # address 4) passed every test here before eventually
+                # being caught on real hardware instead -- see
+                # CHANGELOG.md. Modeled here as "file not found" rather
+                # than reproducing the exact garbage bytes observed on
+                # that one real drive, since the precise bytes aren't
+                # something to treat as a portable, general guarantee;
+                # what matters for testing purposes is that the wrong
+                # secondary address does NOT produce a well-formed
+                # listing, which this now enforces either way.
+                self._io_status |= 0x40
+                self._open_files[lfn] = _VirtualFile('read', '$', b'')
+                return
+            data = self._generate_directory_listing()
+            self._open_files[lfn] = _VirtualFile('directory', '$', data)
+            return
+        base, mode = self._parse_filename()
+        if mode == 'write':
+            self._open_files[lfn] = _VirtualFile('write', base)
+        else:
+            data = self.disk_files.get(base)
+            if data is None:
+                # Real disk OPEN often succeeds even for a file that
+                # doesn't exist, with the error only becoming visible
+                # on the first read. This simulation simplifies that
+                # by flagging EOF right here rather than waiting for a
+                # first CHRIN attempt to discover it -- a program can
+                # check READST immediately after OPEN+CHKIN to detect
+                # "not found" without needing to first distinguish an
+                # empty-but-real file from a missing one, which this
+                # simulation doesn't otherwise try to tell apart.
+                data = b''
+                self._io_status |= 0x40
+            self._open_files[lfn] = _VirtualFile('read', base, data)
+
+    def _do_close(self):
+        lfn = self.cpu.a
+        vf = self._open_files.pop(lfn, None)
+        if vf is not None and vf.mode == 'write':
+            self.disk_files[vf.name] = bytes(vf.write_buffer)
+        if self._channel_in == lfn:
+            self._channel_in = None
+        if self._channel_out == lfn:
+            self._channel_out = None
+
+    def _do_chkin(self):
+        self._channel_in = self.cpu.x
+
+    def _do_chkout(self):
+        self._channel_out = self.cpu.x
+
+    def _do_clrchn(self):
+        self._channel_in = None
+        self._channel_out = None
 
     # --- zero-page poisoning simulation --------------------------------
 

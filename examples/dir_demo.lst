@@ -1,0 +1,213 @@
+; c64asm listing  (origin $0801, 434 bytes)
+; CYCLES column: a plain number is a fixed cycle count; "b/b+1" means b cycles, +1 more if this instruction's indexed addressing crosses a page boundary; "2/3/4" means a branch's usual 2 (not taken) / 3 (taken) / 4 (taken, crossing a page). Blank means an illegal/undocumented opcode (.cpu 6510x) -- see c64asm-reference.md "Listing file format".
+
+ADDR  BYTES      CYCLES  SOURCE
+080D  4C 3A 08   3               .basic start
+0810  85 FB      3               sta str_ptr
+0812  84 FC      3               sty str_ptr+1
+0814  A0 00      2               ldy #$00
+0816  B1 FB      5/6             lda (str_ptr),y
+0818  F0 06      2/3/4           beq __local1_done
+081A  20 D2 FF   6               jsr CHROUT
+081D  C8         2               iny
+081E  D0 F6      2/3/4           bne __local1_loop
+0820  60         6               rts
+0821  85 02      3               sta kw_ptr
+0823  84 03      3               sty kw_ptr+1
+0825  A0 00      2               ldy #$00
+0827  B1 FD      5/6             lda (cmp_ptr),y
+0829  D1 02      5/6             cmp (kw_ptr),y
+082B  D0 07      2/3/4           bne __local2_no
+082D  C9 00      2               cmp #$00
+082F  F0 06      2/3/4           beq __local2_yes
+0831  C8         2               iny
+0832  D0 F3      2/3/4           bne __local2_loop
+0834  A9 00      2               lda #$00
+0836  60         6               rts
+0837  A9 01      2               lda #$01
+0839  60         6               rts
+083A  A9 93      2               lda #$93
+083C  20 D2 FF   6               jsr CHROUT
+083F  A9 3E      2               lda #<title_msg
+0841  A0 09      2               ldy #>title_msg
+0843  20 10 08   6               jsr print_msg
+0846  A9 01      2               lda #$01
+0848  A2 B2      2               ldx #<dirname
+084A  A0 09      2               ldy #>dirname
+084C  20 BD FF   6               jsr SETNAM
+084F  A9 01      2               lda #$01                   ; logical file 1
+0851  A2 08      2               ldx #$08                   ; device 8
+0853  A0 00      2               ldy #$00                    ; secondary address -- the "$"
+0855  20 BA FF   6               jsr SETLFS
+0858  20 C0 FF   6               jsr OPEN
+085B  B0 76      2/3/4           bcs open_failed             ; real OPEN sets carry on failure --
+085D  A2 01      2               ldx #$01
+085F  20 C6 FF   6               jsr CHKIN
+0862  20 CF FF   6               jsr CHRIN                  ; skip the 2-byte fake load address
+0865  20 CF FF   6               jsr CHRIN
+0868  20 CF FF   6               jsr CHRIN
+086B  8D 3C 03   4               sta dir_link_lo
+086E  20 CF FF   6               jsr CHRIN
+0871  8D 3D 03   4               sta dir_link_hi
+0874  AD 3C 03   4               lda dir_link_lo
+0877  0D 3D 03   4               ora dir_link_hi
+087A  F0 47      2/3/4           beq dir_done
+087C  20 CF FF   6               jsr CHRIN
+087F  8D 3E 03   4               sta dir_num_lo
+0882  20 CF FF   6               jsr CHRIN
+0885  8D 3F 03   4               sta dir_num_hi
+0888  AD 3E 03   4               lda dir_num_lo
+088B  0D 3F 03   4               ora dir_num_hi
+088E  F0 14      2/3/4           beq __local6_text_only
+0890  AD 3E 03   4               lda dir_num_lo
+0893  8D 40 03   4               sta dec_lo
+0896  AD 3F 03   4               lda dir_num_hi
+0899  8D 41 03   4               sta dec_hi
+089C  20 DB 08   6               jsr print_decimal16
+089F  A9 20      2               lda #$20
+08A1  20 D2 FF   6               jsr CHROUT
+08A4  20 B7 FF   6               jsr READST
+08A7  29 40      2               and #$40
+08A9  D0 18      2/3/4           bne dir_done              ; the stream ended before a $00
+08AB  20 CF FF   6               jsr CHRIN
+08AE  F0 06      2/3/4           beq __local6_text_done
+08B0  20 D2 FF   6               jsr CHROUT
+08B3  4C A4 08   3               jmp __local6_text_loop
+08B6  A9 92      2               lda #$92                  ; reverse off -- defensive: makes sure
+08B8  20 D2 FF   6               jsr CHROUT
+08BB  A9 0D      2               lda #13
+08BD  20 D2 FF   6               jsr CHROUT
+08C0  4C 68 08   3               jmp dir_loop
+08C3  20 CC FF   6               jsr CLRCHN
+08C6  A9 01      2               lda #$01
+08C8  20 C3 FF   6               jsr CLOSE
+08CB  A9 57      2               lda #<done_msg
+08CD  A0 09      2               ldy #>done_msg
+08CF  20 10 08   6               jsr print_msg
+08D2  60         6               rts
+08D3  A9 6A      2               lda #<open_error_msg
+08D5  A0 09      2               ldy #>open_error_msg
+08D7  20 10 08   6               jsr print_msg
+08DA  60         6               rts
+08DB  A9 00      2               lda #$00
+08DD  8D 43 03   4               sta dec_started
+08E0  A2 00      2               ldx #$00
+08E2  A9 00      2               lda #$00
+08E4  8D 42 03   4               sta dec_digit
+08E7  AD 41 03   4               lda dec_hi
+08EA  DD 39 09   4/5             cmp pow10_hi,x
+08ED  90 23      2/3/4           bcc __local11_next_digit
+08EF  D0 08      2/3/4           bne __local11_do_subtract
+08F1  AD 40 03   4               lda dec_lo
+08F4  DD 34 09   4/5             cmp pow10_lo,x
+08F7  90 19      2/3/4           bcc __local11_next_digit
+08F9  AD 40 03   4               lda dec_lo
+08FC  38         2               sec
+08FD  FD 34 09   4/5             sbc pow10_lo,x
+0900  8D 40 03   4               sta dec_lo
+0903  AD 41 03   4               lda dec_hi
+0906  FD 39 09   4/5             sbc pow10_hi,x
+0909  8D 41 03   4               sta dec_hi
+090C  EE 42 03   6               inc dec_digit
+090F  4C E7 08   3               jmp __local11_subtract_loop
+0912  AD 42 03   4               lda dec_digit
+0915  D0 09      2/3/4           bne __local11_print_it
+0917  AD 43 03   4               lda dec_started
+091A  D0 04      2/3/4           bne __local11_print_it
+091C  E0 04      2               cpx #4
+091E  D0 0E      2/3/4           bne __local11_skip_print
+0920  A9 01      2               lda #$01
+0922  8D 43 03   4               sta dec_started
+0925  AD 42 03   4               lda dec_digit
+0928  18         2               clc
+0929  69 30      2               adc #$30
+092B  20 D2 FF   6               jsr CHROUT
+092E  E8         2               inx
+092F  E0 05      2               cpx #5
+0931  D0 AF      2/3/4           bne __local11_digit_loop
+0933  60         6               rts
+
+Symbol table:
+  BITMAP               = $2000
+  CHKIN                = $FFC6
+  CHRIN                = $FFCF
+  CHROUT               = $FFD2
+  CIA1_DDRA            = $DC02
+  CIA1_DDRB            = $DC03
+  CIA1_PRA             = $DC00
+  CIA1_PRB             = $DC01
+  CLOSE                = $FFC3
+  CLRCHN               = $FFCC
+  OPEN                 = $FFC0
+  READST               = $FFB7
+  SCREEN               = $0400
+  SETLFS               = $FFBA
+  SETNAM               = $FFBD
+  SID_VOLUME           = $D418
+  SPRITE0_COLOR        = $D027
+  SPRITE0_X            = $D000
+  SPRITE0_Y            = $D001
+  SPRITE_ENABLE        = $D015
+  SPRITE_PTR0          = $07F8
+  SPRITE_X_EXPAND      = $D01D
+  SPRITE_X_MSB         = $D010
+  SPRITE_Y_EXPAND      = $D017
+  VIC_BG0              = $D021
+  VIC_BORDER           = $D020
+  VIC_CTRL1            = $D011
+  VIC_CTRL2            = $D016
+  VIC_MEMPTRS          = $D018
+  VIC_RASTER           = $D012
+  VOICE1_AD            = $D405
+  VOICE1_CTRL          = $D404
+  VOICE1_FREQ_HI       = $D401
+  VOICE1_FREQ_LO       = $D400
+  VOICE1_SR            = $D406
+  VOICE2_AD            = $D40C
+  VOICE2_CTRL          = $D40B
+  VOICE2_FREQ_HI       = $D408
+  VOICE2_FREQ_LO       = $D407
+  VOICE2_SR            = $D40D
+  VOICE3_AD            = $D413
+  VOICE3_CTRL          = $D412
+  VOICE3_FREQ_HI       = $D40F
+  VOICE3_FREQ_LO       = $D40E
+  VOICE3_SR            = $D414
+  __local11_digit_loop = $08E2
+  __local11_do_subtract = $08F9
+  __local11_next_digit = $0912
+  __local11_print_it   = $0920
+  __local11_skip_print = $092E
+  __local11_subtract_loop = $08E7
+  __local1_done        = $0820
+  __local1_loop        = $0816
+  __local2_loop        = $0827
+  __local2_no          = $0834
+  __local2_yes         = $0837
+  __local6_text_done   = $08B6
+  __local6_text_loop   = $08A4
+  __local6_text_only   = $08A4
+  cmp_ptr              = $00FD
+  dec_digit            = $0342
+  dec_hi               = $0341
+  dec_lo               = $0340
+  dec_started          = $0343
+  dir_done             = $08C3
+  dir_link_hi          = $033D
+  dir_link_lo          = $033C
+  dir_loop             = $0868
+  dir_num_hi           = $033F
+  dir_num_lo           = $033E
+  dirname              = $09B2
+  done_msg             = $0957
+  kw_ptr               = $0002
+  open_error_msg       = $096A
+  open_failed          = $08D3
+  pow10_hi             = $0939
+  pow10_lo             = $0934
+  print_decimal16      = $08DB
+  print_msg            = $0810
+  start                = $083A
+  str_equal            = $0821
+  str_ptr              = $00FB
+  title_msg            = $093E

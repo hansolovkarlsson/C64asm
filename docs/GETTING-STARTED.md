@@ -181,9 +181,10 @@ one is often the fastest way to see a technique used for real:
   asset via `.incbin`, instead of hand-transcribed `.byte` data.
 - **`music_demo.asm`** — two-voice SID music via `lib/music.inc`, a
   real tune (public domain), not a single test tone.
-- **`editor.asm`** — a one-screen text editor, writing directly to
-  screen memory and reading input via `GETIN` rather than
-  `lib/keyboard.inc`'s single-key `READ_KEY`.
+- **`editor.asm`** — a one-screen text editor with load, save, and
+  disk directory listing, writing directly to screen memory and
+  reading input via `GETIN` rather than `lib/keyboard.inc`'s
+  single-key `READ_KEY`.
 
 `README.md`'s file table has a one-line description of what each one
 specifically demonstrates.

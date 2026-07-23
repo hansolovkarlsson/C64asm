@@ -1,0 +1,200 @@
+; c64asm listing  (origin $0801, 458 bytes)
+; CYCLES column: a plain number is a fixed cycle count; "b/b+1" means b cycles, +1 more if this instruction's indexed addressing crosses a page boundary; "2/3/4" means a branch's usual 2 (not taken) / 3 (taken) / 4 (taken, crossing a page). Blank means an illegal/undocumented opcode (.cpu 6510x) -- see c64asm-reference.md "Listing file format".
+
+ADDR  BYTES      CYCLES  SOURCE
+080D  4C 3A 08   3               .basic start
+0810  85 FB      3               sta str_ptr
+0812  84 FC      3               sty str_ptr+1
+0814  A0 00      2               ldy #$00
+0816  B1 FB      5/6             lda (str_ptr),y
+0818  F0 06      2/3/4           beq __local1_done
+081A  20 D2 FF   6               jsr CHROUT
+081D  C8         2               iny
+081E  D0 F6      2/3/4           bne __local1_loop
+0820  60         6               rts
+0821  85 02      3               sta kw_ptr
+0823  84 03      3               sty kw_ptr+1
+0825  A0 00      2               ldy #$00
+0827  B1 FD      5/6             lda (cmp_ptr),y
+0829  D1 02      5/6             cmp (kw_ptr),y
+082B  D0 07      2/3/4           bne __local2_no
+082D  C9 00      2               cmp #$00
+082F  F0 06      2/3/4           beq __local2_yes
+0831  C8         2               iny
+0832  D0 F3      2/3/4           bne __local2_loop
+0834  A9 00      2               lda #$00
+0836  60         6               rts
+0837  A9 01      2               lda #$01
+0839  60         6               rts
+083A  A9 93      2               lda #$93
+083C  20 D2 FF   6               jsr CHROUT
+083F  A9 10      2               lda #<title_msg
+0841  A0 09      2               ldy #>title_msg
+0843  20 10 08   6               jsr print_msg
+0846  A9 01      2               lda #$01
+0848  A2 CA      2               ldx #<dirname
+084A  A0 09      2               ldy #>dirname
+084C  20 BD FF   6               jsr SETNAM
+084F  A9 01      2               lda #$01                   ; logical file 1
+0851  A2 08      2               ldx #$08                   ; device 8
+0853  A0 00      2               ldy #$00                    ; secondary address -- must be 0
+0855  20 BA FF   6               jsr SETLFS
+0858  20 C0 FF   6               jsr OPEN
+085B  90 12      2/3/4           bcc open_ok
+085D  48         3               pha
+085E  A9 47      2               lda #<open_failed_msg
+0860  A0 09      2               ldy #>open_failed_msg
+0862  20 10 08   6               jsr print_msg
+0865  68         4               pla
+0866  20 F3 08   6               jsr print_hex_byte
+0869  A9 0D      2               lda #13
+086B  20 D2 FF   6               jsr CHROUT
+086E  60         6               rts
+086F  A9 2A      2               lda #<open_ok_msg
+0871  A0 09      2               ldy #>open_ok_msg
+0873  20 10 08   6               jsr print_msg
+0876  A2 01      2               ldx #$01
+0878  20 C6 FF   6               jsr CHKIN
+087B  20 B7 FF   6               jsr READST
+087E  A9 6E      2               lda #<first_readst_msg
+0880  A0 09      2               ldy #>first_readst_msg
+0882  20 10 08   6               jsr print_msg
+0885  20 F3 08   6               jsr print_hex_byte
+0888  A9 0D      2               lda #13
+088A  20 D2 FF   6               jsr CHROUT
+088D  A9 0D      2               lda #13
+088F  20 D2 FF   6               jsr CHROUT
+0892  A9 00      2               lda #$00
+0894  8D 3C 03   4               sta byte_count
+0897  8D 3D 03   4               sta col_count
+089A  20 B7 FF   6               jsr READST
+089D  F0 0F      2/3/4           beq __local10_read_one
+089F  48         3               pha
+08A0  A9 88      2               lda #<stopped_msg
+08A2  A0 09      2               ldy #>stopped_msg
+08A4  20 10 08   6               jsr print_msg
+08A7  68         4               pla
+08A8  20 F3 08   6               jsr print_hex_byte
+08AB  4C DE 08   3               jmp read_done
+08AE  20 CF FF   6               jsr CHRIN
+08B1  20 F3 08   6               jsr print_hex_byte
+08B4  A9 20      2               lda #$20
+08B6  20 D2 FF   6               jsr CHROUT
+08B9  EE 3D 03   6               inc col_count
+08BC  AD 3D 03   4               lda col_count
+08BF  C9 10      2               cmp #16
+08C1  D0 0A      2/3/4           bne __local10_no_newline
+08C3  A9 00      2               lda #$00
+08C5  8D 3D 03   4               sta col_count
+08C8  A9 0D      2               lda #13
+08CA  20 D2 FF   6               jsr CHROUT
+08CD  EE 3C 03   6               inc byte_count
+08D0  AD 3C 03   4               lda byte_count
+08D3  C9 80      2               cmp #128
+08D5  D0 C3      2/3/4           bne read_loop
+08D7  A9 A5      2               lda #<stopped_128_msg
+08D9  A0 09      2               ldy #>stopped_128_msg
+08DB  20 10 08   6               jsr print_msg
+08DE  20 CC FF   6               jsr CLRCHN
+08E1  A9 01      2               lda #$01
+08E3  20 C3 FF   6               jsr CLOSE
+08E6  A9 0D      2               lda #13
+08E8  20 D2 FF   6               jsr CHROUT
+08EB  A9 C4      2               lda #<done_msg
+08ED  A0 09      2               ldy #>done_msg
+08EF  20 10 08   6               jsr print_msg
+08F2  60         6               rts
+08F3  48         3               pha
+08F4  4A         2               lsr a
+08F5  4A         2               lsr a
+08F6  4A         2               lsr a
+08F7  4A         2               lsr a
+08F8  20 02 09   6               jsr print_hex_nibble
+08FB  68         4               pla
+08FC  29 0F      2               and #$0f
+08FE  20 02 09   6               jsr print_hex_nibble
+0901  60         6               rts
+0902  C9 0A      2               cmp #10
+0904  90 03      2/3/4           bcc __local16_digit
+0906  18         2               clc
+0907  69 07      2               adc #$07
+0909  18         2               clc
+090A  69 30      2               adc #$30
+090C  20 D2 FF   6               jsr CHROUT
+090F  60         6               rts
+
+Symbol table:
+  BITMAP               = $2000
+  CHKIN                = $FFC6
+  CHRIN                = $FFCF
+  CHROUT               = $FFD2
+  CIA1_DDRA            = $DC02
+  CIA1_DDRB            = $DC03
+  CIA1_PRA             = $DC00
+  CIA1_PRB             = $DC01
+  CLOSE                = $FFC3
+  CLRCHN               = $FFCC
+  OPEN                 = $FFC0
+  READST               = $FFB7
+  SCREEN               = $0400
+  SETLFS               = $FFBA
+  SETNAM               = $FFBD
+  SID_VOLUME           = $D418
+  SPRITE0_COLOR        = $D027
+  SPRITE0_X            = $D000
+  SPRITE0_Y            = $D001
+  SPRITE_ENABLE        = $D015
+  SPRITE_PTR0          = $07F8
+  SPRITE_X_EXPAND      = $D01D
+  SPRITE_X_MSB         = $D010
+  SPRITE_Y_EXPAND      = $D017
+  VIC_BG0              = $D021
+  VIC_BORDER           = $D020
+  VIC_CTRL1            = $D011
+  VIC_CTRL2            = $D016
+  VIC_MEMPTRS          = $D018
+  VIC_RASTER           = $D012
+  VOICE1_AD            = $D405
+  VOICE1_CTRL          = $D404
+  VOICE1_FREQ_HI       = $D401
+  VOICE1_FREQ_LO       = $D400
+  VOICE1_SR            = $D406
+  VOICE2_AD            = $D40C
+  VOICE2_CTRL          = $D40B
+  VOICE2_FREQ_HI       = $D408
+  VOICE2_FREQ_LO       = $D407
+  VOICE2_SR            = $D40D
+  VOICE3_AD            = $D413
+  VOICE3_CTRL          = $D412
+  VOICE3_FREQ_HI       = $D40F
+  VOICE3_FREQ_LO       = $D40E
+  VOICE3_SR            = $D414
+  __local10_no_newline = $08CD
+  __local10_read_one   = $08AE
+  __local16_digit      = $0909
+  __local1_done        = $0820
+  __local1_loop        = $0816
+  __local2_loop        = $0827
+  __local2_no          = $0834
+  __local2_yes         = $0837
+  byte_count           = $033C
+  cmp_ptr              = $00FD
+  col_count            = $033D
+  dirname              = $09CA
+  done_msg             = $09C4
+  first_readst_msg     = $096E
+  kw_ptr               = $0002
+  open_failed_msg      = $0947
+  open_ok              = $086F
+  open_ok_msg          = $092A
+  print_hex_byte       = $08F3
+  print_hex_nibble     = $0902
+  print_msg            = $0810
+  read_done            = $08DE
+  read_loop            = $089A
+  start                = $083A
+  stopped_128_msg      = $09A5
+  stopped_msg          = $0988
+  str_equal            = $0821
+  str_ptr              = $00FB
+  title_msg            = $0910
