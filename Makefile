@@ -43,7 +43,7 @@ VICE_C1541 = /Applications/vice-arm64-gtk3-3.10/bin/c1541
 
 
 # Make
-all: $(TARGET) $(SINGLE_TARGET) $(EXA_PRG)
+all: $(TARGET) $(SINGLE_TARGET)
 
 bin: $(TARGET)
 single: $(SINGLE_TARGET)

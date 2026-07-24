@@ -1,37 +1,63 @@
-; editor.asm - a simple text editor with load, save, and directory
-; listing.
+; editor.asm - a simple text editor with new/save/save-as/delete/load
+; and directory listing, and a document that can scroll well beyond
+; one screen (see DOC_BUF's own comment, further down, for how).
 ;
 ; The editable area is rows 0-23 (was all 25 rows in this file's first
 ; version) -- row 24 is now a status/prompt line, showing either brief
-; help text, a "SAVE AS:"/"LOAD:" filename prompt, or a one-line result
-; message ("SAVED.", "FILE NOT FOUND", and so on) after an operation.
+; help text, a "SAVE AS: " filename prompt, or a one-line result
+; message ("SAVED.", "FILE NOT FOUND.", and so on) after an operation.
 ; This is a deliberate change from the first version, not an
 ; afterthought: load/save/directory are inherently UI-having
-; operations, and there's nowhere else on a one-screen editor to put
-; that UI.
+; operations, and there's nowhere else on a one-screen-at-a-time
+; editor to put that UI, even one whose document isn't actually
+; limited to a single screen anymore.
 ;
 ; Controls:
 ;   any typable key       insert it at the cursor, advance right
 ;   RETURN                 move to the start of the next line
 ;   DEL                    erase the character behind the cursor
 ;   cursor up/down/left/right   move without changing anything
+;   HOME/CLR                page the viewport up/down a full screen
+;                              (24 rows) at once -- not a cursor-key
+;                              combination; see handle_page_down's own
+;                              comment, further down, for why none of
+;                              CTRL/SHIFT/C=+cursor could mean that
+;
+; Typing, RETURN, DEL, or any cursor key/page key shows the cursor's
+; current row number ("ROW n") on the status line -- see
+; show_row_status, further down.
+;
 ;   F1                     quit
 ;   F2                      new file -- clears the document, no
 ;                              confirmation prompt (matches F5/load,
 ;                              which already overwrites without asking)
-;   F3                      save (prompts for a filename)
-;   F4                      delete a file (prompts for a filename,
-;                              then asks Y/N to confirm -- unlike F2/F5,
-;                              since there's no "just reload it" way
-;                              back from deleting a file on disk)
-;   F5                      load (prompts for a filename)
+;   F3                      save -- reuses the document's current
+;                              filename (already loaded, or already
+;                              saved once this session) if it has one,
+;                              otherwise prompts for one, same as F6
+;   F4                      delete a file -- shows a list of what's
+;                              actually on disk to pick from (cursor to
+;                              move, RETURN to pick), then asks Y/N to
+;                              confirm -- unlike F2/F5/F3-reusing-a-
+;                              name, since there's no "just reload it"
+;                              way back from deleting a file on disk
+;   F5                      load -- shows the same kind of list F4
+;                              does, rather than a filename typed blind
+;   F6                      save as -- always prompts for a filename,
+;                              even if the document already has one
+;                              (unlike plain F3); the deliberate way to
+;                              save under a different name, or to name
+;                              a document for the first time
 ;   F7                      show the disk directory
+;   F8                      show the bottom-row F-key assignments as a
+;                              quick reference on the status line
 ;
-; Any of F3/F4/F5's own filename prompts (and F4's Y/N confirmation)
-; can be backed out of without side effects: pressing RETURN with
-; nothing typed cancels, and so does RUN/STOP -- the C64 keyboard has
-; no key labeled ESC, and RUN/STOP (also reachable as Ctrl+C) is the
-; conventional C64 equivalent for "abort this."
+; F3/F6's own filename prompt (typed, not the F4/F5 picker), and F4's
+; own picker and Y/N confirmation, can all be backed out of without
+; side effects: pressing RETURN with nothing typed at F3/F6's prompt
+; cancels, and so does RUN/STOP anywhere in any of these -- the C64
+; keyboard has no key labeled ESC, and RUN/STOP (also reachable as
+; Ctrl+C) is the conventional C64 equivalent for "abort this."
 ;
 ; Saving/loading uses SEQ (sequential) files -- the natural fit for
 ; plain text, unlike PRG, which implies a 2-byte load-address header
@@ -53,10 +79,17 @@
 ; avoiding the buggy shortcut, not a bug in this approach itself, and
 ; the one every serious CBM DOS reference recommends over "@" anyway).
 ;
-; Screen memory is still the one and only copy of the document (see
-; this file's own original header note on why) -- save converts each
-; screen code back to PETSCII while writing; load does the reverse
-; while reading, filling any row shorter than 40 columns with spaces.
+; DOC_BUF (see that buffer's own declaration, further down) is the
+; document's single source of truth, not screen memory -- save reads
+; straight from it, and load fills it directly, with no PETSCII/
+; screen-code conversion needed on either side, since DOC_BUF already
+; stores plain PETSCII throughout, matching filename_buf's own
+; convention. A file shorter than DOC_BUF leaves the rest of the
+; document blank, exactly like starting a new one; save itself trims
+; the other direction, scanning backward to skip writing any trailing
+; rows that are entirely blank, so a short document doesn't take
+; anywhere near as long on a real drive as writing the full, fixed
+; buffer unconditionally every time would.
 ;
 ; The KERNAL calls used here (SETLFS, SETNAM, OPEN, CHKIN, CHKOUT,
 ; CLRCHN, CLOSE, READST, and CHRIN/CHROUT's file-redirected behavior)
@@ -111,12 +144,31 @@ screen_ptr = $f7
 ; each other.
 msg_ptr = $f9
 
-; copy_ptr: a third zero-page pointer, used only while copying the
-; whole screen to or from a file (write_screen_to_file/
-; read_file_to_screen) or to/from the $C000 backup buffer
-; (save_screen_backup/restore_screen_backup) -- again kept separate
-; from screen_ptr/msg_ptr so none of the three ever collide.
-copy_ptr = $f5
+; copy_ptr: a third zero-page pointer, used two ways that never
+; overlap in time, so sharing one address between them is safe: while
+; copying the whole document to or from a file (write_screen_to_file/
+; read_file_to_screen), and -- reused as "doc_ptr" via
+; compute_doc_ptr, further down -- while insert_char/handle_delete/
+; handle_return update DOC_BUF at the cursor's own current position
+; during ordinary typing, which never happens while a file operation
+; is also in progress. Kept separate from screen_ptr/msg_ptr either
+; way, so none of the three ever collide.
+;
+; $03/$04, not $F5/$F6 (where an earlier version of this file placed
+; it): real hardware's own KERNAL keyboard-scan IRQ actively clobbers
+; $F3-$F6 -- this project's own past experience already identified
+; that range as unsafe for exactly this purpose, and DOC_BUF's own
+; introduction made this a real, reproducible bug rather than a
+; theoretical one, since copy_ptr is now also used by loops
+; (blank_doc_buf, render_viewport) long enough to run for multiple
+; keyboard-scan IRQs in a row, giving many chances for it to actually
+; get hit mid-loop -- confirmed directly, not just reasoned about, by
+; running this file's own test suite with mini6502.py's zero-page
+; poisoning simulation turned on (the default;
+; simulate_zp_poisoning=True) rather than off. $02-$06 is free of that
+; specific interference, and only $02 of it (kw_ptr/handler_vec) was
+; already spoken for.
+copy_ptr = $03
 
 ; cursor_x (0-39), cursor_y (0-23) -- plain RAM, not zero page, since
 ; nothing here needs indirect addressing on them specifically.
@@ -165,19 +217,122 @@ prompt_scratch = $0365
 scratch_cmd_buf = $0366    ; 20 bytes: $0366-$0379
 scratch_cmd_len = $037a
 
-; A 1000-byte scratch copy of screen memory, used only while the
-; directory listing (F7) is on screen -- see this file's own header
-; comment for why. $C000-$C3E7 is ordinary free RAM between BASIC ROM
-; ($A000-$BFFF) and the VIC/SID/CIA I/O area ($D000+), unused by this
-; program otherwise since it's plain machine code, not a BASIC program.
-SCREEN_BACKUP = $C000
+; pick_file's own state -- file_count is how many real files
+; parse_directory_filenames actually found (capped at MAX_FILES),
+; file_selection is the currently-highlighted row's index into
+; file_list_buf (see that buffer's own comment, further down).
+file_count     = $037b
+file_selection = $037c
 
-MAX_ROW = 23     ; last editable row -- row 24 is the status line
+; The document's own "current" filename -- set after a successful
+; load or save, cleared by F2 (new). current_filename_len == 0 means
+; "no name yet" (a fresh, never-saved document), which is what makes
+; F3 (save) prompt for one; a nonzero length means F3 can save
+; straight back to that name without asking again, the same way most
+; editors' plain "save" differs from "save as." F6 (save as) always
+; prompts regardless, and updates this to whatever name was just typed
+; -- see do_save/do_save_as/perform_save, further down.
+current_filename_buf = $037d    ; 16 bytes: $037d-$038c
+current_filename_len = $038d
+
+; doc_top_row: which row of DOC_BUF (0-based, 0 to DOC_ROWS-1) is
+; currently shown at the top of the visible 24-row window. The
+; document's true row for a given on-screen cursor_y is always
+; doc_top_row + cursor_y -- see compute_doc_ptr, further down, which
+; is the only place that arithmetic actually happens.
+doc_top_row = $038e
+
+; compute_doc_ptr's own scratch: mult40_row holds the row value being
+; multiplied by 40 (DOC_BUF's own row width) while it's worked on;
+; mult40_temp_lo/hi holds row*8 temporarily, needed again after
+; computing row*32, since 40 = 32 + 8 and the two partial shifts can't
+; both live in the same 16-bit accumulator at once; doc_offset_lo/hi
+; is that accumulator, and the final result.
+mult40_row      = $038f
+mult40_temp_lo  = $0390
+mult40_temp_hi  = $0391
+doc_offset_lo   = $0392
+doc_offset_hi   = $0393
+
+; insert_char's own scratch: the raw PETSCII byte just typed, held
+; here across compute_doc_ptr (which clobbers A), since it's needed
+; twice -- once written as-is into DOC_BUF, once converted to a screen
+; code for the visible copy.
+insert_char_scratch = $0394
+
+; compute_doc_save_row_count's own state -- doc_scan_row is the row
+; currently being checked while scanning backward for trailing blank
+; ones; doc_save_row_count is the result, a 1-based count of how many
+; rows from the start actually need writing to disk.
+doc_scan_row       = $0395
+doc_save_row_count = $0396
+
+; show_row_status's own scratch: row_num_value holds the (1-based)
+; row number while its decimal digits are being extracted;
+; row_hundreds_digit/row_tens_digit/row_ones_digit hold those digits
+; once found (DOC_ROWS is 200, so at most 3 digits, and the value
+; always fits in a single byte). row_status_buf is where "ROW " plus
+; those digits gets assembled before handing it to print_status --
+; up to 4 + 3 + 1 (null) = 8 bytes.
+row_num_value        = $0397
+row_hundreds_digit    = $0398
+row_tens_digit         = $0399
+row_ones_digit          = $039a
+row_status_buf           = $039b    ; 8 bytes: $039b-$03a2
+
+; file_list_buf holds up to MAX_FILES filenames (as PETSCII, matching
+; filename_buf's own convention -- not screen codes), one 16-byte,
+; space-padded slot per file, filled in by parse_directory_filenames
+; and read back by display_file_list/pick_file. 15*16 = 240 bytes.
+; $C000-$C4EF is ordinary free RAM between BASIC ROM ($A000-$BFFF) and
+; the VIC/SID/CIA I/O area ($D000+), unused by this program otherwise
+; since it's plain machine code, not a BASIC program. (An earlier
+; version of this file also kept a 1000-byte screen backup here,
+; SCREEN_BACKUP, used only while the directory listing or file picker
+; was on screen -- removed once DOC_BUF below made it unnecessary:
+; render_viewport can always correctly reconstruct whatever was on
+; screen before, from DOC_BUF and doc_top_row, which a literal
+; byte-for-byte backup existed only to approximate in the first
+; place.)
+;
+; MAX_FILES is 15, not a rounder-looking number, for a real reason:
+; each slot is found by multiplying its index by 16 (MULT_16, a plain
+; power-of-two shift), and that multiply is only correct up to index
+; 15 (15*16 = 240, fits in a byte) -- index 16 (16*16 = 256) would
+; silently wrap to 0 in an 8-bit register. 15 files is also
+; comfortably within the roughly 22 rows available for the list once
+; a couple of rows go to pick_file's own title and instructions.
+MAX_FILES = 15
+FILE_LIST_BUF = $C400      ; 240 bytes: $C400-$C4EF
+
+; DOC_BUF: the document's own, single source of truth -- 200 rows of
+; 40 columns each, PETSCII (not screen codes; matching filename_buf's
+; own convention, and unlike screen memory itself, which is
+; screen-code by hardware necessity). Screen memory is now only ever
+; a rendered 24-row *view* onto some contiguous slice of this,
+; starting at doc_top_row -- see render_viewport, further down. This
+; is the change that makes scrolling possible at all: the previous
+; version of this file used screen memory itself as the one and only
+; copy of the document, which by definition can never hold more than
+; one screen's worth of it.
+;
+; 200 rows (~8x a single screen) at $2000 is a deliberately generous,
+; but still fixed and bounded, choice -- placed comfortably above this
+; program's own code (which starts at $0801 and is nowhere near this
+; large) and well below BASIC ROM ($A000), in what is otherwise
+; entirely free RAM on a machine-code program like this one.
+DOC_ROWS = 200
+DOC_BUF = $2000            ; 8000 bytes: $2000-$3E7F
+
+MAX_ROW = 23     ; last editable (screen) row -- row 24 is the status
+                     ; line, and this is a screen-relative bound, not
+                     ; a document one; DOC_ROWS is that bound
 STATUS_ROW_ADDR = $07C0   ; $0400 + 24*40
 
         .basic start
 
         .include "lib/text.inc"
+        .include "lib/math.inc"
 
 start:
         CLS
@@ -186,10 +341,26 @@ start:
         PRINT continue_msg
         jsr wait_for_key
 
+        jsr blank_doc_buf          ; DOC_BUF is ordinary RAM -- real
+                                       ; hardware doesn't guarantee it's
+                                       ; already blank at power-on, any
+                                       ; more than it guarantees
+                                       ; current_filename_len is zero
+                                       ; (see that own explicit reset,
+                                       ; just below, for the identical
+                                       ; reasoning)
         CLS
         lda #$00
         sta cursor_x
         sta cursor_y
+        sta doc_top_row
+        sta current_filename_len   ; must be explicit -- real hardware
+                                       ; doesn't guarantee this RAM is
+                                       ; zero at power-on, and a stray
+                                       ; nonzero value here would make
+                                       ; F3 wrongly believe the document
+                                       ; already had a name
+        jsr render_viewport
         jsr recompute_screen_ptr
         jsr show_help_status
 
@@ -203,17 +374,25 @@ wait_key:
         pla
 
         cmp #$85                ; F1
-        beq @do_quit
+        bne @not_quit
+        jmp do_quit
+@not_quit:
         cmp #$89                ; F2
-        beq @do_new
+        bne @not_new
+        jmp do_new
+@not_new:
         cmp #$86                ; F3
         beq @do_save
         cmp #$8a                ; F4
         beq @do_delete_file
         cmp #$87                ; F5
         beq @do_load
+        cmp #$8b                ; F6
+        beq @do_save_as
         cmp #$88                ; F7
         beq @do_directory
+        cmp #$8c                ; F8
+        beq @do_help
         cmp #$0d                ; RETURN
         beq @do_return
         cmp #$14                ; DEL
@@ -226,43 +405,71 @@ wait_key:
         beq @do_right
         cmp #$9d                ; cursor left
         beq @do_left
+        cmp #$13                ; HOME -- page up (see handle_page_up's
+        beq @do_page_up            ; own comment for why this key, not
+                                       ; a cursor-key combination)
+        cmp #$93                ; CLR / SHIFT+HOME -- page down
+        beq @do_page_down
         cmp #$20
         bcc main_loop            ; < $20: an unhandled control code -- ignore
         cmp #$60
         bcs main_loop            ; >= $60: not in the range this editor accepts -- ignore
         jsr insert_char
-        jmp main_loop
+        bcc @update_row_status
+        jmp main_loop            ; document-full message was just
+                                     ; shown -- leave it, don't
+                                     ; immediately overwrite it
 
 @do_return:
         jsr handle_return
-        jmp main_loop
+        bcc @update_row_status
+        jmp main_loop            ; same as above
 @do_delete:
         jsr handle_delete
-        jmp main_loop
+        jmp @update_row_status
 @do_down:
         jsr move_cursor_down
-        jmp main_loop
+        jmp @update_row_status
 @do_up:
         jsr move_cursor_up
-        jmp main_loop
+        jmp @update_row_status
 @do_right:
         jsr move_cursor_right
-        jmp main_loop
+        jmp @update_row_status
 @do_left:
         jsr move_cursor_left
+        jmp @update_row_status
+@do_page_up:
+        jsr handle_page_up
+        jmp @update_row_status
+@do_page_down:
+        jsr handle_page_down
+        jmp @update_row_status
+
+; Shared by every handler above (typing, RETURN, DEL, all four cursor
+; keys, and page up/down) -- shows the cursor's current row number on
+; the status line, replacing whatever was there before (matching how
+; every other status update in this file already works: the most
+; recent one simply wins). Deliberately not shared with the F-key
+; handlers below, whose own status messages ("SAVED.", "CANCELLED.",
+; and so on) are the more useful thing to leave on screen after one of
+; those, not a row number.
+@update_row_status:
+        jsr show_row_status
         jmp main_loop
-@do_quit:
-        jmp do_quit
-@do_new:
-        jmp do_new
+
 @do_save:
         jmp do_save
 @do_delete_file:
         jmp do_delete
 @do_load:
         jmp do_load
+@do_save_as:
+        jmp do_save_as
 @do_directory:
         jmp do_directory
+@do_help:
+        jmp do_help
 
 do_quit:
         CLS
@@ -290,6 +497,135 @@ recompute_screen_ptr:
         sta screen_ptr+1
         rts
 
+; Computes doc_offset_lo/hi := A * 40 (DOC_BUF's own row width). 40 =
+; 32 + 8, so this shifts the row value left 3 times (row*8, saved
+; aside), then 2 more times from the original row value again (row*32,
+; since continuing the shift from row*8 would give row*32 too, but
+; starting fresh from mult40_row keeps each partial result easy to
+; check independently against 8*row and 32*row by hand), then adds the
+; two partial results together. A plain 16-bit shift is needed at all
+; -- unlike lib/math.inc's own MULT_N macros, which only ever produce
+; an 8-bit result -- because a row index up to 199 times 40 can reach
+; 7960, well past what a single byte holds.
+compute_row_offset_40:
+        sta mult40_row
+
+        lda #$00
+        sta doc_offset_hi
+        lda mult40_row
+        sta doc_offset_lo
+        ldx #$03
+@shift_by_8:
+        asl doc_offset_lo
+        rol doc_offset_hi
+        dex
+        bne @shift_by_8
+        lda doc_offset_lo
+        sta mult40_temp_lo
+        lda doc_offset_hi
+        sta mult40_temp_hi
+
+        lda #$00
+        sta doc_offset_hi
+        lda mult40_row
+        sta doc_offset_lo
+        ldx #$05
+@shift_by_32:
+        asl doc_offset_lo
+        rol doc_offset_hi
+        dex
+        bne @shift_by_32
+
+        clc
+        lda doc_offset_lo
+        adc mult40_temp_lo
+        sta doc_offset_lo
+        lda doc_offset_hi
+        adc mult40_temp_hi
+        sta doc_offset_hi
+        rts
+
+; Points copy_ptr (reused here as "doc_ptr" -- see that zero-page
+; declaration's own comment for why sharing it is safe) at DOC_BUF's
+; own copy of the cursor's current cell: row (doc_top_row + cursor_y),
+; column cursor_x. Called by insert_char/handle_delete/handle_return
+; wherever they'd otherwise only have touched screen memory, so
+; DOC_BUF stays the actual source of truth and the screen stays merely
+; a rendering of it.
+compute_doc_ptr:
+        lda doc_top_row
+        clc
+        adc cursor_y
+        jsr compute_row_offset_40
+
+        clc
+        lda doc_offset_lo
+        adc #<DOC_BUF
+        sta copy_ptr
+        lda doc_offset_hi
+        adc #>DOC_BUF
+        sta copy_ptr+1
+
+        lda cursor_x
+        clc
+        adc copy_ptr
+        sta copy_ptr
+        lda copy_ptr+1
+        adc #$00
+        sta copy_ptr+1
+        rts
+
+; Redraws all 24 visible rows from DOC_BUF, starting at doc_top_row --
+; the only place the screen is ever filled from the document in bulk,
+; used both after scrolling (doc_top_row changed) and in place of the
+; old save_screen_backup/restore_screen_backup pair (returning from F7
+; or the F4/F5 picker just means showing the same doc_top_row again,
+; which this reconstructs correctly on its own, rather than needing a
+; literal byte-for-byte copy of what was there before).
+render_viewport:
+        lda doc_top_row
+        jsr compute_row_offset_40
+        lda doc_offset_lo
+        clc
+        adc #<DOC_BUF
+        sta copy_ptr
+        lda doc_offset_hi
+        adc #>DOC_BUF
+        sta copy_ptr+1
+
+        ldx #$00
+@row_loop:
+        lda screen_row_lo,x
+        sta msg_ptr
+        lda screen_row_hi,x
+        sta msg_ptr+1
+
+        ldy #$00
+@col_loop:
+        lda (copy_ptr),y
+        cmp #$40
+        bcc @char_unchanged
+        sec
+        sbc #$40
+@char_unchanged:
+        sta (msg_ptr),y
+        iny
+        cpy #40
+        bne @col_loop
+
+        lda copy_ptr
+        clc
+        adc #40
+        sta copy_ptr
+        lda copy_ptr+1
+        adc #$00
+        sta copy_ptr+1
+
+        inx
+        cpx #24
+        bne @row_loop
+        rts
+
 show_cursor:
         ldy #$00
         lda (screen_ptr),y
@@ -308,43 +644,227 @@ hide_cursor:
 ; filters everything else out before calling this). Converts it to
 ; the matching screen code (see this file's own header comment for
 ; the two-case rule) and writes it at the cursor, then advances right.
-insert_char:
-        cmp #$40
-        bcc @unchanged
+; Writes the character, then advances -- except at the single
+; absolute last cell (row MAX_ROW, column 39), where there's nowhere
+; left for move_cursor_right to advance to. Without this check, every
+; further keypress there would silently keep overwriting that same
+; cell, discarding whatever was just typed, with no indication
+; anything unusual was happening; a person typing normally would have
+; no way to tell the document had quietly run out of room. Checked
+; before writing rather than after: move_cursor_right's own "stay put"
+; case only fires once the cursor is already sitting on that exact
+; cell, which means the previous character just wrote successfully --
+; showing the message and returning here skips that call entirely,
+; since it would only re-derive the same "nowhere to go" result.
+; Scrolls the viewport down/up by one document row and redraws, if
+; there's actually room to -- shared by every place that needs to
+; move past the visible screen's own top or bottom edge (typing or
+; RETURN wrapping past the last visible row, and all four cursor
+; keys). Returns with carry clear on a successful scroll (doc_top_row
+; changed, screen redrawn) or carry set if there's nowhere further to
+; go (already showing DOC_BUF's own first or last row) -- the caller
+; is responsible for cursor_x/cursor_y and the final
+; recompute_screen_ptr either way, since what those should end up as
+; differs by caller (a wrapped RETURN resets cursor_x to 0; a plain
+; down-arrow doesn't touch it at all).
+try_scroll_down:
+        lda doc_top_row
+        cmp #DOC_ROWS - 24
+        bcs @cant_scroll
+        inc doc_top_row
+        jsr render_viewport
+        clc
+        rts
+@cant_scroll:
         sec
-        sbc #$40
-@unchanged:
-        ldy #$00
-        sta (screen_ptr),y
-        jsr move_cursor_right
         rts
 
-; Moves to the start of the next line, unless already on the last
-; editable row, in which case only the column resets -- there's no
-; scrolling in this version (see this file's own header comment).
-handle_return:
-        lda #$00
-        sta cursor_x
-        lda cursor_y
-        cmp #MAX_ROW
-        beq @recompute
-        inc cursor_y
-@recompute:
+try_scroll_up:
+        lda doc_top_row
+        beq @cant_scroll
+        dec doc_top_row
+        jsr render_viewport
+        clc
+        rts
+@cant_scroll:
+        sec
+        rts
+
+; HOME/CLR (page up/down): moves the viewport by a full screen (24
+; rows) at once, rather than one row at a time. Not a cursor-key
+; combination -- confirmed directly (not assumed) that none of the
+; usual modifiers work for that here: CTRL+cursor produces nothing at
+; all in the keyboard buffer (the KERNAL doesn't decode that
+; combination for cursor keys), and both SHIFT+cursor and C=+cursor
+; produce the exact same code as the opposite plain cursor key (e.g.
+; SHIFT+down is indistinguishable from plain up), so neither can mean
+; anything different from what the plain cursor keys already do. HOME
+; and CLR are a genuinely distinct, otherwise-unused key pair this
+; editor doesn't already assign any other meaning to -- the same kind
+; of repurposing RUN/STOP already gets for "cancel" elsewhere in this
+; file, rather than its usual KERNAL meaning.
+;
+; cursor_x/cursor_y themselves don't change -- only doc_top_row does,
+; capped at the same [0, DOC_ROWS-24] range try_scroll_down/
+; try_scroll_up already enforce one row at a time, just moved by 24 at
+; once here. Landing anywhere past DOC_BUF's own last visible window,
+; or before its first, is capped to that boundary rather than
+; overshooting it.
+handle_page_down:
+        lda doc_top_row
+        clc
+        adc #24
+        cmp #DOC_ROWS - 24 + 1
+        bcc @use_new_value
+        lda #DOC_ROWS - 24
+@use_new_value:
+        sta doc_top_row
+        jsr render_viewport
         jmp recompute_screen_ptr
 
+handle_page_up:
+        lda doc_top_row
+        sec
+        sbc #24
+        bcs @use_new_value
+        lda #$00
+@use_new_value:
+        sta doc_top_row
+        jsr render_viewport
+        jmp recompute_screen_ptr
+
+; Writes the typed character into DOC_BUF (the document's own source
+; of truth) and its screen-code form onto the visible screen, then
+; advances -- except at the single absolute last cell of the entire
+; document (DOC_BUF's own last row, column 39), where there's nowhere
+; left for move_cursor_right to advance or scroll to. Without this
+; check, every further keypress there would silently keep overwriting
+; that same cell, discarding whatever was just typed, with no
+; indication anything unusual was happening.
+;
+; Returns with carry set if the document-full message was just shown
+; (the caller should leave it on screen, not immediately overwrite it
+; with a row number), carry clear otherwise.
+insert_char:
+        sta insert_char_scratch
+
+        lda cursor_x
+        cmp #39
+        bne @room_to_advance
+        lda doc_top_row
+        clc
+        adc cursor_y
+        cmp #DOC_ROWS - 1
+        bne @room_to_advance
+
+        ; the absolute last cell -- still write the character, but
+        ; skip move_cursor_right entirely, since it would only
+        ; re-derive the same "nowhere to go" result
+        jsr compute_doc_ptr
+        lda insert_char_scratch
+        ldy #$00
+        sta (copy_ptr),y
+
+        lda insert_char_scratch
+        cmp #$40
+        bcc @screen_code_ready1
+        sec
+        sbc #$40
+@screen_code_ready1:
+        ldy #$00
+        sta (screen_ptr),y
+
+        lda #<document_full_msg
+        sta msg_ptr
+        lda #>document_full_msg
+        sta msg_ptr+1
+        jsr print_status
+        sec
+        rts
+
+@room_to_advance:
+        jsr compute_doc_ptr
+        lda insert_char_scratch
+        ldy #$00
+        sta (copy_ptr),y
+
+        lda insert_char_scratch
+        cmp #$40
+        bcc @screen_code_ready2
+        sec
+        sbc #$40
+@screen_code_ready2:
+        ldy #$00
+        sta (screen_ptr),y
+
+        jsr move_cursor_right
+        clc
+        rts
+
+; Moves to the start of the next line -- scrolling the viewport down
+; first if RETURN was pressed on the bottom visible row and there's
+; more document below, the same as typing past column 39 there would.
+; Only shows "no room left" (the same message insert_char's own
+; absolute-last-cell case shows) when the viewport is already showing
+; DOC_BUF's own very last row and truly can't scroll any further.
+;
+; Returns with carry set if that message was just shown (the caller
+; should leave it on screen, not immediately overwrite it with a row
+; number), carry clear otherwise -- the same convention insert_char
+; uses.
+handle_return:
+        lda cursor_y
+        cmp #MAX_ROW
+        bne @same_viewport
+
+        jsr try_scroll_down
+        bcs @cant_advance
+        lda #$00
+        sta cursor_x
+        jsr recompute_screen_ptr
+        clc
+        rts
+
+@cant_advance:
+        lda #$00
+        sta cursor_x
+        lda #<document_full_msg
+        sta msg_ptr
+        lda #>document_full_msg
+        sta msg_ptr+1
+        jsr print_status
+        jsr recompute_screen_ptr
+        sec
+        rts
+
+@same_viewport:
+        lda #$00
+        sta cursor_x
+        inc cursor_y
+        jsr recompute_screen_ptr
+        clc
+        rts
+
 ; Erases the character behind the cursor (wrapping to the end of the
-; previous line if the cursor is at column 0) -- but only if there's
-; actually something behind it; at the very first cell (0,0), DEL
-; does nothing, matching ordinary backspace behavior rather than
-; erasing the character the cursor happens to be sitting on.
+; previous line if the cursor is at column 0, scrolling the viewport
+; up first if that previous line isn't currently visible) -- but only
+; if there's actually something behind it; at DOC_BUF's own very
+; first cell, DEL does nothing, matching ordinary backspace behavior
+; rather than erasing the character the cursor happens to be sitting
+; on.
 handle_delete:
         lda cursor_x
         bne @can_delete
         lda cursor_y
+        bne @can_delete
+        lda doc_top_row
         beq @nothing_to_delete
 @can_delete:
         jsr move_cursor_left
+        jsr compute_doc_ptr
         lda #$20
+        ldy #$00
+        sta (copy_ptr),y
         ldy #$00
         sta (screen_ptr),y
 @nothing_to_delete:
@@ -352,7 +872,10 @@ handle_delete:
 
 ; Each move_cursor_* routine leaves screen_ptr correctly pointing at
 ; the (possibly unchanged) cursor position either way -- no separate
-; recompute needed afterward.
+; recompute needed afterward, except right after a scroll, which
+; render_viewport doesn't itself touch screen_ptr for (see
+; try_scroll_down/try_scroll_up's own comment for why that's left to
+; each caller).
 move_cursor_right:
         lda cursor_x
         cmp #39
@@ -360,7 +883,16 @@ move_cursor_right:
         lda cursor_y
         cmp #MAX_ROW
         bne @next_row
-        rts                      ; already at the very last cell -- stay put
+
+        jsr try_scroll_down
+        bcs @stay_put              ; nowhere further to go -- the
+                                       ; absolute last cell
+        lda #$00
+        sta cursor_x
+        jmp recompute_screen_ptr
+@stay_put:
+        rts
+
 @next_row:
         lda #$00
         sta cursor_x
@@ -374,13 +906,22 @@ move_cursor_left:
         lda cursor_x
         bne @same_row
         lda cursor_y
-        beq @at_origin           ; already at (0,0) -- stay put
-        dec cursor_y
+        bne @prev_row
+
+        jsr try_scroll_up
+        bcs @at_origin              ; nowhere further to go -- DOC_BUF's
+                                        ; own very first cell
         lda #39
         sta cursor_x
         jmp recompute_screen_ptr
 @at_origin:
         rts
+
+@prev_row:
+        dec cursor_y
+        lda #39
+        sta cursor_x
+        jmp recompute_screen_ptr
 @same_row:
         dec cursor_x
         jmp recompute_screen_ptr
@@ -388,38 +929,56 @@ move_cursor_left:
 move_cursor_down:
         lda cursor_y
         cmp #MAX_ROW
-        beq @no_move
-        inc cursor_y
+        bne @same_viewport
+        jsr try_scroll_down
+        bcs @no_move
         jmp recompute_screen_ptr
 @no_move:
         rts
+@same_viewport:
+        inc cursor_y
+        jmp recompute_screen_ptr
 
 move_cursor_up:
         lda cursor_y
-        beq @no_move
-        dec cursor_y
+        bne @same_viewport
+        jsr try_scroll_up
+        bcs @no_move
         jmp recompute_screen_ptr
 @no_move:
         rts
+@same_viewport:
+        dec cursor_y
+        jmp recompute_screen_ptr
 
 title_msg:
         .text "SIMPLE TEXT EDITOR", 13, 0
 instructions_msg:
         .text "CURSOR KEYS TO MOVE, DEL TO ERASE.", 13
+        .text "THE DOCUMENT SCROLLS -- KEEP GOING PAST", 13
+        .text "THE BOTTOM OR TOP OF THE SCREEN.", 13
+        .text "HOME/CLR PAGE UP/DOWN A FULL SCREEN.", 13
         .text "F1=QUIT F2=NEW F3=SAVE F4=DELETE", 13
-        .text "F5=LOAD F7=DIRECTORY", 13, 0
+        .text "F5=LOAD F6=SAVE AS F7=DIRECTORY", 13
+        .text "F8=HELP (SHOWS THIS LIST AGAIN)", 13, 0
 continue_msg:
         .text "PRESS ANY KEY TO START...", 13, 0
 bye_msg:
         .text "GOODBYE", 13, 0
 help_status_msg:
-        .text "F1-F7: QUIT/NEW/SAVE/DEL/LOAD/DIR", 0
+        .text "F1-F7: QUIT/NEW/SAVE/AS/DEL/LOAD/DIR", 0
+fkey_help_msg:
+        .text "1:Q 2:NEW 3:SAV 4:DEL 5:LD 6:AS 7:DR 8:?", 0
 save_prompt_msg:
         .text "SAVE AS: ", 0
-load_prompt_msg:
-        .text "LOAD: ", 0
-delete_prompt_msg:
-        .text "DELETE: ", 0
+load_picker_title_msg:
+        .text "SELECT A FILE TO LOAD", 13, 0
+delete_picker_title_msg:
+        .text "SELECT A FILE TO DELETE", 13, 0
+picker_instructions_msg:
+        .text "CURSOR MOVE, RETURN SELECT, STOP CANCEL", 13, 0
+picker_empty_msg:
+        .text "NO FILES ON DISK.", 13, 0
 confirm_delete_msg:
         .text "DELETE? (Y/N)", 0
 saved_msg:
@@ -434,6 +993,8 @@ not_found_msg:
         .text "FILE NOT FOUND.", 0
 cancelled_msg:
         .text "CANCELLED.", 0
+document_full_msg:
+        .text "DOCUMENT FULL -- NO ROOM TO ADD MORE.", 0
 directory_title_msg:
         .text "DISK DIRECTORY -- PRESS ANY KEY WHEN DONE", 13, 0
 open_error_msg:
@@ -498,6 +1059,114 @@ show_help_status:
         lda #>help_status_msg
         sta msg_ptr+1
         jmp print_status
+
+; Shows "ROW n" (n = the cursor's current document row, 1-based,
+; matching how people count lines) on the status line -- called after
+; any operation that could move the cursor: typing, RETURN, DEL, all
+; four cursor keys, and page up/down. DOC_ROWS is 200, so n is always
+; 1-3 digits and always fits in a single byte; extracted the same way
+; print_decimal16 extracts the (potentially larger) values it prints,
+; via repeated subtraction, just simpler here since there's no need
+; for a 16-bit value or more than 3 digits. Leading zeros are
+; suppressed unless a higher digit was already shown (so row 5 prints
+; as "ROW 5", not "ROW 005" or "ROW  5", but row 105 correctly prints
+; its own zero in the tens place).
+show_row_status:
+        lda doc_top_row
+        clc
+        adc cursor_y
+        clc
+        adc #$01
+        sta row_num_value
+
+        ldx #$00
+@hundreds_loop:
+        lda row_num_value
+        cmp #100
+        bcc @hundreds_done
+        sec
+        sbc #100
+        sta row_num_value
+        inx
+        jmp @hundreds_loop
+@hundreds_done:
+        stx row_hundreds_digit
+
+        ldx #$00
+@tens_loop:
+        lda row_num_value
+        cmp #10
+        bcc @tens_done
+        sec
+        sbc #10
+        sta row_num_value
+        inx
+        jmp @tens_loop
+@tens_done:
+        stx row_tens_digit
+        lda row_num_value
+        sta row_ones_digit
+
+        ldy #$00
+        lda #$52                    ; 'R'
+        sta row_status_buf,y
+        iny
+        lda #$4f                     ; 'O'
+        sta row_status_buf,y
+        iny
+        lda #$57                      ; 'W'
+        sta row_status_buf,y
+        iny
+        lda #$20                       ; ' '
+        sta row_status_buf,y
+        iny
+
+        lda row_hundreds_digit
+        beq @skip_hundreds
+        clc
+        adc #$30
+        sta row_status_buf,y
+        iny
+@skip_hundreds:
+        lda row_hundreds_digit
+        bne @force_tens
+        lda row_tens_digit
+        beq @skip_tens
+@force_tens:
+        lda row_tens_digit
+        clc
+        adc #$30
+        sta row_status_buf,y
+        iny
+@skip_tens:
+        lda row_ones_digit
+        clc
+        adc #$30
+        sta row_status_buf,y
+        iny
+
+        lda #$00
+        sta row_status_buf,y
+
+        lda #<row_status_buf
+        sta msg_ptr
+        lda #>row_status_buf
+        sta msg_ptr+1
+        jmp print_status
+
+; F8 -- shows the bottom-row F-key assignments as a quick reference.
+; Abbreviated to fit the 40-column status line: the exact wording
+; asked for ("1:Q 2:NEW 3:SAV 4:DEL 5:LD 6:AS 7:DIR 8:?") comes to 41
+; characters, one over the limit -- "DIR" becomes "DR" here, the one
+; abbreviation that could give a character without losing any of the
+; other, harder-to-shorten words.
+do_help:
+        lda #<fkey_help_msg
+        sta msg_ptr
+        lda #>fkey_help_msg
+        sta msg_ptr+1
+        jsr print_status
+        jmp main_loop
 
 ; --- filename prompt -------------------------------------------------
 
@@ -610,122 +1279,190 @@ append_read_suffix:
 
 ; --- save / load -----------------------------------------------------
 
-; Streams all 1000 screen bytes ($0400-$07E7) to the current output
-; channel (already CHKOUT'd to an open file by the caller), converting
-; each screen code back to PETSCII -- the exact reverse of insert_char.
-write_screen_to_file:
-        lda #<$0400
-        sta copy_ptr
-        lda #>$0400
-        sta copy_ptr+1
-        ldx #4                     ; 4 * 240 = 960 bytes -- rows 0-23
-                                      ; only; row 24 is the status line,
-                                      ; not part of the document
-@outer:
-        ldy #$00
-@inner:
-        lda (copy_ptr),y
-        and #$7f                    ; strip any cursor reverse-video bit
-        cmp #$20
-        bcs @unchanged                ; >= $20 -- PETSCII unchanged
+; Scans DOC_BUF backward from its own very last row, skipping any that
+; are entirely blank, to find how many rows from the start actually
+; need writing to disk -- so a short document doesn't take anywhere
+; near as long to save on a real drive (roughly 40-50 bytes/second) as
+; writing the full, fixed 8000-byte buffer unconditionally every time
+; would. Sets doc_save_row_count to the result: always at least 1,
+; even for a completely blank document, so an empty file still
+; round-trips through a save/load cycle the same way any other one
+; does, rather than becoming a zero-byte file that behaves
+; differently.
+compute_doc_save_row_count:
+        lda #DOC_ROWS - 1
+        sta doc_scan_row
+@check_row:
+        lda doc_scan_row
+        jsr compute_row_offset_40
+        lda doc_offset_lo
         clc
-        adc #$40
-@unchanged:
+        adc #<DOC_BUF
+        sta copy_ptr
+        lda doc_offset_hi
+        adc #>DOC_BUF
+        sta copy_ptr+1
+
+        ldy #$00
+@col_loop:
+        lda (copy_ptr),y
+        cmp #$20
+        bne @row_has_content
+        iny
+        cpy #40
+        bne @col_loop
+
+        lda doc_scan_row
+        beq @row_has_content        ; row 0 itself is blank too -- still
+                                        ; counts as the minimum, 1 row
+        dec doc_scan_row
+        jmp @check_row
+
+@row_has_content:
+        lda doc_scan_row
+        clc
+        adc #$01
+        sta doc_save_row_count       ; 1-based: rows 0..doc_scan_row
+        rts
+
+; Streams DOC_BUF's own first doc_save_row_count rows (computed by
+; compute_doc_save_row_count, which the caller must run first) to the
+; current output channel (already CHKOUT'd to an open file). No
+; PETSCII conversion needed here, unlike this routine's previous
+; version -- DOC_BUF already holds plain PETSCII directly (see that
+; buffer's own comment for why), not screen codes.
+write_screen_to_file:
+        lda #<DOC_BUF
+        sta copy_ptr
+        lda #>DOC_BUF
+        sta copy_ptr+1
+
+        ldx #$00
+@row_loop:
+        cpx doc_save_row_count
+        beq @done
+
+        ldy #$00
+@col_loop:
+        lda (copy_ptr),y
         jsr CHROUT
         iny
-        cpy #240
-        bne @inner
+        cpy #40
+        bne @col_loop
+
         lda copy_ptr
         clc
-        adc #240
+        adc #40
         sta copy_ptr
         lda copy_ptr+1
         adc #$00
         sta copy_ptr+1
-        dex
-        bne @outer
+
+        inx
+        jmp @row_loop
+@done:
         rts
 
-; Reverse of write_screen_to_file: reads up to 1000 bytes from the
-; current input channel (already CHKIN'd by the caller), converting
-; PETSCII to screen codes, filling anything past the file's own end
-; with spaces -- a file shorter than 1000 bytes leaves the rest of the
-; screen blank, exactly like starting a new document.
+; Reverse of write_screen_to_file: fills the entire 8000-byte DOC_BUF
+; from the current input channel (already CHKIN'd by the caller),
+; filling anything past the file's own end with spaces -- a file
+; shorter than DOC_BUF leaves the rest of the document blank, exactly
+; like starting a new one. No PETSCII conversion needed on this side
+; either, for the same reason as write_screen_to_file above. The
+; caller is responsible for resetting doc_top_row and the cursor and
+; calling render_viewport afterward -- this only ever touches DOC_BUF
+; itself, never the screen.
 read_file_to_screen:
-        lda #<$0400
+        lda #<DOC_BUF
         sta copy_ptr
-        lda #>$0400
+        lda #>DOC_BUF
         sta copy_ptr+1
-        ldx #4                      ; 4 * 240 = 960 bytes -- rows 0-23
-                                       ; only; row 24 is the status line
-@outer:
+
+        ldx #$00
+@row_loop:
         ldy #$00
-@inner:
+@col_loop:
         jsr READST
         and #$40
         bne @fill_space
         jsr CHRIN
-        cmp #$40
-        bcc @sc_unchanged
-        sec
-        sbc #$40
-        jmp @store
-@sc_unchanged:
         jmp @store
 @fill_space:
         lda #$20
 @store:
         sta (copy_ptr),y
         iny
-        cpy #240
-        bne @inner
+        cpy #40
+        bne @col_loop
+
         lda copy_ptr
         clc
-        adc #240
+        adc #40
         sta copy_ptr
         lda copy_ptr+1
         adc #$00
         sta copy_ptr+1
-        dex
-        bne @outer
+
+        inx
+        cpx #DOC_ROWS
+        bne @row_loop
         rts
 
-; Clears the editable area (rows 0-23) to blank, leaving the status
-; line untouched, and resets the cursor to (0,0) -- "start a new
-; file." No confirmation prompt: this matches F5 (load), which
-; already overwrites the current document without asking first, so a
-; second, inconsistent rule here (confirm to clear, but not to
-; overwrite via load) would be more surprising than helpful.
-do_new:
-        lda #<$0400
+; Fills all of DOC_BUF with spaces (PETSCII, DOC_BUF's own convention
+; -- see that buffer's declaration) -- shared by do_new and this
+; file's own startup code, which both need exactly this and nothing
+; more; startup additionally needs the intro screen shown first and a
+; different final message, which is why this doesn't also reset
+; cursor/doc_top_row/current_filename_len or render itself the way
+; do_new's own, larger job does.
+blank_doc_buf:
+        lda #<DOC_BUF
         sta copy_ptr
-        lda #>$0400
+        lda #>DOC_BUF
         sta copy_ptr+1
-        ldx #$04                    ; 4 * 240 = 960 bytes -- rows 0-23
-                                       ; only, matching write_screen_to_
-                                       ; file/read_file_to_screen's own
-                                       ; loop shape
-@outer:
-        lda #$20                    ; space screen code
+
+        ldx #$00
+@row_loop:
+        lda #$20
         ldy #$00
-@inner:
+@col_loop:
         sta (copy_ptr),y
         iny
-        cpy #240
-        bne @inner
+        cpy #40
+        bne @col_loop
+
         lda copy_ptr
         clc
-        adc #240
+        adc #40
         sta copy_ptr
         lda copy_ptr+1
         adc #$00
         sta copy_ptr+1
-        dex
-        bne @outer
+
+        inx
+        cpx #DOC_ROWS
+        bne @row_loop
+        rts
+
+; Clears the entire document (all of DOC_BUF, not just the visible
+; screen) to blank, scrolls back to the top, and resets the cursor to
+; (0,0) -- "start a new file." No confirmation prompt: this matches F5
+; (load), which already overwrites the current document without
+; asking first, so a second, inconsistent rule here (confirm to
+; clear, but not to overwrite via load) would be more surprising than
+; helpful.
+do_new:
+        jsr blank_doc_buf
 
         lda #$00
         sta cursor_x
         sta cursor_y
+        sta doc_top_row
+        sta current_filename_len   ; a new document has no name yet --
+                                       ; F3 should prompt for one, not
+                                       ; silently reuse whatever the
+                                       ; previous document was called
+        jsr render_viewport
         jsr recompute_screen_ptr
 
         lda #<new_msg
@@ -843,12 +1580,18 @@ scratch_current_file:
         jsr CLRCHN
         lda #$0f
         jsr CLOSE
+        jsr READST                  ; clear any status left over from
+                                        ; this exchange -- see
+                                        ; parse_directory_filenames's
+                                        ; own identical fix and comment
+                                        ; for the full reasoning
         lda #$01
         rts
 @nothing_found:
         jsr CLRCHN
         lda #$0f
         jsr CLOSE
+        jsr READST
         lda #$00
         rts
 
@@ -858,11 +1601,9 @@ scratch_current_file:
 ; does, so the stakes are genuinely different, not just a matter of
 ; being consistent with the other commands for its own sake.
 do_delete:
-        lda #<delete_prompt_msg
-        sta msg_ptr
-        lda #>delete_prompt_msg
-        sta msg_ptr+1
-        jsr prompt_filename
+        lda #<delete_picker_title_msg
+        ldy #>delete_picker_title_msg
+        jsr pick_file
         cmp #$00
         bne @ask_confirm
         jmp @cancelled
@@ -910,23 +1651,21 @@ do_delete:
         jsr print_status
         jmp main_loop
 
-do_save:
-        lda #<save_prompt_msg
-        sta msg_ptr
-        lda #>save_prompt_msg
-        sta msg_ptr+1
-        jsr prompt_filename
-        cmp #$00
-        bne @proceed
-        jmp @cancelled
-@proceed:
-        jsr scratch_current_file   ; delete any existing file with this
-                                      ; name first, then write fresh --
-                                      ; see this file's own header
-                                      ; comment for why this project
-                                      ; uses scratch-then-write instead
-                                      ; of "@0:...,S,W" save-and-replace.
-                                      ; Must happen before
+; Assumes filename_buf/filename_len are already set to the target name
+; -- either copied from current_filename_buf (do_save reusing the
+; document's existing name) or just typed via prompt_filename (do_save
+; either with no existing name, or do_save_as). Scratches any existing
+; file with that name first, then writes fresh (see this file's own
+; header comment for why this project uses scratch-then-write instead
+; of "@0:...,S,W" save-and-replace), remembers the name as the
+; document's current one for next time, shows the result, and returns
+; to main_loop.
+perform_save:
+        jsr compute_doc_save_row_count   ; doesn't depend on anything
+                                             ; file-related, so compute
+                                             ; it before even opening
+                                             ; anything
+        jsr scratch_current_file   ; must happen before
                                       ; append_write_suffix below, which
                                       ; modifies filename_buf itself;
                                       ; the result doesn't matter here,
@@ -952,12 +1691,65 @@ do_save:
         lda #1
         jsr CLOSE
 
+        ; remember this as the document's current filename -- copied
+        ; from filename_buf's own first filename_len bytes, which
+        ; append_write_suffix above left untouched (it only appends
+        ; the ",S,W" suffix afterward, never modifies what's already
+        ; there)
+        ldx #$00
+@remember_loop:
+        cpx filename_len
+        beq @remember_done
+        lda filename_buf,x
+        sta current_filename_buf,x
+        inx
+        jmp @remember_loop
+@remember_done:
+        stx current_filename_len
+
         lda #<saved_msg
         sta msg_ptr
         lda #>saved_msg
         sta msg_ptr+1
         jsr print_status
         jmp main_loop
+
+; F3 -- reuses the document's current filename if it has one (already
+; loaded, or already saved once this session), so a person editing a
+; file they opened doesn't have to retype its name just to save
+; changes. Falls through to do_save_as (prompting, same as always)
+; when there isn't one yet: a brand new, never-saved document.
+do_save:
+        lda current_filename_len
+        bne @has_current_name
+        jmp do_save_as
+@has_current_name:
+        ldx #$00
+@copy_loop:
+        cpx current_filename_len
+        beq @copy_done
+        lda current_filename_buf,x
+        sta filename_buf,x
+        inx
+        jmp @copy_loop
+@copy_done:
+        stx filename_len
+        jmp perform_save
+
+; F6 -- always prompts for a filename, even if the document already
+; has one, unlike F3. The deliberate way to save under a different
+; name, or to name a document for the first time.
+do_save_as:
+        lda #<save_prompt_msg
+        sta msg_ptr
+        lda #>save_prompt_msg
+        sta msg_ptr+1
+        jsr prompt_filename
+        cmp #$00
+        bne @proceed
+        jmp @cancelled
+@proceed:
+        jmp perform_save
 
 @cancelled:
         lda #<cancelled_msg
@@ -968,15 +1760,27 @@ do_save:
         jmp main_loop
 
 do_load:
-        lda #<load_prompt_msg
-        sta msg_ptr
-        lda #>load_prompt_msg
-        sta msg_ptr+1
-        jsr prompt_filename
+        lda #<load_picker_title_msg
+        ldy #>load_picker_title_msg
+        jsr pick_file
         cmp #$00
         bne @proceed
         jmp @cancelled
 @proceed:
+        ; remember this as the document's current filename, before
+        ; append_read_suffix below appends ",S,R" -- see perform_save's
+        ; own identical pattern and comment
+        ldx #$00
+@remember_loop:
+        cpx filename_len
+        beq @remember_done
+        lda filename_buf,x
+        sta current_filename_buf,x
+        inx
+        jmp @remember_loop
+@remember_done:
+        stx current_filename_len
+
         jsr append_read_suffix
 
         lda filename_total_len
@@ -1005,6 +1809,10 @@ do_load:
         lda #$00
         sta cursor_x
         sta cursor_y
+        sta doc_top_row              ; scroll back to the top of the
+                                         ; newly loaded document, same
+                                         ; as F2 (new) already does
+        jsr render_viewport
         jsr recompute_screen_ptr
 
         lda #<loaded_msg
@@ -1034,46 +1842,6 @@ do_load:
         jmp main_loop
 
 ; --- directory listing ------------------------------------------------
-
-; Copies all 1000 bytes of screen memory to/from the $C000 scratch
-; buffer -- used to show the directory listing on a blank screen and
-; then restore exactly what was being edited, the same idea
-; write_screen_to_file/read_file_to_screen use for files, just to
-; another block of memory instead of a KERNAL channel.
-save_screen_backup:
-        ldx #$00
-@loop:
-        lda $0400,x
-        sta SCREEN_BACKUP,x
-        lda $0500,x
-        sta SCREEN_BACKUP+$0100,x
-        lda $0600,x
-        sta SCREEN_BACKUP+$0200,x
-        lda $0700,x
-        sta SCREEN_BACKUP+$0300,x
-        inx
-        bne @loop
-        ; the four 256-byte blocks above cover $0400-$07FF, 24 bytes
-        ; more than the real 1000-byte screen -- harmless, since
-        ; $07E8-$07FF is still ordinary RAM this program doesn't use
-        ; for anything else, and copying a few extra bytes both ways
-        ; is simpler than a fifth, short-length loop just to trim them
-        rts
-
-restore_screen_backup:
-        ldx #$00
-@loop:
-        lda SCREEN_BACKUP,x
-        sta $0400,x
-        lda SCREEN_BACKUP+$0100,x
-        sta $0500,x
-        lda SCREEN_BACKUP+$0200,x
-        sta $0600,x
-        lda SCREEN_BACKUP+$0300,x
-        sta $0700,x
-        inx
-        bne @loop
-        rts
 
 ; Prints the 16-bit value in dec_lo/dec_hi as decimal via CHROUT, with
 ; leading zeros suppressed but always at least one digit printed (so
@@ -1129,8 +1897,371 @@ print_decimal16:
 pow10_lo: .byte <10000, <1000, <100, <10, <1
 pow10_hi: .byte >10000, >1000, >100, >10, >1
 
+; --- file picker (F4/F5 share this instead of typing a filename blind) ---
+
+; Opens "$" and parses the directory listing into file_list_buf, one
+; 16-byte (PETSCII, space-padded) slot per real file found -- skipping
+; the disk name line (line number 0) and the trailing "BLOCKS FREE"
+; line (recognized by not starting with a quote, unlike every real
+; file's own text, which always does). Caps at MAX_FILES entries; any
+; files beyond that aren't added to the list, but their bytes are
+; still correctly consumed so the rest of the listing keeps parsing
+; correctly. Sets file_count to how many were actually found (0 if
+; the disk is empty, or if OPEN itself failed -- checked via carry,
+; the same check do_directory's own listing uses).
+parse_directory_filenames:
+        lda #$00
+        sta file_count
+
+        lda #$01
+        ldx #<dirname
+        ldy #>dirname
+        jsr SETNAM
+        lda #3
+        ldx #8
+        ldy #$00
+        jsr SETLFS
+        jsr OPEN
+        bcc @open_ok
+        rts
+@open_ok:
+        ldx #3
+        jsr CHKIN
+
+        jsr CHRIN
+        jsr CHRIN
+
+@entry_loop:
+        jsr READST
+        beq @got_link_lo
+        jmp @close_and_done
+@got_link_lo:
+        jsr CHRIN
+        sta dir_link_lo
+        jsr READST
+        beq @got_link_hi
+        jmp @close_and_done
+@got_link_hi:
+        jsr CHRIN
+        sta dir_link_hi
+        lda dir_link_lo
+        ora dir_link_hi
+        bne @got_link
+        jmp @close_and_done
+@got_link:
+
+        jsr READST
+        beq @got_num_lo
+        jmp @close_and_done
+@got_num_lo:
+        jsr CHRIN
+        sta dir_num_lo
+        jsr READST
+        beq @got_num_hi
+        jmp @close_and_done
+@got_num_hi:
+        jsr CHRIN
+        sta dir_num_hi
+
+        lda dir_num_lo
+        ora dir_num_hi
+        beq @consume_rest          ; line 0 -- disk name line, not a file
+
+@skip_leading_spaces:
+        jsr READST
+        beq @got_char
+        jmp @close_and_done
+@got_char:
+        jsr CHRIN
+        cmp #$20                    ; ' ' -- real files are padded with
+        beq @skip_leading_spaces       ; leading spaces before the
+                                           ; opening quote, to align the
+                                           ; filename column against the
+                                           ; block-count number's own
+                                           ; variable width; skip past
+                                           ; them rather than mistaking
+                                           ; the padding for "not a file"
+        cmp #$22                    ; '"'
+        beq @is_a_file
+        jmp @consume_rest             ; some other non-space,
+                                          ; non-quote character (e.g.
+                                          ; 'B' from "BLOCKS FREE.") --
+                                          ; not a file; the byte just
+                                          ; read is already consumed,
+                                          ; @consume_rest just keeps
+                                          ; going until $00
+
+@is_a_file:
+        lda file_count
+        cmp #MAX_FILES
+        bcs @consume_rest            ; list already full -- don't
+                                         ; store, but still consume
+
+        lda file_count
+        MULT_16
+        clc
+        adc #<FILE_LIST_BUF
+        sta copy_ptr
+        lda #>FILE_LIST_BUF
+        adc #$00
+        sta copy_ptr+1
+
+        ldy #$00
+        lda #$20
+@blank_loop:
+        sta (copy_ptr),y
+        iny
+        cpy #16
+        bne @blank_loop
+
+        ldy #$00
+@copy_name_loop:
+        jsr READST
+        bne @name_done
+        jsr CHRIN
+        cmp #$22                     ; closing quote -- name is done
+        beq @name_done
+        cpy #16
+        bcs @name_done                 ; safety cap -- shouldn't
+                                           ; trigger for anything this
+                                           ; editor's own save wrote
+        sta (copy_ptr),y
+        iny
+        jmp @copy_name_loop
+@name_done:
+        inc file_count
+
+@consume_rest:
+        jsr READST
+        beq @got_text_char
+        jmp @close_and_done
+@got_text_char:
+        jsr CHRIN
+        bne @consume_rest
+        jmp @entry_loop               ; $00 -- end of this line's text
+
+@close_and_done:
+        jsr CLRCHN
+        lda #3
+        jsr CLOSE
+        jsr READST                 ; real READST's own status persists
+                                       ; until explicitly read again,
+                                       ; regardless of what other
+                                       ; operations happen in between --
+                                       ; reading (and so clearing) it
+                                       ; here stops a stale EOF flag
+                                       ; from this directory read (set
+                                       ; by the final CHRIN that
+                                       ; happened to also be the last
+                                       ; byte of the listing) from
+                                       ; being mistaken by a later,
+                                       ; completely unrelated OPEN for
+                                       ; that file not existing
+        rts
+
+; Displays file_list_buf's first file_count entries, one per screen
+; row starting at row 2 (rows 0-1 are pick_file's own title and
+; instructions), in columns 2-17. Converts each stored PETSCII
+; character to its screen-code equivalent the same way insert_char
+; does. Doesn't draw the "> " selector itself -- see
+; set_selector_char, called separately by pick_file's own loop.
+display_file_list:
+        ldx #$00
+@row_loop:
+        cpx file_count
+        beq @done
+
+        txa
+        clc
+        adc #$02
+        tay
+        lda screen_row_lo,y
+        clc
+        adc #$02                    ; +2 columns, past the selector gap
+        sta msg_ptr
+        lda screen_row_hi,y
+        adc #$00
+        sta msg_ptr+1
+
+        txa
+        MULT_16
+        clc
+        adc #<FILE_LIST_BUF
+        sta copy_ptr
+        lda #>FILE_LIST_BUF
+        adc #$00
+        sta copy_ptr+1
+
+        ldy #$00
+@char_loop:
+        lda (copy_ptr),y
+        cmp #$40
+        bcc @char_unchanged
+        sec
+        sbc #$40
+@char_unchanged:
+        sta (msg_ptr),y
+        iny
+        cpy #16
+        bne @char_loop
+
+        inx
+        jmp @row_loop
+@done:
+        rts
+
+; Writes A (a screen code -- '>' and ' ', the only two values this is
+; ever called with, are both in the "unchanged" $20-$3F PETSCII/
+; screen-code range, so no conversion is needed for either) to column
+; 0 of the screen row showing file_list_buf's entry number X
+; (0-based) -- used to draw or erase the "> " selector as
+; file_selection moves.
+set_selector_char:
+        pha
+        txa
+        clc
+        adc #$02
+        tay
+        lda screen_row_lo,y
+        sta msg_ptr
+        lda screen_row_hi,y
+        sta msg_ptr+1
+        pla
+        ldy #$00
+        sta (msg_ptr),y
+        rts
+
+; The shared file picker behind F4 (delete) and F5 (load) -- shows a
+; selectable list of every file actually on the disk, rather than
+; asking for a filename to be typed blind. Caller passes a one-line
+; title in A (low)/Y (high), matching print_msg's own convention,
+; since that's what this passes it straight to. Handles its own
+; screen backup/restore the same way do_directory does, since a
+; multi-row list needs the same full-screen treatment a read-only
+; directory view does, not the one-line status prompt prompt_filename
+; itself uses. Returns the same way prompt_filename does: A (and
+; filename_len) holds the chosen filename's length, 0 meaning
+; cancelled (RUN/STOP, or an empty disk with nothing to pick).
+pick_file:
+        pha
+        tya
+        pha
+        CLS
+        pla
+        tay
+        pla
+        jsr print_msg
+        PRINT picker_instructions_msg
+
+        jsr parse_directory_filenames
+        lda file_count
+        bne @has_files
+
+        PRINT picker_empty_msg
+        PRINT press_key_msg
+        jsr wait_for_key
+        jsr render_viewport
+        jsr recompute_screen_ptr
+        lda #$00
+        sta filename_len
+        rts
+
+@has_files:
+        jsr display_file_list
+        lda #$00
+        sta file_selection
+        lda #$3e                    ; '>'
+        ldx #$00
+        jsr set_selector_char
+
+@select_loop:
+        jsr GETIN
+        beq @select_loop
+        cmp #$03                     ; RUN/STOP
+        bne @not_stop
+        jmp @cancelled
+@not_stop:
+        cmp #$0d                      ; RETURN
+        beq @selected
+        cmp #$11                       ; cursor down
+        beq @move_down
+        cmp #$91                        ; cursor up
+        beq @move_up
+        jmp @select_loop
+
+@move_down:
+        lda file_selection
+        clc
+        adc #$01
+        cmp file_count
+        bcs @select_loop                 ; already at the last entry
+
+        lda #$20
+        ldx file_selection
+        jsr set_selector_char
+        inc file_selection
+        lda #$3e
+        ldx file_selection
+        jsr set_selector_char
+        jmp @select_loop
+
+@move_up:
+        lda file_selection
+        beq @select_loop                  ; already at the first entry
+
+        lda #$20
+        ldx file_selection
+        jsr set_selector_char
+        dec file_selection
+        lda #$3e
+        ldx file_selection
+        jsr set_selector_char
+        jmp @select_loop
+
+@selected:
+        lda file_selection
+        MULT_16
+        clc
+        adc #<FILE_LIST_BUF
+        sta copy_ptr
+        lda #>FILE_LIST_BUF
+        adc #$00
+        sta copy_ptr+1
+
+        ldy #$00
+@copy_selected_loop:
+        lda (copy_ptr),y
+        sta filename_buf,y
+        iny
+        cpy #16
+        bne @copy_selected_loop
+
+        ldy #16                       ; trim trailing spaces back off,
+@trim_loop:                             ; matching what a typed
+        dey                              ; filename would look like
+        lda filename_buf,y
+        cmp #$20
+        bne @trim_done
+        cpy #$00
+        beq @trim_done
+        jmp @trim_loop
+@trim_done:
+        iny
+        sty filename_len
+
+        jsr render_viewport
+        jsr recompute_screen_ptr
+        lda filename_len
+        rts
+
+@cancelled:
+        jsr render_viewport
+        jsr recompute_screen_ptr
+        lda #$00
+        sta filename_len
+        rts
+
 do_directory:
-        jsr save_screen_backup
         CLS
         PRINT directory_title_msg
 
@@ -1212,7 +2343,7 @@ directory_open_failed:
         PRINT open_error_msg
         PRINT press_key_msg
         jsr wait_for_key
-        jsr restore_screen_backup
+        jsr render_viewport
         jsr recompute_screen_ptr
         jmp main_loop
 
@@ -1220,11 +2351,23 @@ dir_done:
         jsr CLRCHN
         lda #3
         jsr CLOSE
+        jsr READST                 ; clear any stale EOF status left by
+                                       ; the final CHRIN above happening
+                                       ; to also be the listing's own
+                                       ; last byte -- see
+                                       ; parse_directory_filenames's own
+                                       ; identical fix, and its comment,
+                                       ; for the full reasoning; real
+                                       ; READST's status otherwise
+                                       ; persists until read again,
+                                       ; regardless of what other
+                                       ; operations (like a much later
+                                       ; F5/F4) happen in between
 
         PRINT press_key_msg
         jsr wait_for_key
 
-        jsr restore_screen_backup
+        jsr render_viewport
         jsr recompute_screen_ptr
         jmp main_loop
 

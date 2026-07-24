@@ -13,6 +13,267 @@ this project's full regression suite before being marked done — that
 discipline is this project's own standing practice, not something
 worth repeating in every entry below.
 
+## `editor.asm`: row number status, and HOME/CLR page up/down
+
+Two additions, both aimed at getting around in the larger, scrollable
+document more easily. Typing, RETURN, DEL, or any cursor key now shows
+"ROW n" (1-based) on the status line -- DOC_ROWS is 200, so n is
+always 1-3 digits, extracted the same way `print_decimal16` extracts
+the (potentially larger) values it prints, via repeated subtraction,
+just simpler here since there's no need for more than 3 digits.
+Deliberately not shown after F-key operations, whose own result
+messages ("SAVED.", "CANCELLED.", and so on) are more useful to leave
+in place.
+
+Page up/down uses HOME and CLR (SHIFT+HOME) -- not a cursor-key
+combination, confirmed directly rather than assumed: CTRL+cursor
+produces nothing at all in the keyboard buffer (the KERNAL doesn't
+decode that combination for cursor keys), and both SHIFT+cursor and
+C=+cursor produce the exact same code as the *opposite* plain cursor
+key (SHIFT+down is indistinguishable from plain up), so neither can
+mean anything new. HOME/CLR are a genuinely distinct, otherwise unused
+key pair -- the same kind of repurposing RUN/STOP already gets for
+"cancel" elsewhere in this file, not their usual KERNAL meaning. Each
+page jumps the viewport a full 24 rows at once, capped at the same
+[0, DOC_ROWS-24] range `try_scroll_down`/`try_scroll_up` already
+enforce one row at a time.
+
+A real priority conflict came up building the row status display,
+caught by the test suite rather than shipped by accident: showing the
+row number unconditionally after every keypress meant it immediately
+overwrote `insert_char`'s "DOCUMENT FULL" message and `handle_return`'s
+equivalent the instant either fired, since both are dispatched the
+same way ordinary typing and RETURN are. Fixed by having those two
+routines signal via the carry flag whether their own warning should be
+left in place (carry set) or a row number is fine to show instead
+(carry clear) -- the dispatcher in `main_loop` checks that flag before
+deciding which one wins. Several existing tests had encoded the old
+assumption that ordinary typing and RETURN leave the default help text
+or nothing in particular on the status line -- updated to reflect what
+the status line is actually showing now (a row number), not just
+patched until green.
+
+## Fixed: `editor.asm` corrupting the screen on real hardware after scrolling
+
+Reported directly from real hardware, not caught by this project's own
+testing first: reaching the bottom of the screen and pressing RETURN
+produced "random characters and graphic symbols" on the lower half of
+the screen -- the program kept running, not hanging, but with garbage
+left behind.
+
+Root cause: `copy_ptr`, reused throughout `DOC_BUF`'s own access
+(scrolling's own feature, added recently) sat at `$F5`, inside `$F3-
+$F6` -- a range this project's own past experience had already
+identified as actively clobbered by the KERNAL's keyboard-scan IRQ on
+real hardware (see `c64-memory-reference.md`'s zero-page notes). That
+was a latent risk from the moment `copy_ptr` was first declared there,
+but scrolling is what turned it into a real, reproducible bug: `copy_ptr`
+is now used by loops (`blank_doc_buf`, `render_viewport`) long enough
+to run across several keyboard-scan IRQs in a row, each one a fresh
+chance for the pointer to actually get hit mid-loop and sent somewhere
+else in memory -- corrupting whatever it read from or wrote to next.
+Moved to `$03` instead, well clear of that range and not colliding
+with the one other thing already using nearby zero page (`kw_ptr`/
+`handler_vec` at `$02`).
+
+The more important fix is in how this project verifies `editor.asm` at
+all: `mini6502.py` has had a zero-page poisoning simulation
+(`simulate_zp_poisoning`, on by default) since early in this project,
+built specifically to catch exactly this class of bug by periodically
+writing realistic garbage into `$F3-$F6` the way real hardware's own
+IRQ handler does -- but every test in `test_editor.py` had been
+calling it with `simulate_zp_poisoning=False` instead, silently
+switching that protection off for the one file in this whole project
+that actually needed it. Confirmed directly, not just reasoned about:
+reverting the fix and running the suite with poisoning re-enabled
+reliably reproduces the hang this bug actually caused in simulation;
+with the fix in place and poisoning on, it doesn't. Every test in
+`test_editor.py` now runs with `simulate_zp_poisoning=True`, and a new
+one exists specifically to name this exact bug and check the two
+operations the original report described: reaching the bottom of the
+screen and pressing RETURN, with nothing left behind afterward. Swept
+every other file in this project for the same class of collision (any
+zero-page pointer landing in `$F3-$F6`) -- `editor.asm`'s `copy_ptr`
+was the only one.
+
+## `editor.asm`: F8 (help)
+
+A small addition: F8 shows the bottom-row F-key assignments on the
+status line, as a quick reference without needing to restart the
+program to see the intro screen again. The exact wording asked for
+("1:Q 2:NEW 3:SAV 4:DEL 5:LD 6:AS 7:DIR 8:?") comes to 41 characters,
+one over the 40-column status line -- "DIR" became "DR" to fit, the
+one abbreviation that could give up a character without shortening
+any of the other, harder-to-trim words.
+
+## `editor.asm`: the document scrolls well beyond one screen
+
+The most substantial change this editor has had: the document is no
+longer screen memory itself. A separate buffer, `DOC_BUF` -- 200 rows
+of 40 columns, ~8x a single screen, placed well clear of this
+program's own code in otherwise-free RAM -- is now the single source
+of truth, and the visible 24 rows are only ever a rendered window onto
+some contiguous slice of it, tracked by a new `doc_top_row`. Typing,
+RETURN, and all four cursor keys now scroll the viewport when they'd
+otherwise run off the visible top or bottom edge, rather than
+stopping there the way the previous, screen-memory-is-the-document
+version had to.
+
+This was a deliberate architectural change, not a small addition, and
+touched nearly every editing routine: `insert_char`, `handle_return`,
+`handle_delete`, and all four `move_cursor_*` routines now read and
+write `DOC_BUF` (via a new `compute_doc_ptr`, reusing `copy_ptr` for
+it rather than claiming a new zero-page address, since the two uses
+never overlap in time) and call a shared `try_scroll_down`/
+`try_scroll_up` pair when they reach a visible edge with more document
+beyond it. The "document full" message a recent, smaller change added
+still fires, now correctly at `DOC_BUF`'s own true last cell rather
+than the old single screen's -- confirmed precisely at that boundary,
+not one row early or late.
+
+Save now scans `DOC_BUF` backward first, trimming trailing blank rows,
+so a short document doesn't take anywhere near as long to write to a
+real drive (roughly 40-50 bytes/second) as writing the full, fixed
+8000-byte buffer unconditionally every time would; an empty document
+still saves as one blank row, not a zero-byte file, so it round-trips
+the same way any other one does. Load fills the entire buffer
+(blanking anything past the file's own end) and resets the viewport to
+the top. F7 (directory) and the F4/F5 picker no longer need their own
+literal screen backup to restore what was on screen before -- removed
+entirely, along with the 1024 bytes it used, since `render_viewport`
+can always correctly reconstruct any prior view from `DOC_BUF` and
+`doc_top_row` on its own, which a byte-for-byte copy existed only to
+approximate in the first place.
+
+Confirmed the property that actually matters most, not just that
+scrolling looks right on screen: content typed, scrolled far away
+from, and scrolled back to is genuinely still there, and a saved file
+correctly captures everything typed across many rows, not just
+whatever happened to be visible at save time -- both checked directly
+via a full save/load round trip spanning well beyond one screen.
+Several existing tests had encoded the old, now-incorrect assumption
+that reaching screen row 23 meant "no more room" -- updated to reflect
+what's actually true now (there's 200 rows of real capacity, not 24),
+not just patched to pass.
+
+## `editor.asm`: feedback when there's no room left to type more
+
+A small polish item, but confirmed as a real, reproducible rough edge
+first, not assumed: filling the entire 24x40 document and continuing
+to type past that point silently kept overwriting the single last
+cell (row 23, column 39) forever, discarding whatever was typed there
+with zero indication anything unusual was happening -- checked
+directly: typing "!?#" after filling the document left only "#"
+behind, the other two silently gone. Ordinary character wrap within
+the document (typing past column 39 on any row before the last one)
+was never the issue -- `move_cursor_right` already handles that
+correctly, advancing to the next row's own column 0. The problem was
+specific to the one cell where there's nowhere left to advance to at
+all.
+
+Fixed in the two places that share that same root cause -- no room
+left to move to, not "wrapped to a new row": `insert_char` now shows
+"DOCUMENT FULL -- NO ROOM TO ADD MORE." on the status line when typing
+lands on that exact last cell (the character itself still gets
+written -- only the further advance has nowhere to go), and
+`handle_return` shows the same message when RETURN is pressed on the
+last row, since it genuinely can't create a next line to move the
+cursor to either. Both distinguish this precisely from ordinary
+mid-document wrapping, which continues to show no message at all, and
+the condition clears itself naturally the moment the cursor moves
+away (there's no separate flag to reset, F2's own cursor reset back to
+(0,0) is sufficient on its own).
+
+## `editor.asm`: F3 remembers the document's filename, F6 is "save as"
+
+F3 (save) now behaves the way most editors' plain save does: if the
+document already has a name -- already loaded via F5, or already
+saved once this session -- it saves straight back to that name without
+asking again. It only prompts when there truly isn't one yet: a brand
+new (F2) or never-saved document. F6 is the deliberate escape hatch --
+always prompts for a filename regardless of whether one already
+exists, and whatever name gets typed there becomes the document's new
+current one, so a later plain F3 follows it rather than the original
+name.
+
+Shared the actual disk-writing logic between the two (scratch the
+existing file, then write fresh, then remember the name used) as a
+single `perform_save` routine, called either after copying the
+remembered name into place (F3 with one already set) or after
+`prompt_filename` returns one (F3 with none set yet, or F6
+unconditionally) -- rather than duplicating that logic per entry
+point.
+
+One correctness detail worth naming plainly, not left implicit: the
+new `current_filename_len` byte needed explicit initialization at
+startup. Real hardware doesn't guarantee that RAM is zero at
+power-on, and a stray nonzero value there would have made a brand
+new document's very first F3 wrongly believe it already had a name --
+a plausible, easy-to-miss bug specific to introducing a brand new
+piece of persistent state, checked directly here (an explicit test
+covers a fresh session's first F3) rather than left as an assumption.
+
+## `editor.asm`: F4/F5 now show a selectable file list instead of typing a filename blind
+
+Load and delete now parse the actual disk directory into a list --
+cursor up/down to move, RETURN to pick, RUN/STOP to cancel -- rather
+than asking for a filename typed from memory. Save keeps its existing
+typing prompt, since a new filename can't be picked from a list of
+what already exists. Reuses `lib/math.inc`'s `MULT_16` (a plain
+power-of-two shift, no zero page needed, unlike `MULT_6`) to index the
+15-entry filename buffer; capped at 15 files deliberately, not a
+rounder-looking number -- the highest index that multiply stays
+correct for in an 8-bit register (15*16=240; 16*16=256 would silently
+wrap to 0).
+
+Two real, non-obvious bugs came up building this, both caught only by
+testing the complete F5 flow end to end rather than each piece in
+isolation, and both worth naming plainly:
+
+**Leading padding spaces.** A real directory entry's filename text is
+padded with leading spaces to align the filename column against the
+block-count number's own variable width -- `"NOTES"` in the listing
+stream actually looks like `   "NOTES"`, not `"NOTES"` directly. The
+first version of the filename parser checked only the very first
+character for the opening quote, so every real file was mistaken for
+"not a file" (the same bucket "BLOCKS FREE." falls into) and silently
+skipped -- the picker would show nothing, or "NO FILES ON DISK." even
+when there clearly were some. Fixed by skipping leading spaces before
+checking for the quote.
+
+**A stale `READST` flag leaking across an unrelated `OPEN`.** After
+the first bug was fixed, files appeared in the picker correctly, but
+selecting one and pressing RETURN still silently failed to load it.
+The actual cause: real `READST`'s status persists until it's
+explicitly read again, regardless of what happens in between -- it is
+not tied to, or reset by, the specific file that was open when it was
+last set. Parsing the directory listing's own final `CHRIN` call (the
+closing `$00` terminator) happens to also be the very last byte of the
+whole listing buffer, which sets the EOF flag -- and since nothing
+read `READST` again before `parse_directory_filenames` returned, that
+flag was still sitting there when `do_load`'s own, completely
+unrelated `OPEN` (for the actual file the person picked) checked
+`READST` immediately afterward, and wrongly concluded that file didn't
+exist. This is not a simulator quirk; it is exactly how real `READST`
+behaves, and it would have failed identically on real hardware. Fixed
+by having `parse_directory_filenames` read (and so clear) `READST` one
+last time before returning. `do_directory` (F7) and
+`scratch_current_file` (used by F4 and by save's own overwrite logic)
+had the same latent structural issue -- reading a stream through to
+its own natural end without a final clearing read afterward -- and got
+the same fix, even though it's less likely to actually trigger for
+`scratch_current_file` specifically, which normally stops reading well
+before the true end of its own short response.
+
+The existing test suite needed real updates alongside this, not just
+additions: three tests exercised save/load/delete scenarios ("load a
+nonexistent file," "delete with an empty filename typed") that
+described the *previous* typing-based F4/F5 flow and can no longer
+happen at all now that both are picker-based -- removed or replaced
+with the equivalent picker scenario (an empty disk, RUN/STOP before
+selecting anything) rather than left in place describing behavior that
+no longer exists.
+
 ## `adventure.asm`: combined room description and exits into one `Room` struct
 
 A loose end closed, sitting unaddressed since `MULT_6` first made it

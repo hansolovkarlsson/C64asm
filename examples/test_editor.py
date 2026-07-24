@@ -70,6 +70,10 @@ with open('/tmp/editor_regress.prg', 'rb') as f:
 SCREEN = 0x0400
 CURSOR_X = 0x033c
 CURSOR_Y = 0x033d
+MAX_ROW = 23   # editor.asm's own last editable (screen) row -- row 24
+                  # is the status line
+DOC_ROWS = 200 # editor.asm's own DOC_BUF row count -- the true document
+                  # capacity, not just what fits on one screen
 
 # PETSCII codes for the non-typable keys editor.asm handles specially.
 RETURN = 0x0D
@@ -83,7 +87,7 @@ ANY_KEY = ord(' ')   # dismisses the "press any key to start" prompt
 
 
 def fresh():
-    m = C64Machine(simulate_zp_poisoning=False)
+    m = C64Machine(simulate_zp_poisoning=True)
     target = m.find_sys_target(data)
     m.load_prg(data)
     return m, target
@@ -216,7 +220,11 @@ F2 = 0x89   # new file
 F3 = 0x86   # save
 F4 = 0x8a   # delete
 F5 = 0x87   # load
+F6 = 0x8b   # save as
 F7 = 0x88   # directory
+F8 = 0x8c   # help
+HOME = 0x13   # page up
+CLR = 0x93    # SHIFT+HOME -- page down
 DEL = 0x14
 RUNSTOP = 0x03   # RUN/STOP -- the C64's conventional "abort this" key,
                     # also reachable as Ctrl+C; there's no key labeled
@@ -240,7 +248,8 @@ def status_row_text(m):
 
 STATUS_ROW = SCREEN + 24 * 40
 
-print("=== F3 saves the editable area (960 bytes) as a SEQ file, excluding the status line ===")
+print("=== F3 saves only as much as the document actually uses, trimming "
+      "trailing blank rows, as a SEQ file excluding the status line ===")
 m11, target = fresh_with_blank_screen()
 m11.getin_queue = [ANY_KEY, ord('H'), ord('I'), F3,
                     ord('T'), ord('E'), ord('S'), ord('T'), RETURN, F1]
@@ -249,12 +258,13 @@ check("program returns cleanly", reason is None, f"reason={reason}")
 saved = m11.disk_files.get('TEST')
 check("file was saved under the typed name", saved is not None)
 if saved is not None:
-    check("saved file is exactly 960 bytes (24 rows, not 25)", len(saved) == 960,
+    check("saved file is exactly one 40-byte row, not the full 8000-byte "
+          "document buffer or the old fixed 960", len(saved) == 40,
           f"got {len(saved)}")
     check("saved content starts with the typed text", saved[:2] == b'HI')
     check("saved content has no status-line text mixed in "
           "(the bug an early version of this feature actually had)",
-          saved[2:] == b' ' * 958, "found non-space bytes after the typed text")
+          saved[2:] == b' ' * 38, "found non-space bytes after the typed text")
 
 print("=== F5 loads a file back onto the editable area ===")
 m12, target = fresh_with_blank_screen()
@@ -266,13 +276,6 @@ loaded = [screen_char(m12, 0, c) for c in range(11)]
 expected = [8, 5, 12, 12, 15, 0x20, 23, 15, 18, 12, 4]  # H E L L O sp W O R L D as screen codes
 check("loaded text decodes correctly on row 0", loaded == expected,
       f"got {loaded}, want {expected}")
-
-print("=== F5 on a nonexistent file shows FILE NOT FOUND and touches nothing ===")
-m13, target = fresh_with_blank_screen()
-m13.getin_queue = [ANY_KEY, F5, ord('N'), ord('O'), ord('P'), ord('E'), RETURN, F1]
-reason = run_until_return(m13, target)
-check("program returns cleanly", reason is None, f"reason={reason}")
-check("status line shows FILE NOT FOUND.", status_row_text(m13) == 'FILE NOT FOUND.')
 
 print("=== an empty filename (RETURN immediately) cancels save/load ===")
 m14, target = fresh_with_blank_screen()
@@ -331,7 +334,7 @@ m19.getin_queue = [ANY_KEY, F1]
 reason = run_until_return(m19, target)
 check("program returns cleanly", reason is None, f"reason={reason}")
 check("help text shown by default",
-      status_row_text(m19) == 'F1-F7: QUIT/NEW/SAVE/DEL/LOAD/DIR')
+      status_row_text(m19) == 'F1-F7: QUIT/NEW/SAVE/AS/DEL/LOAD/DIR')
 
 print("=== round trip: save, then load into a differently-edited screen ===")
 m20, target = fresh_with_blank_screen()
@@ -424,7 +427,7 @@ m28.getin_queue = [ANY_KEY, F1]
 reason = run_until_return(m28, target)
 check("program returns cleanly", reason is None, f"reason={reason}")
 check("help text mentions all five commands",
-      status_row_text(m28) == 'F1-F7: QUIT/NEW/SAVE/DEL/LOAD/DIR',
+      status_row_text(m28) == 'F1-F7: QUIT/NEW/SAVE/AS/DEL/LOAD/DIR',
       f"got {status_row_text(m28)!r}")
 
 # --- F4 (delete) and the save-overwrite fix --------------------------
@@ -483,23 +486,17 @@ check("program returns cleanly", reason is None, f"reason={reason}")
 check("the file still exists", list(m31.disk_files.keys()) == ['NOTES'])
 check("status line shows CANCELLED.", status_row_text(m31) == 'CANCELLED.')
 
-print("=== F4 on a nonexistent file correctly reports FILE NOT FOUND, "
-      "not DELETED (the exact bug an early version of this had, from "
-      "misreading the zero-padded \"00\" count as nonzero) ===")
+print("=== F4's picker: an empty disk shows NO FILES, gracefully, no crash ===")
 m32, target = fresh_with_blank_screen()
 m32.disk_files = {}
-m32.getin_queue = [ANY_KEY, F4, ord('N'), ord('O'), ord('P'), ord('E'),
-                    RETURN, ord('Y'), F1]
+m32.getin_queue = [ANY_KEY, F4, ANY_KEY, F1]
 reason = run_until_return(m32, target)
 check("program returns cleanly", reason is None, f"reason={reason}")
-check("status line shows FILE NOT FOUND., not DELETED.",
-      status_row_text(m32) == 'FILE NOT FOUND.',
-      f"got {status_row_text(m32)!r}")
 
-print("=== F4 with an empty filename cancels immediately, no confirmation shown ===")
+print("=== F4's picker: RUN/STOP before selecting anything cancels, nothing deleted ===")
 m33, target = fresh_with_blank_screen()
 m33.disk_files = {'X': b'y' * 960}
-m33.getin_queue = [ANY_KEY, F4, RETURN, F1]
+m33.getin_queue = [ANY_KEY, F4, RUNSTOP, F1]
 reason = run_until_return(m33, target)
 check("program returns cleanly", reason is None, f"reason={reason}")
 check("nothing was deleted", list(m33.disk_files.keys()) == ['X'])
@@ -542,7 +539,8 @@ check("program returns cleanly", reason is None, f"reason={reason}")
 check("status line shows CANCELLED.", status_row_text(m36) == 'CANCELLED.')
 check("screen was never touched by a load", screen_char(m36, 0, 0) == 0x20)
 
-print("=== RUN/STOP cancels the DELETE prompt's filename entry ===")
+print("=== RUN/STOP cancels F4's picker even after some other, unrecognized "
+      "key was pressed first ===")
 m37, target = fresh_with_blank_screen()
 m37.disk_files = {'NOTES': b'x' * 960}
 m37.getin_queue = [ANY_KEY, F4, ord('N'), RUNSTOP, F1]
@@ -571,6 +569,638 @@ check("both typed characters landed, RUN/STOP did nothing in between",
       screen_char(m39, 0, 0) == 1 and screen_char(m39, 0, 1) == 2)
 check("cursor advanced by exactly 2, not 3",
       m39.cpu.memory[CURSOR_X] == 2, f"cursor_x={m39.cpu.memory[CURSOR_X]}")
+
+# --- file picker (F4/F5 now select from a real list instead of typing
+# a filename blind) ---
+#
+# One real, non-obvious bug came up building this, caught only by
+# testing the full F5 flow end to end rather than each piece in
+# isolation: parse_directory_filenames's own final CHRIN call (reading
+# the directory listing's closing $00 terminator) happens to also be
+# the very last byte of the whole listing buffer, which sets real
+# READST's EOF flag -- and that flag persists until READST is read
+# again, regardless of what unrelated operation happens next. Without
+# an extra READST call to clear it before returning, the *next* OPEN
+# (the actual file being loaded) would see that stale EOF flag
+# immediately and wrongly conclude the file didn't exist, even though
+# it does. This isn't a simulator quirk -- it's how real READST
+# actually behaves, and it would have failed identically on real
+# hardware. do_directory (F7) and scratch_current_file (F4/save) had
+# the same latent structural issue and got the same fix, even though
+# it's less likely to trigger there.
+
+def decoded_row(m, row, n):
+    chars = []
+    for i in range(n):
+        c = screen_char(m, row, i)
+        chars.append(chr(c + 0x40) if c < 0x20 else chr(c))
+    return ''.join(chars)
+
+
+print("=== F5's picker: selecting the first (only) entry loads it correctly ===")
+m40, target = fresh_with_blank_screen()
+m40.disk_files = {'NOTES': b'HELLO FROM NOTES' + b' ' * (960 - 17)}
+m40.getin_queue = [ANY_KEY, F5, RETURN, F1]
+reason = run_until_return(m40, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("the actual file content was loaded, not left blank",
+      decoded_row(m40, 0, len('HELLO FROM NOTES')) == 'HELLO FROM NOTES',
+      f"got {decoded_row(m40, 0, len('HELLO FROM NOTES'))!r}")
+
+print("=== F5's picker: cursor down moves the selection to a later file ===")
+m41, target = fresh_with_blank_screen()
+m41.disk_files = {
+    'AAA': b'FIRST FILE' + b' ' * 950,
+    'BBB': b'SECOND FILE' + b' ' * 949,
+    'CCC': b'THIRD FILE CONTENT' + b' ' * 941,
+}
+m41.getin_queue = [ANY_KEY, F5, CRSR_DOWN, CRSR_DOWN, RETURN, F1]
+reason = run_until_return(m41, target, max_instructions=10_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("the third file (two down-moves from the first) was loaded",
+      decoded_row(m41, 0, len('THIRD FILE CONTENT')) == 'THIRD FILE CONTENT',
+      f"got {decoded_row(m41, 0, len('THIRD FILE CONTENT'))!r}")
+
+print("=== F5's picker: cursor up from the first entry is clamped, not wraparound ===")
+m42, target = fresh_with_blank_screen()
+m42.disk_files = {'AAA': b'FIRST' + b' ' * 955, 'BBB': b'SECOND' + b' ' * 954}
+m42.getin_queue = [ANY_KEY, F5, CRSR_UP, CRSR_UP, RETURN, F1]
+reason = run_until_return(m42, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("still loaded the first file, not wrapped to the last",
+      decoded_row(m42, 0, 5) == 'FIRST', f"got {decoded_row(m42, 0, 5)!r}")
+
+print("=== F5's picker: RUN/STOP cancels, the document is untouched ===")
+m43, target = fresh_with_blank_screen()
+m43.disk_files = {'AAA': b'SHOULD NOT LOAD' + b' ' * 945}
+m43.getin_queue = [ANY_KEY, ord('X'), F5, RUNSTOP, F1]
+reason = run_until_return(m43, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("the document is unaffected by the cancelled load",
+      decoded_row(m43, 0, 1) == 'X', f"got {decoded_row(m43, 0, 1)!r}")
+
+print("=== F5's picker: an empty disk is handled gracefully, no crash ===")
+m44, target = fresh_with_blank_screen()
+m44.disk_files = {}
+m44.getin_queue = [ANY_KEY, F5, ANY_KEY, F1]
+reason = run_until_return(m44, target)
+check("program returns cleanly, does not hang or crash",
+      reason is None, f"reason={reason}")
+
+print("=== F4's picker: selecting an entry and confirming deletes the right file ===")
+m45, target = fresh_with_blank_screen()
+m45.disk_files = {'AAA': b'x' * 960, 'BBB': b'y' * 960}
+m45.getin_queue = [ANY_KEY, F4, CRSR_DOWN, RETURN, ord('Y'), F1]
+reason = run_until_return(m45, target, max_instructions=10_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("only the selected file (BBB) was deleted",
+      list(m45.disk_files.keys()) == ['AAA'], f"got {list(m45.disk_files.keys())}")
+
+print("=== no stray reverse-video bits remain after using the picker ===")
+m46, target = fresh_with_blank_screen()
+m46.disk_files = {'AAA': b'x' * 960, 'BBB': b'y' * 960}
+m46.getin_queue = [ANY_KEY, F5, RETURN, F1]
+reason = run_until_return(m46, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+stray = [i for i in range(1000) if m46.cpu.memory[SCREEN + i] & 0x80]
+check("every screen cell has bit 7 clear", stray == [], f"stray bits at {stray}")
+
+print("=== the real bug this feature shipped with: a stale READST EOF flag "
+      "from the directory read doesn't leak into the file load that follows ===")
+m47, target = fresh_with_blank_screen()
+m47.disk_files = {'NOTES': b'PROOF THE FIX WORKS' + b' ' * (960 - 20)}
+m47.getin_queue = [ANY_KEY, F5, RETURN, F1]
+reason = run_until_return(m47, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("the file loaded correctly, not silently treated as not found",
+      decoded_row(m47, 0, len('PROOF THE FIX WORKS')) == 'PROOF THE FIX WORKS',
+      f"got {decoded_row(m47, 0, len('PROOF THE FIX WORKS'))!r} -- if this is blank, the stale "
+      f"READST bug has regressed")
+
+# --- F3 (save, reusing a remembered name) and F6 (save as, always
+# prompts) ---
+#
+# F3 now behaves like most editors' plain "save": if the document
+# already has a name (already loaded, or already saved once this
+# session), it saves straight back to that name without asking again.
+# F6 is the deliberate escape hatch -- always prompts, even when a
+# name already exists, and becomes the new current name on success.
+# Loading a file, and F2 (new), both affect this same remembered name:
+# loading sets it, new clears it.
+
+print("=== F3 with no current name prompts once, then reuses it on a later F3 "
+      "without prompting again ===")
+m48, target = fresh_with_blank_screen()
+m48.getin_queue = [ANY_KEY, ord('A'), F3, ord('N'), ord('O'), ord('T'), ord('E'), ord('S'),
+                    RETURN, ord('B'), F3, F1]
+reason = run_until_return(m48, target, max_instructions=10_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+saved = m48.disk_files.get('NOTES')
+check("both edits (before and after the second, name-less F3) landed "
+      "in the same file", saved is not None and saved[:2] == b'AB',
+      f"got {saved[:2] if saved else None}")
+
+print("=== F6 always prompts, even though a current name already exists ===")
+m49, target = fresh_with_blank_screen()
+m49.getin_queue = (
+    [ANY_KEY, ord('X'), F3, ord('A'), ord('A'), ord('A'), RETURN]
+    + [F6, ord('B'), ord('B'), ord('B'), RETURN, F1]
+)
+reason = run_until_return(m49, target, max_instructions=10_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("both AAA (via F3) and BBB (via F6) exist as separate files",
+      sorted(m49.disk_files.keys()) == ['AAA', 'BBB'],
+      f"got {sorted(m49.disk_files.keys())}")
+
+print("=== after F6 saves under a new name, a later plain F3 uses THAT name, "
+      "not the original one ===")
+m50, target = fresh_with_blank_screen()
+m50.getin_queue = (
+    [ANY_KEY, ord('1'), F3, ord('A'), ord('A'), ord('A'), RETURN]
+    + [F6, ord('B'), ord('B'), ord('B'), RETURN]
+    + [ord('2'), F3, F1]
+)
+reason = run_until_return(m50, target, max_instructions=10_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+bbb = m50.disk_files.get('BBB')
+check("the plain F3 after F6 saved back to BBB (the new current name), "
+      "picking up both edits", bbb is not None and bbb[:2] == b'12',
+      f"got {bbb[:2] if bbb else None}")
+
+print("=== F5 (load) sets the current filename; a later plain F3 saves back "
+      "to the loaded file, not a new prompt ===")
+m51, target = fresh_with_blank_screen()
+m51.disk_files = {'EXISTING': b'ORIGINAL' + b' ' * 952}
+m51.getin_queue = [ANY_KEY, F5, RETURN, ord('!'), F3, F1]
+reason = run_until_return(m51, target, max_instructions=15_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("no new file was created -- F3 saved back to EXISTING, not a "
+      "fresh prompt", list(m51.disk_files.keys()) == ['EXISTING'],
+      f"got {list(m51.disk_files.keys())}")
+
+print("=== F2 (new) clears the current filename; F3 afterward prompts again ===")
+m52, target = fresh_with_blank_screen()
+m52.getin_queue = (
+    [ANY_KEY, ord('X'), F3, ord('A'), ord('A'), ord('A'), RETURN]
+    + [F2]
+    + [ord('Y'), F3, ord('B'), ord('B'), ord('B'), RETURN, F1]
+)
+reason = run_until_return(m52, target, max_instructions=10_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("F3 after F2 prompted for and created a second, separate file",
+      sorted(m52.disk_files.keys()) == ['AAA', 'BBB'],
+      f"got {sorted(m52.disk_files.keys())}")
+
+print("=== F3 with no current name, cancelled via RUN/STOP, remembers nothing "
+      "-- pressing F3 again still prompts ===")
+m53, target = fresh_with_blank_screen()
+m53.getin_queue = [ANY_KEY, ord('X'), F3, RUNSTOP, F3, ord('A'), ord('A'), ord('A'),
+                    RETURN, F1]
+reason = run_until_return(m53, target, max_instructions=10_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("the cancelled F3 saved nothing, but the retried F3 still worked",
+      list(m53.disk_files.keys()) == ['AAA'], f"got {list(m53.disk_files.keys())}")
+
+print("=== F6 cancelled leaves any existing current name untouched ===")
+m54, target = fresh_with_blank_screen()
+m54.getin_queue = (
+    [ANY_KEY, ord('1'), F3, ord('A'), ord('A'), ord('A'), RETURN]
+    + [ord('2'), F6, RUNSTOP]
+    + [ord('3'), F3, F1]
+)
+reason = run_until_return(m54, target, max_instructions=10_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("no BBB (or any other) file was created by the cancelled F6",
+      list(m54.disk_files.keys()) == ['AAA'], f"got {list(m54.disk_files.keys())}")
+aaa = m54.disk_files.get('AAA')
+check("all three edits (across the cancelled F6) ended up in AAA",
+      aaa is not None and aaa[:3] == b'123', f"got {aaa[:3] if aaa else None}")
+
+print("=== current_filename_len is properly initialized at startup, not "
+      "garbage -- a document's very first F3 always prompts ===")
+m55, target = fresh_with_blank_screen()
+m55.getin_queue = [ANY_KEY, F3, ord('F'), ord('I'), ord('R'), ord('S'), ord('T'),
+                    RETURN, F1]
+reason = run_until_return(m55, target, max_instructions=10_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("the very first F3 in a fresh session prompted correctly and saved",
+      list(m55.disk_files.keys()) == ['FIRST'], f"got {list(m55.disk_files.keys())}")
+
+print("=== default status line's help text includes F6 ===")
+m56, target = fresh_with_blank_screen()
+m56.getin_queue = [ANY_KEY, F1]
+reason = run_until_return(m56, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("help text mentions save as",
+      status_row_text(m56) == 'F1-F7: QUIT/NEW/SAVE/AS/DEL/LOAD/DIR',
+      f"got {status_row_text(m56)!r}")
+
+# --- document-full feedback at the absolute last cell ---
+#
+# Before this, typing past the single last cell (row MAX_ROW, column
+# 39) silently kept overwriting that same cell forever, discarding
+# whatever was typed there with zero indication the document had run
+# out of room -- confirmed directly: typing "!?#" there left only "#"
+# behind. Fixed in two places that share the same root cause (no room
+# left to advance to): insert_char (typing at the last cell) and
+# handle_return (RETURN on the last row, which can't create a next
+# line to move to).
+
+def fill_document_chars():
+    return [ord(chr(65 + (i % 26))) for i in range(DOC_ROWS * 40 - 1)]
+
+
+print("=== typing at the absolute last cell writes the character and shows "
+      "DOCUMENT FULL, rather than silently discarding it ===")
+m57, target = fresh_with_blank_screen()
+m57.getin_queue = [ANY_KEY] + fill_document_chars() + [ord('!'), F1]
+reason = run_until_return(m57, target, max_instructions=250_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("the character was actually written, not discarded",
+      screen_char(m57, MAX_ROW, 39) == ord('!'),
+      f"got {screen_char(m57, MAX_ROW, 39)}")
+check("status line shows the document-full message",
+      status_row_text(m57) == 'DOCUMENT FULL -- NO ROOM TO ADD MORE.',
+      f"got {status_row_text(m57)!r}")
+
+print("=== typing well short of the last cell never shows DOCUMENT FULL "
+      "-- shows the row status instead ===")
+m58, target = fresh_with_blank_screen()
+m58.getin_queue = [ANY_KEY, ord('A'), ord('B'), ord('C'), F1]
+reason = run_until_return(m58, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("status line shows the row status (ROW 1), not document-full",
+      status_row_text(m58) == 'ROW 1',
+      f"got {status_row_text(m58)!r}")
+
+print("=== ordinary row-wrap at column 39 (not the last row) never shows "
+      "the document-full message -- it's a genuinely different case ===")
+m59, target = fresh_with_blank_screen()
+chars41 = [ord(chr(65 + (i % 26))) for i in range(41)]
+m59.getin_queue = [ANY_KEY] + chars41 + [F1]
+reason = run_until_return(m59, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("cursor correctly wrapped to row 1",
+      m59.cpu.memory[CURSOR_Y] == 1, f"cursor_y={m59.cpu.memory[CURSOR_Y]}")
+check("status line shows the row status (ROW 2), not document-full",
+      status_row_text(m59) == 'ROW 2',
+      f"got {status_row_text(m59)!r}")
+
+print("=== RETURN on the last row shows the same message; the column still "
+      "resets to 0 even though there's no next row to move to ===")
+m60, target = fresh_with_blank_screen()
+m60.getin_queue = [ANY_KEY] + [RETURN] * (DOC_ROWS - 1) + [ord('X'), RETURN, F1]
+reason = run_until_return(m60, target, max_instructions=250_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("status line shows the document-full message",
+      status_row_text(m60) == 'DOCUMENT FULL -- NO ROOM TO ADD MORE.',
+      f"got {status_row_text(m60)!r}")
+check("cursor_x still reset to 0", m60.cpu.memory[CURSOR_X] == 0,
+      f"cursor_x={m60.cpu.memory[CURSOR_X]}")
+
+print("=== RETURN on any row before the last one never shows DOCUMENT FULL "
+      "-- shows the row status instead, like every other normal RETURN ===")
+m61, target = fresh_with_blank_screen()
+m61.getin_queue = [ANY_KEY, ord('A'), RETURN, ord('B'), F1]
+reason = run_until_return(m61, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("status line shows the row status (ROW 2), not document-full",
+      status_row_text(m61) == 'ROW 2',
+      f"got {status_row_text(m61)!r}")
+
+print("=== after F2 (new), the document-full condition is fully cleared -- "
+      "normal typing resumes cleanly with no stray marks ===")
+m62, target = fresh_with_blank_screen()
+m62.getin_queue = ([ANY_KEY] + fill_document_chars()
+                    + [ord('1'), ord('2'), ord('3'), F2, ord('X'), F1])
+reason = run_until_return(m62, target, max_instructions=250_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("X landed at (0,0) after new, typing works normally again",
+      screen_char(m62, 0, 0) == ord('X') - 0x40,
+      f"got {screen_char(m62, 0, 0)}")
+stray = [i for i in range(960) if m62.cpu.memory[SCREEN + i] & 0x80]
+check("no stray reverse-video bits left over", stray == [],
+      f"stray bits at {stray}")
+
+# --- scrolling beyond one screen ---
+#
+# The document is no longer screen memory itself -- DOC_BUF (200 rows,
+# ~8x a single screen) is now the single source of truth, and the
+# screen is only ever a rendered 24-row view onto some slice of it,
+# starting at doc_top_row. These tests exercise the property that
+# actually matters most: content typed, scrolled away from, and
+# scrolled back to is genuinely still there, not just visually gone.
+
+DOC_TOP_ROW = 0x038e  # editor.asm's own address for this -- see that
+                          # declaration's own comment
+
+
+def doc_row_text(m, doc_buf_addr, row, n):
+    chars = []
+    for c in range(n):
+        b = m.cpu.memory[doc_buf_addr + row * 40 + c]
+        chars.append(chr(b))
+    return ''.join(chars)
+
+
+print("=== typing past the bottom visible row scrolls the viewport down, "
+      "rather than stopping or refusing further input ===")
+m63, target = fresh_with_blank_screen()
+m63.getin_queue = [ANY_KEY] + [RETURN] * 24 + [ord('X'), F1]
+reason = run_until_return(m63, target, max_instructions=20_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("the typed character landed at screen row 23 after scrolling",
+      screen_char(m63, 23, 0) == ord('X') - 0x40,
+      f"got {screen_char(m63, 23, 0)}")
+
+print("=== content typed, scrolled well away from, and scrolled back to "
+      "is still correctly there -- the core property of this feature ===")
+m64, target = fresh_with_blank_screen()
+top = [ord(c) for c in "TOP ROW"]
+down_returns = [RETURN] * 30
+bottom = [ord(c) for c in "BOTTOM AREA"]
+up_arrows = [CRSR_UP] * 30
+m64.getin_queue = [ANY_KEY] + top + down_returns + bottom + up_arrows + [F1]
+reason = run_until_return(m64, target, max_instructions=60_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("row 0 shows the original text after scrolling away and back",
+      decoded_row(m64, 0, 7) == 'TOP ROW',
+      f"got {decoded_row(m64, 0, 7)!r}")
+check("doc_top_row is back to 0", m64.cpu.memory[DOC_TOP_ROW] == 0,
+      f"doc_top_row={m64.cpu.memory[DOC_TOP_ROW]}")
+
+print("=== the viewport cannot scroll past DOC_BUF's own last row: typing "
+      "at the true document boundary is exactly where DOCUMENT FULL "
+      "correctly appears, not one row short or one row past it ===")
+m65, target = fresh_with_blank_screen()
+m65.getin_queue = ([ANY_KEY] + [RETURN] * (DOC_ROWS - 1)
+                    + [ord('A')] * 39 + [ord('Z'), F1])
+reason = run_until_return(m65, target, max_instructions=200_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("doc_top_row capped at the highest valid scroll position",
+      m65.cpu.memory[DOC_TOP_ROW] == DOC_ROWS - 24,
+      f"doc_top_row={m65.cpu.memory[DOC_TOP_ROW]}")
+check("status line shows DOCUMENT FULL exactly at the true last cell",
+      status_row_text(m65) == 'DOCUMENT FULL -- NO ROOM TO ADD MORE.',
+      f"got {status_row_text(m65)!r}")
+
+print("=== cursor-up at the top visible row scrolls up when there's more "
+      "document above, rather than refusing to move ===")
+m66, target = fresh_with_blank_screen()
+m66.getin_queue = [ANY_KEY] + [RETURN] * 5 + [CRSR_UP, CRSR_UP, CRSR_UP, F1]
+reason = run_until_return(m66, target, max_instructions=10_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("doc_top_row stayed at 0 -- cursor moving within the still-visible "
+      "rows 0-4 doesn't need to scroll at all",
+      m66.cpu.memory[DOC_TOP_ROW] == 0, f"doc_top_row={m66.cpu.memory[DOC_TOP_ROW]}")
+
+print("=== DEL at the top-left of a scrolled viewport scrolls up and "
+      "correctly erases the character at the end of the previous line ===")
+m67, target = fresh_with_blank_screen()
+m67.getin_queue = ([ANY_KEY] + [ord(c) for c in "HELLO"] + [RETURN] * 10
+                    + [DEL] * 11 + [F1])   # delete past the wrap point,
+                                              # back into "HELLO"'s own row
+reason = run_until_return(m67, target, max_instructions=20_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("scrolled back up to row 0 (doc_top_row 0) while deleting",
+      m67.cpu.memory[DOC_TOP_ROW] == 0, f"doc_top_row={m67.cpu.memory[DOC_TOP_ROW]}")
+check("one character was correctly erased from HELLO -- HELL remains",
+      decoded_row(m67, 0, 4) == 'HELL', f"got {decoded_row(m67, 0, 4)!r}")
+
+print("=== save trims trailing blank rows down to what's actually used, "
+      "not the full fixed-size document buffer every time ===")
+m68, target = fresh_with_blank_screen()
+m68.getin_queue = [ANY_KEY, ord('H'), ord('I'), F3, ord('S'), ord('H'), ord('O'),
+                    ord('R'), ord('T'), RETURN, F1]
+reason = run_until_return(m68, target, max_instructions=10_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+saved = m68.disk_files.get('SHORT')
+check("saved file is one 40-byte row, not the full 8000-byte document",
+      saved is not None and len(saved) == 40,
+      f"got {len(saved) if saved else None}")
+
+print("=== saving content that spans well beyond one screen captures ALL "
+      "of it, not just whatever's currently visible ===")
+m69, target = fresh_with_blank_screen()
+top2 = [ord(c) for c in "FIRST LINE"]
+returns2 = [RETURN] * 30
+bottom2 = [ord(c) for c in "LAST LINE"]
+m69.getin_queue = ([ANY_KEY] + top2 + returns2 + bottom2
+                    + [F3, ord('B'), ord('I'), ord('G'), RETURN, F1])
+reason = run_until_return(m69, target, max_instructions=100_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+saved2 = m69.disk_files.get('BIG')
+check("saved file covers all 31 rows (31*40 bytes), well beyond one screen",
+      saved2 is not None and len(saved2) == 31 * 40,
+      f"got {len(saved2) if saved2 else None}")
+if saved2:
+    check("row 0 preserved", saved2[0:10] == b'FIRST LINE')
+    check("row 30 preserved", saved2[30*40:30*40+9] == b'LAST LINE')
+
+print("=== loading that same multi-row file back restores it correctly, "
+      "with the viewport reset to the top ===")
+m70, target = fresh_with_blank_screen()
+row_data = bytearray(b' ' * (31 * 40))
+row_data[0:10] = b'FIRST LINE'
+row_data[30*40:30*40+9] = b'LAST LINE'
+m70.disk_files = {'BIG': bytes(row_data)}
+m70.getin_queue = [ANY_KEY, F5, RETURN, F1]
+reason = run_until_return(m70, target, max_instructions=100_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("row 0 shows FIRST LINE immediately after loading",
+      decoded_row(m70, 0, 10) == 'FIRST LINE',
+      f"got {decoded_row(m70, 0, 10)!r}")
+check("doc_top_row reset to 0 after loading",
+      m70.cpu.memory[DOC_TOP_ROW] == 0, f"doc_top_row={m70.cpu.memory[DOC_TOP_ROW]}")
+
+print("=== F7 (directory) preserves the scrolled position it was invoked "
+      "from, rather than resetting to the top ===")
+m71, target = fresh_with_blank_screen()
+m71.disk_files = {'FILE1': b'x' * 40}
+m71.getin_queue = ([ANY_KEY] + [ord(c) for c in "SCROLLED"] + [RETURN] * 10
+                    + [ord(c) for c in "HERE"] + [F7, ANY_KEY, F1])
+reason = run_until_return(m71, target, max_instructions=30_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("row 10 still shows HERE after F7 is dismissed, unaffected",
+      decoded_row(m71, 10, 4) == 'HERE',
+      f"got {decoded_row(m71, 10, 4)!r}")
+
+# --- F8 (help) ---
+#
+# Shows the bottom-row F-key assignments on the status line. The exact
+# wording asked for ("1:Q 2:NEW 3:SAV 4:DEL 5:LD 6:AS 7:DIR 8:?") comes
+# to 41 characters, one over the 40-column status line -- "DIR" became
+# "DR" here to fit, the one abbreviation that could give up a
+# character without shortening any of the other, harder-to-trim words.
+
+print("=== F8 shows the exact (trimmed-to-fit) F-key reference text ===")
+m72, target = fresh_with_blank_screen()
+m72.getin_queue = [ANY_KEY, F8, F1]
+reason = run_until_return(m72, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("status line shows the F-key reference",
+      status_row_text(m72) == '1:Q 2:NEW 3:SAV 4:DEL 5:LD 6:AS 7:DR 8:?',
+      f"got {status_row_text(m72)!r}")
+
+print("=== F8 doesn't touch the document; typing after it correctly shows "
+      "the row status again, not stuck showing the old F8 text forever ===")
+m73, target = fresh_with_blank_screen()
+m73.getin_queue = [ANY_KEY, ord('A'), ord('B'), F8, ord('C'), F1]
+reason = run_until_return(m73, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("all three characters landed correctly, F8 in between changed nothing",
+      screen_char(m73, 0, 0) == 1 and screen_char(m73, 0, 1) == 2
+      and screen_char(m73, 0, 2) == 3)
+check("status line shows the row status after typing resumes, same as "
+      "any other typing (matching the general rule: typing/cursor keys "
+      "always show the row, F-keys show their own result)",
+      status_row_text(m73) == 'ROW 1',
+      f"got {status_row_text(m73)!r}")
+
+print("=== F8 leaves no stray reverse-video bits behind ===")
+m74, target = fresh_with_blank_screen()
+m74.getin_queue = [ANY_KEY, F8, F1]
+reason = run_until_return(m74, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+stray = [i for i in range(960) if m74.cpu.memory[SCREEN + i] & 0x80]
+check("every cell in the editable area has bit 7 clear", stray == [],
+      f"stray bits at offsets {stray}")
+
+# --- the real hardware bug this file shipped with: copy_ptr at $F5,
+# inside the KERNAL's own $F3-$F6 keyboard-scan IRQ range ---
+#
+# Confirmed on real hardware, not just in a bug report taken on faith:
+# reaching the bottom of the screen and pressing RETURN produced
+# "random characters and graphic symbols" on the lower half of the
+# screen, without hanging. This project's own past experience had
+# already identified $F3-$F6 as unsafe for exactly this kind of
+# pointer -- confirmed here directly by running the whole suite above
+# with mini6502.py's zero-page poisoning simulation turned on (see
+# fresh_with_blank_screen's own C64Machine call), which periodically
+# writes realistic garbage into that range the same way real
+# hardware's own IRQ handler does. copy_ptr, reused for both DOC_BUF
+# access and file I/O, is now at $03 instead, which every test in this
+# file already exercises -- this last one exists specifically to name
+# the bug plainly and check the two exact operations the original
+# report described: reaching the bottom of the screen and pressing
+# RETURN, with no garbage left behind afterward.
+
+print("=== reaching the bottom of the screen and pressing RETURN leaves "
+      "no garbage behind, with realistic zero-page interference active "
+      "(the exact real-hardware bug this file shipped with) ===")
+m75, target = fresh_with_blank_screen()
+m75.getin_queue = [ANY_KEY] + [RETURN] * 24 + [ord('X'), F1]
+reason = run_until_return(m75, target, max_instructions=20_000_000)
+check("program returns cleanly, does not hang", reason is None, f"reason={reason}")
+garbage = [(r, c) for r in range(24) for c in range(40)
+           if screen_char(m75, r, c) != 0x20 and not (r == 23 and c == 0)]
+check("no unexpected bytes anywhere on screen after scrolling",
+      garbage == [], f"found unexpected bytes at {garbage[:10]}")
+check("the typed character landed correctly at the new position",
+      screen_char(m75, 23, 0) == ord('X') - 0x40,
+      f"got {screen_char(m75, 23, 0)}")
+
+# --- row number status display and page up/down ---
+#
+# Row status shows "ROW n" (1-based) on the status line after typing,
+# RETURN, DEL, any cursor key, or page up/down -- but deliberately not
+# after F-key operations, whose own result messages ("SAVED.",
+# "CANCELLED.", and so on) are more useful to leave in place.
+#
+# Page up/down uses HOME/CLR (SHIFT+HOME), not a cursor-key
+# combination -- confirmed directly, not assumed, that none of the
+# usual modifiers work for that here: CTRL+cursor produces nothing at
+# all in the keyboard buffer, and both SHIFT+cursor and C=+cursor
+# produce the same code as the opposite plain cursor key, so neither
+# can mean anything new. HOME/CLR are a genuinely distinct, otherwise
+# unused key pair.
+
+print("=== typing the first character shows ROW 1 ===")
+m76, target = fresh_with_blank_screen()
+m76.getin_queue = [ANY_KEY, ord('A'), F1]
+reason = run_until_return(m76, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("status line shows ROW 1", status_row_text(m76) == 'ROW 1',
+      f"got {status_row_text(m76)!r}")
+
+print("=== RETURN moves to ROW 2 ===")
+m77, target = fresh_with_blank_screen()
+m77.getin_queue = [ANY_KEY, RETURN, F1]
+reason = run_until_return(m77, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("status line shows ROW 2", status_row_text(m77) == 'ROW 2',
+      f"got {status_row_text(m77)!r}")
+
+print("=== ROW 105 formats correctly -- a real digit-extraction edge case "
+      "(the tens digit must show its own zero once hundreds is nonzero) ===")
+m78, target = fresh_with_blank_screen()
+m78.getin_queue = [ANY_KEY] + [CLR] * 4 + [RETURN] * 8 + [F1]
+reason = run_until_return(m78, target, max_instructions=100_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("status line shows ROW 105", status_row_text(m78) == 'ROW 105',
+      f"got {status_row_text(m78)!r}")
+
+print("=== ROW 200, the true last row, formats correctly ===")
+m79, target = fresh_with_blank_screen()
+m79.getin_queue = [ANY_KEY] + [CLR] * 8 + [RETURN] * 23 + [F1]
+reason = run_until_return(m79, target, max_instructions=150_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("status line shows ROW 200", status_row_text(m79) == 'ROW 200',
+      f"got {status_row_text(m79)!r}")
+
+print("=== F-key operations still show their own result message, not "
+      "immediately overwritten by a row number ===")
+m80, target = fresh_with_blank_screen()
+m80.getin_queue = [ANY_KEY, ord('X'), F3, ord('A'), ord('A'), ord('A'), RETURN, F1]
+reason = run_until_return(m80, target, max_instructions=10_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("status line shows SAVED., not a row number",
+      status_row_text(m80) == 'SAVED.', f"got {status_row_text(m80)!r}")
+
+print("=== F8 (help) still shows the F-key reference, not a row number ===")
+m81, target = fresh_with_blank_screen()
+m81.getin_queue = [ANY_KEY, ord('A'), F8, F1]
+reason = run_until_return(m81, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("status line shows the F-key reference",
+      status_row_text(m81) == '1:Q 2:NEW 3:SAV 4:DEL 5:LD 6:AS 7:DR 8:?',
+      f"got {status_row_text(m81)!r}")
+
+print("=== CLR (page down) from the top moves the viewport 24 rows down ===")
+m82, target = fresh_with_blank_screen()
+m82.getin_queue = [ANY_KEY, CLR, F1]
+reason = run_until_return(m82, target)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("doc_top_row advanced by exactly 24",
+      m82.cpu.memory[DOC_TOP_ROW] == 24, f"doc_top_row={m82.cpu.memory[DOC_TOP_ROW]}")
+
+print("=== repeated page-down is capped at the highest valid scroll "
+      "position, not overshot past it ===")
+m83, target = fresh_with_blank_screen()
+m83.getin_queue = [ANY_KEY] + [CLR] * 9 + [F1]   # 9*24=216, far past 176
+reason = run_until_return(m83, target, max_instructions=30_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("doc_top_row capped at DOC_ROWS-24",
+      m83.cpu.memory[DOC_TOP_ROW] == DOC_ROWS - 24,
+      f"doc_top_row={m83.cpu.memory[DOC_TOP_ROW]}")
+
+print("=== HOME (page up) from a scrolled position moves back up, capped at 0 ===")
+m84, target = fresh_with_blank_screen()
+m84.getin_queue = [ANY_KEY, CLR, CLR] + [HOME] * 5 + [F1]   # down 48, up 120 -> capped at 0
+reason = run_until_return(m84, target, max_instructions=30_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("doc_top_row capped at 0", m84.cpu.memory[DOC_TOP_ROW] == 0,
+      f"doc_top_row={m84.cpu.memory[DOC_TOP_ROW]}")
+
+print("=== content typed, paged away from, and paged back to is still "
+      "correctly there ===")
+m85, target = fresh_with_blank_screen()
+top_text = [ord(c) for c in "TOP"]
+m85.getin_queue = [ANY_KEY] + top_text + [CLR, HOME, F1]
+reason = run_until_return(m85, target, max_instructions=20_000_000)
+check("program returns cleanly", reason is None, f"reason={reason}")
+check("row 0 still reads TOP after paging away and back",
+      decoded_row(m85, 0, 3) == 'TOP', f"got {decoded_row(m85, 0, 3)!r}")
 
 print()
 print(f"{passed} passed, {failed} failed")

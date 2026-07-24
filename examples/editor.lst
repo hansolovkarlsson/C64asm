@@ -1,4 +1,4 @@
-; c64asm listing  (origin $0801, 2123 bytes)
+; c64asm listing  (origin $0801, 3726 bytes)
 ; CYCLES column: a plain number is a fixed cycle count; "b/b+1" means b cycles, +1 more if this instruction's indexed addressing crosses a page boundary; "2/3/4" means a branch's usual 2 (not taken) / 3 (taken) / 4 (taken, crossing a page). Blank means an illegal/undocumented opcode (.cpu 6510x) -- see c64asm-reference.md "Listing file format".
 
 ADDR  BYTES      CYCLES  SOURCE
@@ -28,684 +28,1255 @@ ADDR  BYTES      CYCLES  SOURCE
 0839  60         6               rts
 083A  A9 93      2               lda #$93
 083C  20 D2 FF   6               jsr CHROUT
-083F  A9 AF      2               lda #<title_msg
-0841  A0 09      2               ldy #>title_msg
+083F  A9 90      2               lda #<title_msg
+0841  A0 0B      2               ldy #>title_msg
 0843  20 10 08   6               jsr print_msg
-0846  A9 C3      2               lda #<instructions_msg
-0848  A0 09      2               ldy #>instructions_msg
+0846  A9 A4      2               lda #<instructions_msg
+0848  A0 0B      2               ldy #>instructions_msg
 084A  20 10 08   6               jsr print_msg
-084D  A9 1D      2               lda #<continue_msg
-084F  A0 0A      2               ldy #>continue_msg
+084D  A9 97      2               lda #<continue_msg
+084F  A0 0C      2               ldy #>continue_msg
 0851  20 10 08   6               jsr print_msg
-0854  20 F8 08   6               jsr wait_for_key
-0857  A9 93      2               lda #$93
-0859  20 D2 FF   6               jsr CHROUT
-085C  A9 00      2               lda #$00
-085E  8D 3C 03   4               sta cursor_x
-0861  8D 3D 03   4               sta cursor_y
-0864  20 FE 08   6               jsr recompute_screen_ptr
-0867  20 BE 0B   6               jsr show_help_status
-086A  20 12 09   6               jsr show_cursor
-086D  20 E4 FF   6               jsr GETIN
-0870  F0 FB      2/3/4           beq wait_key
-0872  48         3               pha
-0873  20 1B 09   6               jsr hide_cursor
-0876  68         4               pla
-0877  C9 85      2               cmp #$85                ; F1
-0879  F0 5E      2/3/4           beq __local10_do_quit
-087B  C9 89      2               cmp #$89                ; F2
-087D  F0 5D      2/3/4           beq __local10_do_new
-087F  C9 86      2               cmp #$86                ; F3
-0881  F0 5C      2/3/4           beq __local10_do_save
-0883  C9 8A      2               cmp #$8a                ; F4
-0885  F0 5B      2/3/4           beq __local10_do_delete_file
-0887  C9 87      2               cmp #$87                ; F5
-0889  F0 5A      2/3/4           beq __local10_do_load
-088B  C9 88      2               cmp #$88                ; F7
-088D  F0 59      2/3/4           beq __local10_do_directory
-088F  C9 0D      2               cmp #$0d                ; RETURN
-0891  F0 22      2/3/4           beq __local10_do_return
-0893  C9 14      2               cmp #$14                ; DEL
-0895  F0 24      2/3/4           beq __local10_do_delete
-0897  C9 11      2               cmp #$11                ; cursor down
-0899  F0 26      2/3/4           beq __local10_do_down
-089B  C9 91      2               cmp #$91                ; cursor up
-089D  F0 28      2/3/4           beq __local10_do_up
-089F  C9 1D      2               cmp #$1d                ; cursor right
-08A1  F0 2A      2/3/4           beq __local10_do_right
-08A3  C9 9D      2               cmp #$9d                ; cursor left
-08A5  F0 2C      2/3/4           beq __local10_do_left
-08A7  C9 20      2               cmp #$20
-08A9  90 BF      2/3/4           bcc main_loop            ; < $20: an unhandled control code -- ignore
-08AB  C9 60      2               cmp #$60
-08AD  B0 BB      2/3/4           bcs main_loop            ; >= $60: not in the range this editor accepts -- ignore
-08AF  20 24 09   6               jsr insert_char
-08B2  4C 6A 08   3               jmp main_loop
-08B5  20 33 09   6               jsr handle_return
-08B8  4C 6A 08   3               jmp main_loop
-08BB  20 45 09   6               jsr handle_delete
-08BE  4C 6A 08   3               jmp main_loop
-08C1  20 95 09   6               jsr move_cursor_down
-08C4  4C 6A 08   3               jmp main_loop
-08C7  20 A3 09   6               jsr move_cursor_up
-08CA  4C 6A 08   3               jmp main_loop
-08CD  20 59 09   6               jsr move_cursor_right
-08D0  4C 6A 08   3               jmp main_loop
-08D3  20 79 09   6               jsr move_cursor_left
-08D6  4C 6A 08   3               jmp main_loop
-08D9  4C EB 08   3               jmp do_quit
-08DC  4C E0 0C   3               jmp do_new
-08DF  4C 0C 0E   3               jmp do_save
-08E2  4C AD 0D   3               jmp do_delete
-08E5  4C 66 0E   3               jmp do_load
-08E8  4C 87 0F   3               jmp do_directory
-08EB  A9 93      2               lda #$93
-08ED  20 D2 FF   6               jsr CHROUT
-08F0  A9 38      2               lda #<bye_msg
-08F2  A0 0A      2               ldy #>bye_msg
-08F4  20 10 08   6               jsr print_msg
-08F7  60         6               rts
-08F8  20 E4 FF   6               jsr GETIN
-08FB  F0 FB      2/3/4           beq wait_for_key
-08FD  60         6               rts
-08FE  AE 3D 03   4               ldx cursor_y
-0901  BD 65 0B   4/5             lda screen_row_lo,x
-0904  18         2               clc
-0905  6D 3C 03   4               adc cursor_x
-0908  85 F7      3               sta screen_ptr
-090A  BD 7E 0B   4/5             lda screen_row_hi,x
-090D  69 00      2               adc #$00
-090F  85 F8      3               sta screen_ptr+1
-0911  60         6               rts
-0912  A0 00      2               ldy #$00
-0914  B1 F7      5/6             lda (screen_ptr),y
-0916  09 80      2               ora #$80
-0918  91 F7      6               sta (screen_ptr),y
-091A  60         6               rts
-091B  A0 00      2               ldy #$00
-091D  B1 F7      5/6             lda (screen_ptr),y
-091F  29 7F      2               and #$7f
-0921  91 F7      6               sta (screen_ptr),y
-0923  60         6               rts
-0924  C9 40      2               cmp #$40
-0926  90 03      2/3/4           bcc __local18_unchanged
-0928  38         2               sec
-0929  E9 40      2               sbc #$40
-092B  A0 00      2               ldy #$00
-092D  91 F7      6               sta (screen_ptr),y
-092F  20 59 09   6               jsr move_cursor_right
-0932  60         6               rts
-0933  A9 00      2               lda #$00
-0935  8D 3C 03   4               sta cursor_x
-0938  AD 3D 03   4               lda cursor_y
-093B  C9 17      2               cmp #MAX_ROW
-093D  F0 03      2/3/4           beq __local19_recompute
-093F  EE 3D 03   6               inc cursor_y
-0942  4C FE 08   3               jmp recompute_screen_ptr
-0945  AD 3C 03   4               lda cursor_x
-0948  D0 05      2/3/4           bne __local20_can_delete
-094A  AD 3D 03   4               lda cursor_y
-094D  F0 09      2/3/4           beq __local20_nothing_to_delete
-094F  20 79 09   6               jsr move_cursor_left
-0952  A9 20      2               lda #$20
-0954  A0 00      2               ldy #$00
-0956  91 F7      6               sta (screen_ptr),y
-0958  60         6               rts
-0959  AD 3C 03   4               lda cursor_x
-095C  C9 27      2               cmp #39
-095E  D0 13      2/3/4           bne __local21_same_row
-0960  AD 3D 03   4               lda cursor_y
-0963  C9 17      2               cmp #MAX_ROW
-0965  D0 01      2/3/4           bne __local21_next_row
-0967  60         6               rts                      ; already at the very last cell -- stay put
-0968  A9 00      2               lda #$00
-096A  8D 3C 03   4               sta cursor_x
-096D  EE 3D 03   6               inc cursor_y
-0970  4C FE 08   3               jmp recompute_screen_ptr
-0973  EE 3C 03   6               inc cursor_x
-0976  4C FE 08   3               jmp recompute_screen_ptr
-0979  AD 3C 03   4               lda cursor_x
-097C  D0 11      2/3/4           bne __local22_same_row
-097E  AD 3D 03   4               lda cursor_y
-0981  F0 0B      2/3/4           beq __local22_at_origin           ; already at (0,0) -- stay put
-0983  CE 3D 03   6               dec cursor_y
-0986  A9 27      2               lda #39
-0988  8D 3C 03   4               sta cursor_x
-098B  4C FE 08   3               jmp recompute_screen_ptr
-098E  60         6               rts
-098F  CE 3C 03   6               dec cursor_x
-0992  4C FE 08   3               jmp recompute_screen_ptr
-0995  AD 3D 03   4               lda cursor_y
-0998  C9 17      2               cmp #MAX_ROW
-099A  F0 06      2/3/4           beq __local23_no_move
-099C  EE 3D 03   6               inc cursor_y
-099F  4C FE 08   3               jmp recompute_screen_ptr
-09A2  60         6               rts
-09A3  AD 3D 03   4               lda cursor_y
-09A6  F0 06      2/3/4           beq __local24_no_move
-09A8  CE 3D 03   6               dec cursor_y
-09AB  4C FE 08   3               jmp recompute_screen_ptr
-09AE  60         6               rts
-0B97  A0 00      2               ldy #$00
-0B99  B1 F9      5/6             lda (msg_ptr),y
-0B9B  F0 10      2/3/4           beq __local45_pad
-0B9D  C9 40      2               cmp #$40
-0B9F  90 03      2/3/4           bcc __local45_unchanged
-0BA1  38         2               sec
-0BA2  E9 40      2               sbc #$40
-0BA4  99 C0 07   5               sta STATUS_ROW_ADDR,y
-0BA7  C8         2               iny
-0BA8  C0 28      2               cpy #40
-0BAA  D0 ED      2/3/4           bne __local45_copy_loop
-0BAC  60         6               rts                       ; message filled the whole row exactly
-0BAD  8C 64 03   4               sty status_msg_len
-0BB0  A9 20      2               lda #$20
-0BB2  C0 28      2               cpy #40
-0BB4  F0 07      2/3/4           beq __local45_done
-0BB6  99 C0 07   5               sta STATUS_ROW_ADDR,y
-0BB9  C8         2               iny
-0BBA  4C B2 0B   3               jmp __local45_pad_loop
-0BBD  60         6               rts
-0BBE  A9 41      2               lda #<help_status_msg
-0BC0  85 F9      3               sta msg_ptr
-0BC2  A9 0A      2               lda #>help_status_msg
-0BC4  85 FA      3               sta msg_ptr+1
-0BC6  4C 97 0B   3               jmp print_status
-0BC9  20 97 0B   6               jsr print_status
-0BCC  A9 00      2               lda #$00
-0BCE  8D 5A 03   4               sta filename_len
-0BD1  20 E4 FF   6               jsr GETIN
-0BD4  F0 FB      2/3/4           beq __local47_type_loop
-0BD6  C9 03      2               cmp #$03                ; RUN/STOP -- the C64 keyboard has no
-0BD8  F0 52      2/3/4           beq __local47_cancel_via_stop       ; key labeled ESC; RUN/STOP (also
-0BDA  C9 0D      2               cmp #$0d
-0BDC  F0 53      2/3/4           beq __local47_done
-0BDE  C9 14      2               cmp #$14
-0BE0  F0 31      2/3/4           beq __local47_do_backspace
-0BE2  C9 20      2               cmp #$20
-0BE4  90 EB      2/3/4           bcc __local47_type_loop
-0BE6  C9 60      2               cmp #$60
-0BE8  B0 E7      2/3/4           bcs __local47_type_loop
-0BEA  AC 5A 03   4               ldy filename_len
-0BED  C0 10      2               cpy #16
-0BEF  B0 E0      2/3/4           bcs __local47_type_loop             ; buffer already full -- ignore
-0BF1  99 42 03   5               sta filename_buf,y         ; store the raw PETSCII byte
-0BF4  8D 65 03   4               sta prompt_scratch
-0BF7  C9 40      2               cmp #$40
-0BF9  90 06      2/3/4           bcc __local47_sc_done
-0BFB  38         2               sec
-0BFC  E9 40      2               sbc #$40
-0BFE  8D 65 03   4               sta prompt_scratch
-0C01  98         2               tya
-0C02  18         2               clc
-0C03  6D 64 03   4               adc status_msg_len
-0C06  A8         2               tay
-0C07  AD 65 03   4               lda prompt_scratch
-0C0A  99 C0 07   5               sta STATUS_ROW_ADDR,y
-0C0D  EE 5A 03   6               inc filename_len
-0C10  4C D1 0B   3               jmp __local47_type_loop
-0C13  AD 5A 03   4               lda filename_len
-0C16  F0 B9      2/3/4           beq __local47_type_loop              ; nothing typed yet -- ignore
-0C18  CE 5A 03   6               dec filename_len
-0C1B  AC 5A 03   4               ldy filename_len
-0C1E  98         2               tya
-0C1F  18         2               clc
-0C20  6D 64 03   4               adc status_msg_len
-0C23  A8         2               tay
-0C24  A9 20      2               lda #$20
-0C26  99 C0 07   5               sta STATUS_ROW_ADDR,y
-0C29  4C D1 0B   3               jmp __local47_type_loop
-0C2C  A9 00      2               lda #$00
-0C2E  8D 5A 03   4               sta filename_len
-0C31  AD 5A 03   4               lda filename_len
-0C34  60         6               rts
-0C35  AC 5A 03   4               ldy filename_len
-0C38  A9 2C      2               lda #$2c
-0C3A  99 42 03   5               sta filename_buf,y
-0C3D  C8         2               iny
-0C3E  A9 53      2               lda #$53
-0C40  99 42 03   5               sta filename_buf,y
-0C43  C8         2               iny
-0C44  A9 2C      2               lda #$2c
-0C46  99 42 03   5               sta filename_buf,y
-0C49  C8         2               iny
-0C4A  A9 57      2               lda #$57
-0C4C  99 42 03   5               sta filename_buf,y
-0C4F  C8         2               iny
-0C50  8C 5B 03   4               sty filename_total_len
-0C53  60         6               rts
-0C54  AC 5A 03   4               ldy filename_len
-0C57  A9 2C      2               lda #$2c
-0C59  99 42 03   5               sta filename_buf,y
-0C5C  C8         2               iny
-0C5D  A9 53      2               lda #$53
-0C5F  99 42 03   5               sta filename_buf,y
-0C62  C8         2               iny
-0C63  A9 2C      2               lda #$2c
-0C65  99 42 03   5               sta filename_buf,y
-0C68  C8         2               iny
-0C69  A9 52      2               lda #$52
-0C6B  99 42 03   5               sta filename_buf,y
-0C6E  C8         2               iny
-0C6F  8C 5B 03   4               sty filename_total_len
-0C72  60         6               rts
-0C73  A9 00      2               lda #<$0400
-0C75  85 F5      3               sta copy_ptr
-0C77  A9 04      2               lda #>$0400
-0C79  85 F6      3               sta copy_ptr+1
-0C7B  A2 04      2               ldx #4                     ; 4 * 240 = 960 bytes -- rows 0-23
-0C7D  A0 00      2               ldy #$00
-0C7F  B1 F5      5/6             lda (copy_ptr),y
-0C81  29 7F      2               and #$7f                    ; strip any cursor reverse-video bit
-0C83  C9 20      2               cmp #$20
-0C85  B0 03      2/3/4           bcs __local50_unchanged                ; >= $20 -- PETSCII unchanged
-0C87  18         2               clc
-0C88  69 40      2               adc #$40
-0C8A  20 D2 FF   6               jsr CHROUT
-0C8D  C8         2               iny
-0C8E  C0 F0      2               cpy #240
-0C90  D0 ED      2/3/4           bne __local50_inner
-0C92  A5 F5      3               lda copy_ptr
-0C94  18         2               clc
-0C95  69 F0      2               adc #240
-0C97  85 F5      3               sta copy_ptr
-0C99  A5 F6      3               lda copy_ptr+1
-0C9B  69 00      2               adc #$00
-0C9D  85 F6      3               sta copy_ptr+1
-0C9F  CA         2               dex
-0CA0  D0 DB      2/3/4           bne __local50_outer
-0CA2  60         6               rts
-0CA3  A9 00      2               lda #<$0400
-0CA5  85 F5      3               sta copy_ptr
-0CA7  A9 04      2               lda #>$0400
-0CA9  85 F6      3               sta copy_ptr+1
-0CAB  A2 04      2               ldx #4                      ; 4 * 240 = 960 bytes -- rows 0-23
-0CAD  A0 00      2               ldy #$00
-0CAF  20 B7 FF   6               jsr READST
-0CB2  29 40      2               and #$40
-0CB4  D0 10      2/3/4           bne __local51_fill_space
-0CB6  20 CF FF   6               jsr CHRIN
-0CB9  C9 40      2               cmp #$40
-0CBB  90 06      2/3/4           bcc __local51_sc_unchanged
-0CBD  38         2               sec
-0CBE  E9 40      2               sbc #$40
-0CC0  4C C8 0C   3               jmp __local51_store
-0CC3  4C C8 0C   3               jmp __local51_store
-0CC6  A9 20      2               lda #$20
-0CC8  91 F5      6               sta (copy_ptr),y
-0CCA  C8         2               iny
-0CCB  C0 F0      2               cpy #240
-0CCD  D0 E0      2/3/4           bne __local51_inner
-0CCF  A5 F5      3               lda copy_ptr
-0CD1  18         2               clc
-0CD2  69 F0      2               adc #240
-0CD4  85 F5      3               sta copy_ptr
-0CD6  A5 F6      3               lda copy_ptr+1
-0CD8  69 00      2               adc #$00
-0CDA  85 F6      3               sta copy_ptr+1
-0CDC  CA         2               dex
-0CDD  D0 CE      2/3/4           bne __local51_outer
-0CDF  60         6               rts
-0CE0  A9 00      2               lda #<$0400
-0CE2  85 F5      3               sta copy_ptr
-0CE4  A9 04      2               lda #>$0400
-0CE6  85 F6      3               sta copy_ptr+1
-0CE8  A2 04      2               ldx #$04                    ; 4 * 240 = 960 bytes -- rows 0-23
-0CEA  A9 20      2               lda #$20                    ; space screen code
-0CEC  A0 00      2               ldy #$00
-0CEE  91 F5      6               sta (copy_ptr),y
-0CF0  C8         2               iny
-0CF1  C0 F0      2               cpy #240
-0CF3  D0 F9      2/3/4           bne __local52_inner
-0CF5  A5 F5      3               lda copy_ptr
-0CF7  18         2               clc
-0CF8  69 F0      2               adc #240
-0CFA  85 F5      3               sta copy_ptr
-0CFC  A5 F6      3               lda copy_ptr+1
-0CFE  69 00      2               adc #$00
-0D00  85 F6      3               sta copy_ptr+1
-0D02  CA         2               dex
-0D03  D0 E5      2/3/4           bne __local52_outer
-0D05  A9 00      2               lda #$00
-0D07  8D 3C 03   4               sta cursor_x
-0D0A  8D 3D 03   4               sta cursor_y
-0D0D  20 FE 08   6               jsr recompute_screen_ptr
-0D10  A9 92      2               lda #<new_msg
-0D12  85 F9      3               sta msg_ptr
-0D14  A9 0A      2               lda #>new_msg
-0D16  85 FA      3               sta msg_ptr+1
-0D18  20 97 0B   6               jsr print_status
-0D1B  4C 6A 08   3               jmp main_loop
-0D1E  A9 53      2               lda #$53                   ; 'S'
-0D20  8D 66 03   4               sta scratch_cmd_buf
-0D23  A9 30      2               lda #$30                   ; '0'
-0D25  8D 67 03   4               sta scratch_cmd_buf+1
-0D28  A9 3A      2               lda #$3a                    ; ':'
-0D2A  8D 68 03   4               sta scratch_cmd_buf+2
-0D2D  A0 00      2               ldy #$00
-0D2F  CC 5A 03   4               cpy filename_len
-0D32  F0 0A      2/3/4           beq __local53_done
-0D34  B9 42 03   4/5             lda filename_buf,y
-0D37  99 69 03   5               sta scratch_cmd_buf+3,y
-0D3A  C8         2               iny
-0D3B  4C 2F 0D   3               jmp __local53_copy_loop
-0D3E  98         2               tya
-0D3F  18         2               clc
-0D40  69 03      2               adc #$03
-0D42  8D 7A 03   4               sta scratch_cmd_len
-0D45  60         6               rts
-0D46  20 1E 0D   6               jsr build_scratch_cmd
-0D49  AD 7A 03   4               lda scratch_cmd_len
-0D4C  A2 66      2               ldx #<scratch_cmd_buf
-0D4E  A0 03      2               ldy #>scratch_cmd_buf
-0D50  20 BD FF   6               jsr SETNAM
-0D53  A9 0F      2               lda #$0f                   ; logical file 15
-0D55  A2 08      2               ldx #$08                   ; device 8
-0D57  A0 0F      2               ldy #$0f                    ; secondary address 15 = command
-0D59  20 BA FF   6               jsr SETLFS
-0D5C  20 C0 FF   6               jsr OPEN
-0D5F  90 03      2/3/4           bcc __local54_open_ok
-0D61  A9 00      2               lda #$00                    ; couldn't even open the command
-0D63  60         6               rts                          ; channel -- treat as "nothing
-0D64  A2 0F      2               ldx #$0f
-0D66  20 C6 FF   6               jsr CHKIN
-0D69  A2 00      2               ldx #$00                    ; comma counter
-0D6B  20 B7 FF   6               jsr READST
-0D6E  D0 32      2/3/4           bne __local54_nothing_found            ; response ended before reaching
-0D70  20 CF FF   6               jsr CHRIN
-0D73  C9 2C      2               cmp #$2c                       ; ','
-0D75  D0 F4      2/3/4           bne __local54_skip_loop
-0D77  E8         2               inx
-0D78  E0 02      2               cpx #$02
-0D7A  D0 EF      2/3/4           bne __local54_skip_loop
-0D7C  20 B7 FF   6               jsr READST
-0D7F  D0 21      2/3/4           bne __local54_nothing_found
-0D81  20 CF FF   6               jsr CHRIN
-0D84  C9 30      2               cmp #$30                       ; '0' -- the count's first digit
-0D86  D0 0F      2/3/4           bne __local54_something_found            ; nonzero first digit -- found
-0D88  20 B7 FF   6               jsr READST
-0D8B  D0 15      2/3/4           bne __local54_nothing_found
-0D8D  20 CF FF   6               jsr CHRIN
-0D90  C9 30      2               cmp #$30                        ; '0' -- the count's second digit;
-0D92  D0 03      2/3/4           bne __local54_something_found             ; the real response always
-0D94  4C A2 0D   3               jmp __local54_nothing_found
-0D97  20 CC FF   6               jsr CLRCHN
-0D9A  A9 0F      2               lda #$0f
-0D9C  20 C3 FF   6               jsr CLOSE
-0D9F  A9 01      2               lda #$01
-0DA1  60         6               rts
-0DA2  20 CC FF   6               jsr CLRCHN
-0DA5  A9 0F      2               lda #$0f
-0DA7  20 C3 FF   6               jsr CLOSE
-0DAA  A9 00      2               lda #$00
-0DAC  60         6               rts
-0DAD  A9 74      2               lda #<delete_prompt_msg
-0DAF  85 F9      3               sta msg_ptr
-0DB1  A9 0A      2               lda #>delete_prompt_msg
-0DB3  85 FA      3               sta msg_ptr+1
-0DB5  20 C9 0B   6               jsr prompt_filename
-0DB8  C9 00      2               cmp #$00
-0DBA  D0 03      2/3/4           bne __local55_ask_confirm
-0DBC  4C FE 0D   3               jmp __local55_cancelled
-0DBF  A9 7D      2               lda #<confirm_delete_msg
-0DC1  85 F9      3               sta msg_ptr
-0DC3  A9 0A      2               lda #>confirm_delete_msg
-0DC5  85 FA      3               sta msg_ptr+1
-0DC7  20 97 0B   6               jsr print_status
-0DCA  20 E4 FF   6               jsr GETIN
-0DCD  F0 FB      2/3/4           beq __local55_confirm_wait
-0DCF  C9 03      2               cmp #$03                    ; RUN/STOP -- cancel here too, same
-0DD1  F0 2B      2/3/4           beq __local55_cancelled                ; as at the filename prompt itself
-0DD3  C9 4E      2               cmp #$4e                    ; 'N'
-0DD5  F0 27      2/3/4           beq __local55_cancelled
-0DD7  C9 59      2               cmp #$59                     ; 'Y'
-0DD9  D0 EF      2/3/4           bne __local55_confirm_wait             ; anything else -- keep waiting
-0DDB  20 46 0D   6               jsr scratch_current_file
-0DDE  C9 01      2               cmp #$01
-0DE0  F0 0E      2/3/4           beq __local55_deleted
-0DE2  A9 AD      2               lda #<not_found_msg
-0DE4  85 F9      3               sta msg_ptr
-0DE6  A9 0A      2               lda #>not_found_msg
-0DE8  85 FA      3               sta msg_ptr+1
-0DEA  20 97 0B   6               jsr print_status
-0DED  4C 6A 08   3               jmp main_loop
-0DF0  A9 9C      2               lda #<deleted_msg
-0DF2  85 F9      3               sta msg_ptr
-0DF4  A9 0A      2               lda #>deleted_msg
-0DF6  85 FA      3               sta msg_ptr+1
-0DF8  20 97 0B   6               jsr print_status
-0DFB  4C 6A 08   3               jmp main_loop
-0DFE  A9 BD      2               lda #<cancelled_msg
-0E00  85 F9      3               sta msg_ptr
-0E02  A9 0A      2               lda #>cancelled_msg
-0E04  85 FA      3               sta msg_ptr+1
-0E06  20 97 0B   6               jsr print_status
-0E09  4C 6A 08   3               jmp main_loop
-0E0C  A9 63      2               lda #<save_prompt_msg
-0E0E  85 F9      3               sta msg_ptr
-0E10  A9 0A      2               lda #>save_prompt_msg
-0E12  85 FA      3               sta msg_ptr+1
-0E14  20 C9 0B   6               jsr prompt_filename
-0E17  C9 00      2               cmp #$00
-0E19  D0 03      2/3/4           bne __local56_proceed
-0E1B  4C 58 0E   3               jmp __local56_cancelled
-0E1E  20 46 0D   6               jsr scratch_current_file   ; delete any existing file with this
-0E21  20 35 0C   6               jsr append_write_suffix
-0E24  AD 5B 03   4               lda filename_total_len
-0E27  A2 42      2               ldx #<filename_buf
-0E29  A0 03      2               ldy #>filename_buf
-0E2B  20 BD FF   6               jsr SETNAM
-0E2E  A9 01      2               lda #1                     ; logical file 1
-0E30  A2 08      2               ldx #8                     ; device 8
-0E32  A0 03      2               ldy #3                      ; secondary address 3 (write)
-0E34  20 BA FF   6               jsr SETLFS
-0E37  20 C0 FF   6               jsr OPEN
-0E3A  A2 01      2               ldx #1
-0E3C  20 C9 FF   6               jsr CHKOUT
-0E3F  20 73 0C   6               jsr write_screen_to_file
-0E42  20 CC FF   6               jsr CLRCHN
-0E45  A9 01      2               lda #1
-0E47  20 C3 FF   6               jsr CLOSE
-0E4A  A9 8B      2               lda #<saved_msg
-0E4C  85 F9      3               sta msg_ptr
-0E4E  A9 0A      2               lda #>saved_msg
-0E50  85 FA      3               sta msg_ptr+1
-0E52  20 97 0B   6               jsr print_status
-0E55  4C 6A 08   3               jmp main_loop
-0E58  A9 BD      2               lda #<cancelled_msg
-0E5A  85 F9      3               sta msg_ptr
-0E5C  A9 0A      2               lda #>cancelled_msg
-0E5E  85 FA      3               sta msg_ptr+1
-0E60  20 97 0B   6               jsr print_status
-0E63  4C 6A 08   3               jmp main_loop
-0E66  A9 6D      2               lda #<load_prompt_msg
-0E68  85 F9      3               sta msg_ptr
-0E6A  A9 0A      2               lda #>load_prompt_msg
-0E6C  85 FA      3               sta msg_ptr+1
-0E6E  20 C9 0B   6               jsr prompt_filename
-0E71  C9 00      2               cmp #$00
-0E73  D0 03      2/3/4           bne __local57_proceed
-0E75  4C DA 0E   3               jmp __local57_cancelled
-0E78  20 54 0C   6               jsr append_read_suffix
-0E7B  AD 5B 03   4               lda filename_total_len
-0E7E  A2 42      2               ldx #<filename_buf
-0E80  A0 03      2               ldy #>filename_buf
-0E82  20 BD FF   6               jsr SETNAM
-0E85  A9 02      2               lda #2                     ; logical file 2
-0E87  A2 08      2               ldx #8                     ; device 8
-0E89  A0 02      2               ldy #2                      ; secondary address 2 (read)
-0E8B  20 BA FF   6               jsr SETLFS
-0E8E  20 C0 FF   6               jsr OPEN
-0E91  A2 02      2               ldx #2
-0E93  20 C6 FF   6               jsr CHKIN
-0E96  20 B7 FF   6               jsr READST
-0E99  29 40      2               and #$40
-0E9B  F0 03      2/3/4           beq __local57_found
-0E9D  4C C4 0E   3               jmp __local57_not_found
-0EA0  20 A3 0C   6               jsr read_file_to_screen
-0EA3  20 CC FF   6               jsr CLRCHN
-0EA6  A9 02      2               lda #2
-0EA8  20 C3 FF   6               jsr CLOSE
-0EAB  A9 00      2               lda #$00
-0EAD  8D 3C 03   4               sta cursor_x
-0EB0  8D 3D 03   4               sta cursor_y
-0EB3  20 FE 08   6               jsr recompute_screen_ptr
-0EB6  A9 A5      2               lda #<loaded_msg
-0EB8  85 F9      3               sta msg_ptr
-0EBA  A9 0A      2               lda #>loaded_msg
-0EBC  85 FA      3               sta msg_ptr+1
-0EBE  20 97 0B   6               jsr print_status
-0EC1  4C 6A 08   3               jmp main_loop
-0EC4  20 CC FF   6               jsr CLRCHN
-0EC7  A9 02      2               lda #2
-0EC9  20 C3 FF   6               jsr CLOSE
-0ECC  A9 AD      2               lda #<not_found_msg
-0ECE  85 F9      3               sta msg_ptr
-0ED0  A9 0A      2               lda #>not_found_msg
-0ED2  85 FA      3               sta msg_ptr+1
-0ED4  20 97 0B   6               jsr print_status
-0ED7  4C 6A 08   3               jmp main_loop
-0EDA  A9 BD      2               lda #<cancelled_msg
-0EDC  85 F9      3               sta msg_ptr
-0EDE  A9 0A      2               lda #>cancelled_msg
-0EE0  85 FA      3               sta msg_ptr+1
-0EE2  20 97 0B   6               jsr print_status
-0EE5  4C 6A 08   3               jmp main_loop
-0EE8  A2 00      2               ldx #$00
-0EEA  BD 00 04   4/5             lda $0400,x
-0EED  9D 00 C0   5               sta SCREEN_BACKUP,x
-0EF0  BD 00 05   4/5             lda $0500,x
-0EF3  9D 00 C1   5               sta SCREEN_BACKUP+$0100,x
-0EF6  BD 00 06   4/5             lda $0600,x
-0EF9  9D 00 C2   5               sta SCREEN_BACKUP+$0200,x
-0EFC  BD 00 07   4/5             lda $0700,x
-0EFF  9D 00 C3   5               sta SCREEN_BACKUP+$0300,x
-0F02  E8         2               inx
-0F03  D0 E5      2/3/4           bne __local58_loop
-0F05  60         6               rts
-0F06  A2 00      2               ldx #$00
-0F08  BD 00 C0   4/5             lda SCREEN_BACKUP,x
-0F0B  9D 00 04   5               sta $0400,x
-0F0E  BD 00 C1   4/5             lda SCREEN_BACKUP+$0100,x
-0F11  9D 00 05   5               sta $0500,x
-0F14  BD 00 C2   4/5             lda SCREEN_BACKUP+$0200,x
-0F17  9D 00 06   5               sta $0600,x
-0F1A  BD 00 C3   4/5             lda SCREEN_BACKUP+$0300,x
-0F1D  9D 00 07   5               sta $0700,x
-0F20  E8         2               inx
-0F21  D0 E5      2/3/4           bne __local59_loop
-0F23  60         6               rts
-0F24  A9 00      2               lda #$00
-0F26  8D 63 03   4               sta dec_started
-0F29  A2 00      2               ldx #$00
-0F2B  A9 00      2               lda #$00
-0F2D  8D 62 03   4               sta dec_digit
-0F30  AD 61 03   4               lda dec_hi
-0F33  DD 82 0F   4/5             cmp pow10_hi,x
-0F36  90 23      2/3/4           bcc __local60_next_digit
-0F38  D0 08      2/3/4           bne __local60_do_subtract
-0F3A  AD 60 03   4               lda dec_lo
-0F3D  DD 7D 0F   4/5             cmp pow10_lo,x
-0F40  90 19      2/3/4           bcc __local60_next_digit
-0F42  AD 60 03   4               lda dec_lo
-0F45  38         2               sec
-0F46  FD 7D 0F   4/5             sbc pow10_lo,x
-0F49  8D 60 03   4               sta dec_lo
-0F4C  AD 61 03   4               lda dec_hi
-0F4F  FD 82 0F   4/5             sbc pow10_hi,x
-0F52  8D 61 03   4               sta dec_hi
-0F55  EE 62 03   6               inc dec_digit
-0F58  4C 30 0F   3               jmp __local60_subtract_loop
-0F5B  AD 62 03   4               lda dec_digit
-0F5E  D0 09      2/3/4           bne __local60_print_it
-0F60  AD 63 03   4               lda dec_started
-0F63  D0 04      2/3/4           bne __local60_print_it
-0F65  E0 04      2               cpx #4
-0F67  D0 0E      2/3/4           bne __local60_skip_print
-0F69  A9 01      2               lda #$01
-0F6B  8D 63 03   4               sta dec_started
-0F6E  AD 62 03   4               lda dec_digit
-0F71  18         2               clc
-0F72  69 30      2               adc #$30
-0F74  20 D2 FF   6               jsr CHROUT
-0F77  E8         2               inx
-0F78  E0 05      2               cpx #5
-0F7A  D0 AF      2/3/4           bne __local60_digit_loop
-0F7C  60         6               rts
-0F87  20 E8 0E   6               jsr save_screen_backup
-0F8A  A9 93      2               lda #$93
-0F8C  20 D2 FF   6               jsr CHROUT
-0F8F  A9 C8      2               lda #<directory_title_msg
-0F91  A0 0A      2               ldy #>directory_title_msg
-0F93  20 10 08   6               jsr print_msg
-0F96  A9 01      2               lda #$01
-0F98  A2 4B      2               ldx #<dirname
-0F9A  A0 10      2               ldy #>dirname
-0F9C  20 BD FF   6               jsr SETNAM
-0F9F  A9 03      2               lda #3                     ; logical file 3
-0FA1  A2 08      2               ldx #8
-0FA3  A0 00      2               ldy #$00                    ; secondary address -- must be 0 for
-0FA5  20 BA FF   6               jsr SETLFS
-0FA8  20 C0 FF   6               jsr OPEN
-0FAB  90 03      2/3/4           bcc __local63_directory_open_ok
-0FAD  4C 16 10   3               jmp directory_open_failed
-0FB0  A2 03      2               ldx #3
-0FB2  20 C6 FF   6               jsr CHKIN
-0FB5  20 CF FF   6               jsr CHRIN                  ; skip the 2-byte fake load address
-0FB8  20 CF FF   6               jsr CHRIN
-0FBB  20 CF FF   6               jsr CHRIN
-0FBE  8D 5C 03   4               sta dir_link_lo
-0FC1  20 CF FF   6               jsr CHRIN
-0FC4  8D 5D 03   4               sta dir_link_hi
-0FC7  AD 5C 03   4               lda dir_link_lo
-0FCA  0D 5D 03   4               ora dir_link_hi
-0FCD  F0 61      2/3/4           beq dir_done
-0FCF  20 CF FF   6               jsr CHRIN
-0FD2  8D 5E 03   4               sta dir_num_lo
-0FD5  20 CF FF   6               jsr CHRIN
-0FD8  8D 5F 03   4               sta dir_num_hi
-0FDB  AD 5E 03   4               lda dir_num_lo
-0FDE  0D 5F 03   4               ora dir_num_hi
-0FE1  F0 14      2/3/4           beq __local66_text_only
-0FE3  AD 5E 03   4               lda dir_num_lo
-0FE6  8D 60 03   4               sta dec_lo
-0FE9  AD 5F 03   4               lda dir_num_hi
-0FEC  8D 61 03   4               sta dec_hi
-0FEF  20 24 0F   6               jsr print_decimal16
-0FF2  A9 20      2               lda #$20
-0FF4  20 D2 FF   6               jsr CHROUT
-0FF7  20 B7 FF   6               jsr READST
-0FFA  29 40      2               and #$40
-0FFC  D0 32      2/3/4           bne dir_done              ; the stream ended before a $00
-0FFE  20 CF FF   6               jsr CHRIN
-1001  F0 06      2/3/4           beq __local66_text_done
-1003  20 D2 FF   6               jsr CHROUT
-1006  4C F7 0F   3               jmp __local66_text_loop
-1009  A9 92      2               lda #$92                  ; reverse off -- defensive: makes sure
-100B  20 D2 FF   6               jsr CHROUT
-100E  A9 0D      2               lda #13
-1010  20 D2 FF   6               jsr CHROUT
-1013  4C BB 0F   3               jmp dir_loop
-1016  A9 F3      2               lda #<open_error_msg
-1018  A0 0A      2               ldy #>open_error_msg
-101A  20 10 08   6               jsr print_msg
-101D  A9 3B      2               lda #<press_key_msg
-101F  A0 0B      2               ldy #>press_key_msg
-1021  20 10 08   6               jsr print_msg
-1024  20 F8 08   6               jsr wait_for_key
-1027  20 06 0F   6               jsr restore_screen_backup
-102A  20 FE 08   6               jsr recompute_screen_ptr
-102D  4C 6A 08   3               jmp main_loop
-1030  20 CC FF   6               jsr CLRCHN
-1033  A9 03      2               lda #3
-1035  20 C3 FF   6               jsr CLOSE
-1038  A9 3B      2               lda #<press_key_msg
-103A  A0 0B      2               ldy #>press_key_msg
-103C  20 10 08   6               jsr print_msg
-103F  20 F8 08   6               jsr wait_for_key
-1042  20 06 0F   6               jsr restore_screen_backup
-1045  20 FE 08   6               jsr recompute_screen_ptr
-1048  4C 6A 08   3               jmp main_loop
+0854  20 30 09   6               jsr wait_for_key
+0857  20 DA 10   6               jsr blank_doc_buf          ; DOC_BUF is ordinary RAM -- real
+085A  A9 93      2               lda #$93
+085C  20 D2 FF   6               jsr CHROUT
+085F  A9 00      2               lda #$00
+0861  8D 3C 03   4               sta cursor_x
+0864  8D 3D 03   4               sta cursor_y
+0867  8D 8E 03   4               sta doc_top_row
+086A  8D 8D 03   4               sta current_filename_len   ; must be explicit -- real hardware
+086D  20 C1 09   6               jsr render_viewport
+0870  20 36 09   6               jsr recompute_screen_ptr
+0873  20 E6 0E   6               jsr show_help_status
+0876  20 07 0A   6               jsr show_cursor
+0879  20 E4 FF   6               jsr GETIN
+087C  F0 FB      2/3/4           beq wait_key
+087E  48         3               pha
+087F  20 10 0A   6               jsr hide_cursor
+0882  68         4               pla
+0883  C9 85      2               cmp #$85                ; F1
+0885  D0 03      2/3/4           bne __local10_not_quit
+0887  4C 23 09   3               jmp do_quit
+088A  C9 89      2               cmp #$89                ; F2
+088C  D0 03      2/3/4           bne __local10_not_new
+088E  4C 02 11   3               jmp do_new
+0891  C9 86      2               cmp #$86                ; F3
+0893  F0 7C      2/3/4           beq __local10_do_save
+0895  C9 8A      2               cmp #$8a                ; F4
+0897  F0 7B      2/3/4           beq __local10_do_delete_file
+0899  C9 87      2               cmp #$87                ; F5
+089B  F0 7A      2/3/4           beq __local10_do_load
+089D  C9 8B      2               cmp #$8b                ; F6
+089F  F0 79      2/3/4           beq __local10_do_save_as
+08A1  C9 88      2               cmp #$88                ; F7
+08A3  F0 78      2/3/4           beq __local10_do_directory
+08A5  C9 8C      2               cmp #$8c                ; F8
+08A7  F0 77      2/3/4           beq __local10_do_help
+08A9  C9 0D      2               cmp #$0d                ; RETURN
+08AB  F0 2C      2/3/4           beq __local10_do_return
+08AD  C9 14      2               cmp #$14                ; DEL
+08AF  F0 30      2/3/4           beq __local10_do_delete
+08B1  C9 11      2               cmp #$11                ; cursor down
+08B3  F0 32      2/3/4           beq __local10_do_down
+08B5  C9 91      2               cmp #$91                ; cursor up
+08B7  F0 34      2/3/4           beq __local10_do_up
+08B9  C9 1D      2               cmp #$1d                ; cursor right
+08BB  F0 36      2/3/4           beq __local10_do_right
+08BD  C9 9D      2               cmp #$9d                ; cursor left
+08BF  F0 38      2/3/4           beq __local10_do_left
+08C1  C9 13      2               cmp #$13                ; HOME -- page up (see handle_page_up's
+08C3  F0 3A      2/3/4           beq __local10_do_page_up            ; own comment for why this key, not
+08C5  C9 93      2               cmp #$93                ; CLR / SHIFT+HOME -- page down
+08C7  F0 3C      2/3/4           beq __local10_do_page_down
+08C9  C9 20      2               cmp #$20
+08CB  90 A9      2/3/4           bcc main_loop            ; < $20: an unhandled control code -- ignore
+08CD  C9 60      2               cmp #$60
+08CF  B0 A5      2/3/4           bcs main_loop            ; >= $60: not in the range this editor accepts -- ignore
+08D1  20 61 0A   6               jsr insert_char
+08D4  90 35      2/3/4           bcc __local10_update_row_status
+08D6  4C 76 08   3               jmp main_loop            ; document-full message was just
+08D9  20 B8 0A   6               jsr handle_return
+08DC  90 2D      2/3/4           bcc __local10_update_row_status
+08DE  4C 76 08   3               jmp main_loop            ; same as above
+08E1  20 F0 0A   6               jsr handle_delete
+08E4  4C 0B 09   3               jmp __local10_update_row_status
+08E7  20 66 0B   6               jsr move_cursor_down
+08EA  4C 0B 09   3               jmp __local10_update_row_status
+08ED  20 7C 0B   6               jsr move_cursor_up
+08F0  4C 0B 09   3               jmp __local10_update_row_status
+08F3  20 10 0B   6               jsr move_cursor_right
+08F6  4C 0B 09   3               jmp __local10_update_row_status
+08F9  20 3D 0B   6               jsr move_cursor_left
+08FC  4C 0B 09   3               jmp __local10_update_row_status
+08FF  20 4E 0A   6               jsr handle_page_up
+0902  4C 0B 09   3               jmp __local10_update_row_status
+0905  20 39 0A   6               jsr handle_page_down
+0908  4C 0B 09   3               jmp __local10_update_row_status
+090B  20 F1 0E   6               jsr show_row_status
+090E  4C 76 08   3               jmp main_loop
+0911  4C 68 12   3               jmp do_save
+0914  4C BC 11   3               jmp do_delete
+0917  4C AA 12   3               jmp do_load
+091A  4C 87 12   3               jmp do_save_as
+091D  4C CA 15   3               jmp do_directory
+0920  4C 84 0F   3               jmp do_help
+0923  A9 93      2               lda #$93
+0925  20 D2 FF   6               jsr CHROUT
+0928  A9 B2      2               lda #<bye_msg
+092A  A0 0C      2               ldy #>bye_msg
+092C  20 10 08   6               jsr print_msg
+092F  60         6               rts
+0930  20 E4 FF   6               jsr GETIN
+0933  F0 FB      2/3/4           beq wait_for_key
+0935  60         6               rts
+0936  AE 3D 03   4               ldx cursor_y
+0939  BD 8D 0E   4/5             lda screen_row_lo,x
+093C  18         2               clc
+093D  6D 3C 03   4               adc cursor_x
+0940  85 F7      3               sta screen_ptr
+0942  BD A6 0E   4/5             lda screen_row_hi,x
+0945  69 00      2               adc #$00
+0947  85 F8      3               sta screen_ptr+1
+0949  60         6               rts
+094A  8D 8F 03   4               sta mult40_row
+094D  A9 00      2               lda #$00
+094F  8D 93 03   4               sta doc_offset_hi
+0952  AD 8F 03   4               lda mult40_row
+0955  8D 92 03   4               sta doc_offset_lo
+0958  A2 03      2               ldx #$03
+095A  0E 92 03   6               asl doc_offset_lo
+095D  2E 93 03   6               rol doc_offset_hi
+0960  CA         2               dex
+0961  D0 F7      2/3/4           bne __local16_shift_by_8
+0963  AD 92 03   4               lda doc_offset_lo
+0966  8D 90 03   4               sta mult40_temp_lo
+0969  AD 93 03   4               lda doc_offset_hi
+096C  8D 91 03   4               sta mult40_temp_hi
+096F  A9 00      2               lda #$00
+0971  8D 93 03   4               sta doc_offset_hi
+0974  AD 8F 03   4               lda mult40_row
+0977  8D 92 03   4               sta doc_offset_lo
+097A  A2 05      2               ldx #$05
+097C  0E 92 03   6               asl doc_offset_lo
+097F  2E 93 03   6               rol doc_offset_hi
+0982  CA         2               dex
+0983  D0 F7      2/3/4           bne __local16_shift_by_32
+0985  18         2               clc
+0986  AD 92 03   4               lda doc_offset_lo
+0989  6D 90 03   4               adc mult40_temp_lo
+098C  8D 92 03   4               sta doc_offset_lo
+098F  AD 93 03   4               lda doc_offset_hi
+0992  6D 91 03   4               adc mult40_temp_hi
+0995  8D 93 03   4               sta doc_offset_hi
+0998  60         6               rts
+0999  AD 8E 03   4               lda doc_top_row
+099C  18         2               clc
+099D  6D 3D 03   4               adc cursor_y
+09A0  20 4A 09   6               jsr compute_row_offset_40
+09A3  18         2               clc
+09A4  AD 92 03   4               lda doc_offset_lo
+09A7  69 00      2               adc #<DOC_BUF
+09A9  85 03      3               sta copy_ptr
+09AB  AD 93 03   4               lda doc_offset_hi
+09AE  69 20      2               adc #>DOC_BUF
+09B0  85 04      3               sta copy_ptr+1
+09B2  AD 3C 03   4               lda cursor_x
+09B5  18         2               clc
+09B6  65 03      3               adc copy_ptr
+09B8  85 03      3               sta copy_ptr
+09BA  A5 04      3               lda copy_ptr+1
+09BC  69 00      2               adc #$00
+09BE  85 04      3               sta copy_ptr+1
+09C0  60         6               rts
+09C1  AD 8E 03   4               lda doc_top_row
+09C4  20 4A 09   6               jsr compute_row_offset_40
+09C7  AD 92 03   4               lda doc_offset_lo
+09CA  18         2               clc
+09CB  69 00      2               adc #<DOC_BUF
+09CD  85 03      3               sta copy_ptr
+09CF  AD 93 03   4               lda doc_offset_hi
+09D2  69 20      2               adc #>DOC_BUF
+09D4  85 04      3               sta copy_ptr+1
+09D6  A2 00      2               ldx #$00
+09D8  BD 8D 0E   4/5             lda screen_row_lo,x
+09DB  85 F9      3               sta msg_ptr
+09DD  BD A6 0E   4/5             lda screen_row_hi,x
+09E0  85 FA      3               sta msg_ptr+1
+09E2  A0 00      2               ldy #$00
+09E4  B1 03      5/6             lda (copy_ptr),y
+09E6  C9 40      2               cmp #$40
+09E8  90 03      2/3/4           bcc __local18_char_unchanged
+09EA  38         2               sec
+09EB  E9 40      2               sbc #$40
+09ED  91 F9      6               sta (msg_ptr),y
+09EF  C8         2               iny
+09F0  C0 28      2               cpy #40
+09F2  D0 F0      2/3/4           bne __local18_col_loop
+09F4  A5 03      3               lda copy_ptr
+09F6  18         2               clc
+09F7  69 28      2               adc #40
+09F9  85 03      3               sta copy_ptr
+09FB  A5 04      3               lda copy_ptr+1
+09FD  69 00      2               adc #$00
+09FF  85 04      3               sta copy_ptr+1
+0A01  E8         2               inx
+0A02  E0 18      2               cpx #24
+0A04  D0 D2      2/3/4           bne __local18_row_loop
+0A06  60         6               rts
+0A07  A0 00      2               ldy #$00
+0A09  B1 F7      5/6             lda (screen_ptr),y
+0A0B  09 80      2               ora #$80
+0A0D  91 F7      6               sta (screen_ptr),y
+0A0F  60         6               rts
+0A10  A0 00      2               ldy #$00
+0A12  B1 F7      5/6             lda (screen_ptr),y
+0A14  29 7F      2               and #$7f
+0A16  91 F7      6               sta (screen_ptr),y
+0A18  60         6               rts
+0A19  AD 8E 03   4               lda doc_top_row
+0A1C  C9 B0      2               cmp #DOC_ROWS - 24
+0A1E  B0 08      2/3/4           bcs __local21_cant_scroll
+0A20  EE 8E 03   6               inc doc_top_row
+0A23  20 C1 09   6               jsr render_viewport
+0A26  18         2               clc
+0A27  60         6               rts
+0A28  38         2               sec
+0A29  60         6               rts
+0A2A  AD 8E 03   4               lda doc_top_row
+0A2D  F0 08      2/3/4           beq __local22_cant_scroll
+0A2F  CE 8E 03   6               dec doc_top_row
+0A32  20 C1 09   6               jsr render_viewport
+0A35  18         2               clc
+0A36  60         6               rts
+0A37  38         2               sec
+0A38  60         6               rts
+0A39  AD 8E 03   4               lda doc_top_row
+0A3C  18         2               clc
+0A3D  69 18      2               adc #24
+0A3F  C9 B1      2               cmp #DOC_ROWS - 24 + 1
+0A41  90 02      2/3/4           bcc __local23_use_new_value
+0A43  A9 B0      2               lda #DOC_ROWS - 24
+0A45  8D 8E 03   4               sta doc_top_row
+0A48  20 C1 09   6               jsr render_viewport
+0A4B  4C 36 09   3               jmp recompute_screen_ptr
+0A4E  AD 8E 03   4               lda doc_top_row
+0A51  38         2               sec
+0A52  E9 18      2               sbc #24
+0A54  B0 02      2/3/4           bcs __local24_use_new_value
+0A56  A9 00      2               lda #$00
+0A58  8D 8E 03   4               sta doc_top_row
+0A5B  20 C1 09   6               jsr render_viewport
+0A5E  4C 36 09   3               jmp recompute_screen_ptr
+0A61  8D 94 03   4               sta insert_char_scratch
+0A64  AD 3C 03   4               lda cursor_x
+0A67  C9 27      2               cmp #39
+0A69  D0 30      2/3/4           bne __local25_room_to_advance
+0A6B  AD 8E 03   4               lda doc_top_row
+0A6E  18         2               clc
+0A6F  6D 3D 03   4               adc cursor_y
+0A72  C9 C7      2               cmp #DOC_ROWS - 1
+0A74  D0 25      2/3/4           bne __local25_room_to_advance
+0A76  20 99 09   6               jsr compute_doc_ptr
+0A79  AD 94 03   4               lda insert_char_scratch
+0A7C  A0 00      2               ldy #$00
+0A7E  91 03      6               sta (copy_ptr),y
+0A80  AD 94 03   4               lda insert_char_scratch
+0A83  C9 40      2               cmp #$40
+0A85  90 03      2/3/4           bcc __local25_screen_code_ready1
+0A87  38         2               sec
+0A88  E9 40      2               sbc #$40
+0A8A  A0 00      2               ldy #$00
+0A8C  91 F7      6               sta (screen_ptr),y
+0A8E  A9 CA      2               lda #<document_full_msg
+0A90  85 F9      3               sta msg_ptr
+0A92  A9 0D      2               lda #>document_full_msg
+0A94  85 FA      3               sta msg_ptr+1
+0A96  20 BF 0E   6               jsr print_status
+0A99  38         2               sec
+0A9A  60         6               rts
+0A9B  20 99 09   6               jsr compute_doc_ptr
+0A9E  AD 94 03   4               lda insert_char_scratch
+0AA1  A0 00      2               ldy #$00
+0AA3  91 03      6               sta (copy_ptr),y
+0AA5  AD 94 03   4               lda insert_char_scratch
+0AA8  C9 40      2               cmp #$40
+0AAA  90 03      2/3/4           bcc __local25_screen_code_ready2
+0AAC  38         2               sec
+0AAD  E9 40      2               sbc #$40
+0AAF  A0 00      2               ldy #$00
+0AB1  91 F7      6               sta (screen_ptr),y
+0AB3  20 10 0B   6               jsr move_cursor_right
+0AB6  18         2               clc
+0AB7  60         6               rts
+0AB8  AD 3D 03   4               lda cursor_y
+0ABB  C9 17      2               cmp #MAX_ROW
+0ABD  D0 24      2/3/4           bne __local26_same_viewport
+0ABF  20 19 0A   6               jsr try_scroll_down
+0AC2  B0 0A      2/3/4           bcs __local26_cant_advance
+0AC4  A9 00      2               lda #$00
+0AC6  8D 3C 03   4               sta cursor_x
+0AC9  20 36 09   6               jsr recompute_screen_ptr
+0ACC  18         2               clc
+0ACD  60         6               rts
+0ACE  A9 00      2               lda #$00
+0AD0  8D 3C 03   4               sta cursor_x
+0AD3  A9 CA      2               lda #<document_full_msg
+0AD5  85 F9      3               sta msg_ptr
+0AD7  A9 0D      2               lda #>document_full_msg
+0AD9  85 FA      3               sta msg_ptr+1
+0ADB  20 BF 0E   6               jsr print_status
+0ADE  20 36 09   6               jsr recompute_screen_ptr
+0AE1  38         2               sec
+0AE2  60         6               rts
+0AE3  A9 00      2               lda #$00
+0AE5  8D 3C 03   4               sta cursor_x
+0AE8  EE 3D 03   6               inc cursor_y
+0AEB  20 36 09   6               jsr recompute_screen_ptr
+0AEE  18         2               clc
+0AEF  60         6               rts
+0AF0  AD 3C 03   4               lda cursor_x
+0AF3  D0 0A      2/3/4           bne __local27_can_delete
+0AF5  AD 3D 03   4               lda cursor_y
+0AF8  D0 05      2/3/4           bne __local27_can_delete
+0AFA  AD 8E 03   4               lda doc_top_row
+0AFD  F0 10      2/3/4           beq __local27_nothing_to_delete
+0AFF  20 3D 0B   6               jsr move_cursor_left
+0B02  20 99 09   6               jsr compute_doc_ptr
+0B05  A9 20      2               lda #$20
+0B07  A0 00      2               ldy #$00
+0B09  91 03      6               sta (copy_ptr),y
+0B0B  A0 00      2               ldy #$00
+0B0D  91 F7      6               sta (screen_ptr),y
+0B0F  60         6               rts
+0B10  AD 3C 03   4               lda cursor_x
+0B13  C9 27      2               cmp #39
+0B15  D0 20      2/3/4           bne __local28_same_row
+0B17  AD 3D 03   4               lda cursor_y
+0B1A  C9 17      2               cmp #MAX_ROW
+0B1C  D0 0E      2/3/4           bne __local28_next_row
+0B1E  20 19 0A   6               jsr try_scroll_down
+0B21  B0 08      2/3/4           bcs __local28_stay_put              ; nowhere further to go -- the
+0B23  A9 00      2               lda #$00
+0B25  8D 3C 03   4               sta cursor_x
+0B28  4C 36 09   3               jmp recompute_screen_ptr
+0B2B  60         6               rts
+0B2C  A9 00      2               lda #$00
+0B2E  8D 3C 03   4               sta cursor_x
+0B31  EE 3D 03   6               inc cursor_y
+0B34  4C 36 09   3               jmp recompute_screen_ptr
+0B37  EE 3C 03   6               inc cursor_x
+0B3A  4C 36 09   3               jmp recompute_screen_ptr
+0B3D  AD 3C 03   4               lda cursor_x
+0B40  D0 1E      2/3/4           bne __local29_same_row
+0B42  AD 3D 03   4               lda cursor_y
+0B45  D0 0E      2/3/4           bne __local29_prev_row
+0B47  20 2A 0A   6               jsr try_scroll_up
+0B4A  B0 08      2/3/4           bcs __local29_at_origin              ; nowhere further to go -- DOC_BUF's
+0B4C  A9 27      2               lda #39
+0B4E  8D 3C 03   4               sta cursor_x
+0B51  4C 36 09   3               jmp recompute_screen_ptr
+0B54  60         6               rts
+0B55  CE 3D 03   6               dec cursor_y
+0B58  A9 27      2               lda #39
+0B5A  8D 3C 03   4               sta cursor_x
+0B5D  4C 36 09   3               jmp recompute_screen_ptr
+0B60  CE 3C 03   6               dec cursor_x
+0B63  4C 36 09   3               jmp recompute_screen_ptr
+0B66  AD 3D 03   4               lda cursor_y
+0B69  C9 17      2               cmp #MAX_ROW
+0B6B  D0 09      2/3/4           bne __local30_same_viewport
+0B6D  20 19 0A   6               jsr try_scroll_down
+0B70  B0 03      2/3/4           bcs __local30_no_move
+0B72  4C 36 09   3               jmp recompute_screen_ptr
+0B75  60         6               rts
+0B76  EE 3D 03   6               inc cursor_y
+0B79  4C 36 09   3               jmp recompute_screen_ptr
+0B7C  AD 3D 03   4               lda cursor_y
+0B7F  D0 09      2/3/4           bne __local31_same_viewport
+0B81  20 2A 0A   6               jsr try_scroll_up
+0B84  B0 03      2/3/4           bcs __local31_no_move
+0B86  4C 36 09   3               jmp recompute_screen_ptr
+0B89  60         6               rts
+0B8A  CE 3D 03   6               dec cursor_y
+0B8D  4C 36 09   3               jmp recompute_screen_ptr
+0EBF  A0 00      2               ldy #$00
+0EC1  B1 F9      5/6             lda (msg_ptr),y
+0EC3  F0 10      2/3/4           beq __local56_pad
+0EC5  C9 40      2               cmp #$40
+0EC7  90 03      2/3/4           bcc __local56_unchanged
+0EC9  38         2               sec
+0ECA  E9 40      2               sbc #$40
+0ECC  99 C0 07   5               sta STATUS_ROW_ADDR,y
+0ECF  C8         2               iny
+0ED0  C0 28      2               cpy #40
+0ED2  D0 ED      2/3/4           bne __local56_copy_loop
+0ED4  60         6               rts                       ; message filled the whole row exactly
+0ED5  8C 64 03   4               sty status_msg_len
+0ED8  A9 20      2               lda #$20
+0EDA  C0 28      2               cpy #40
+0EDC  F0 07      2/3/4           beq __local56_done
+0EDE  99 C0 07   5               sta STATUS_ROW_ADDR,y
+0EE1  C8         2               iny
+0EE2  4C DA 0E   3               jmp __local56_pad_loop
+0EE5  60         6               rts
+0EE6  A9 BB      2               lda #<help_status_msg
+0EE8  85 F9      3               sta msg_ptr
+0EEA  A9 0C      2               lda #>help_status_msg
+0EEC  85 FA      3               sta msg_ptr+1
+0EEE  4C BF 0E   3               jmp print_status
+0EF1  AD 8E 03   4               lda doc_top_row
+0EF4  18         2               clc
+0EF5  6D 3D 03   4               adc cursor_y
+0EF8  18         2               clc
+0EF9  69 01      2               adc #$01
+0EFB  8D 97 03   4               sta row_num_value
+0EFE  A2 00      2               ldx #$00
+0F00  AD 97 03   4               lda row_num_value
+0F03  C9 64      2               cmp #100
+0F05  90 0A      2/3/4           bcc __local58_hundreds_done
+0F07  38         2               sec
+0F08  E9 64      2               sbc #100
+0F0A  8D 97 03   4               sta row_num_value
+0F0D  E8         2               inx
+0F0E  4C 00 0F   3               jmp __local58_hundreds_loop
+0F11  8E 98 03   4               stx row_hundreds_digit
+0F14  A2 00      2               ldx #$00
+0F16  AD 97 03   4               lda row_num_value
+0F19  C9 0A      2               cmp #10
+0F1B  90 0A      2/3/4           bcc __local58_tens_done
+0F1D  38         2               sec
+0F1E  E9 0A      2               sbc #10
+0F20  8D 97 03   4               sta row_num_value
+0F23  E8         2               inx
+0F24  4C 16 0F   3               jmp __local58_tens_loop
+0F27  8E 99 03   4               stx row_tens_digit
+0F2A  AD 97 03   4               lda row_num_value
+0F2D  8D 9A 03   4               sta row_ones_digit
+0F30  A0 00      2               ldy #$00
+0F32  A9 52      2               lda #$52                    ; 'R'
+0F34  99 9B 03   5               sta row_status_buf,y
+0F37  C8         2               iny
+0F38  A9 4F      2               lda #$4f                     ; 'O'
+0F3A  99 9B 03   5               sta row_status_buf,y
+0F3D  C8         2               iny
+0F3E  A9 57      2               lda #$57                      ; 'W'
+0F40  99 9B 03   5               sta row_status_buf,y
+0F43  C8         2               iny
+0F44  A9 20      2               lda #$20                       ; ' '
+0F46  99 9B 03   5               sta row_status_buf,y
+0F49  C8         2               iny
+0F4A  AD 98 03   4               lda row_hundreds_digit
+0F4D  F0 07      2/3/4           beq __local58_skip_hundreds
+0F4F  18         2               clc
+0F50  69 30      2               adc #$30
+0F52  99 9B 03   5               sta row_status_buf,y
+0F55  C8         2               iny
+0F56  AD 98 03   4               lda row_hundreds_digit
+0F59  D0 05      2/3/4           bne __local58_force_tens
+0F5B  AD 99 03   4               lda row_tens_digit
+0F5E  F0 0A      2/3/4           beq __local58_skip_tens
+0F60  AD 99 03   4               lda row_tens_digit
+0F63  18         2               clc
+0F64  69 30      2               adc #$30
+0F66  99 9B 03   5               sta row_status_buf,y
+0F69  C8         2               iny
+0F6A  AD 9A 03   4               lda row_ones_digit
+0F6D  18         2               clc
+0F6E  69 30      2               adc #$30
+0F70  99 9B 03   5               sta row_status_buf,y
+0F73  C8         2               iny
+0F74  A9 00      2               lda #$00
+0F76  99 9B 03   5               sta row_status_buf,y
+0F79  A9 9B      2               lda #<row_status_buf
+0F7B  85 F9      3               sta msg_ptr
+0F7D  A9 03      2               lda #>row_status_buf
+0F7F  85 FA      3               sta msg_ptr+1
+0F81  4C BF 0E   3               jmp print_status
+0F84  A9 E0      2               lda #<fkey_help_msg
+0F86  85 F9      3               sta msg_ptr
+0F88  A9 0C      2               lda #>fkey_help_msg
+0F8A  85 FA      3               sta msg_ptr+1
+0F8C  20 BF 0E   6               jsr print_status
+0F8F  4C 76 08   3               jmp main_loop
+0F92  20 BF 0E   6               jsr print_status
+0F95  A9 00      2               lda #$00
+0F97  8D 5A 03   4               sta filename_len
+0F9A  20 E4 FF   6               jsr GETIN
+0F9D  F0 FB      2/3/4           beq __local60_type_loop
+0F9F  C9 03      2               cmp #$03                ; RUN/STOP -- the C64 keyboard has no
+0FA1  F0 52      2/3/4           beq __local60_cancel_via_stop       ; key labeled ESC; RUN/STOP (also
+0FA3  C9 0D      2               cmp #$0d
+0FA5  F0 53      2/3/4           beq __local60_done
+0FA7  C9 14      2               cmp #$14
+0FA9  F0 31      2/3/4           beq __local60_do_backspace
+0FAB  C9 20      2               cmp #$20
+0FAD  90 EB      2/3/4           bcc __local60_type_loop
+0FAF  C9 60      2               cmp #$60
+0FB1  B0 E7      2/3/4           bcs __local60_type_loop
+0FB3  AC 5A 03   4               ldy filename_len
+0FB6  C0 10      2               cpy #16
+0FB8  B0 E0      2/3/4           bcs __local60_type_loop             ; buffer already full -- ignore
+0FBA  99 42 03   5               sta filename_buf,y         ; store the raw PETSCII byte
+0FBD  8D 65 03   4               sta prompt_scratch
+0FC0  C9 40      2               cmp #$40
+0FC2  90 06      2/3/4           bcc __local60_sc_done
+0FC4  38         2               sec
+0FC5  E9 40      2               sbc #$40
+0FC7  8D 65 03   4               sta prompt_scratch
+0FCA  98         2               tya
+0FCB  18         2               clc
+0FCC  6D 64 03   4               adc status_msg_len
+0FCF  A8         2               tay
+0FD0  AD 65 03   4               lda prompt_scratch
+0FD3  99 C0 07   5               sta STATUS_ROW_ADDR,y
+0FD6  EE 5A 03   6               inc filename_len
+0FD9  4C 9A 0F   3               jmp __local60_type_loop
+0FDC  AD 5A 03   4               lda filename_len
+0FDF  F0 B9      2/3/4           beq __local60_type_loop              ; nothing typed yet -- ignore
+0FE1  CE 5A 03   6               dec filename_len
+0FE4  AC 5A 03   4               ldy filename_len
+0FE7  98         2               tya
+0FE8  18         2               clc
+0FE9  6D 64 03   4               adc status_msg_len
+0FEC  A8         2               tay
+0FED  A9 20      2               lda #$20
+0FEF  99 C0 07   5               sta STATUS_ROW_ADDR,y
+0FF2  4C 9A 0F   3               jmp __local60_type_loop
+0FF5  A9 00      2               lda #$00
+0FF7  8D 5A 03   4               sta filename_len
+0FFA  AD 5A 03   4               lda filename_len
+0FFD  60         6               rts
+0FFE  AC 5A 03   4               ldy filename_len
+1001  A9 2C      2               lda #$2c
+1003  99 42 03   5               sta filename_buf,y
+1006  C8         2               iny
+1007  A9 53      2               lda #$53
+1009  99 42 03   5               sta filename_buf,y
+100C  C8         2               iny
+100D  A9 2C      2               lda #$2c
+100F  99 42 03   5               sta filename_buf,y
+1012  C8         2               iny
+1013  A9 57      2               lda #$57
+1015  99 42 03   5               sta filename_buf,y
+1018  C8         2               iny
+1019  8C 5B 03   4               sty filename_total_len
+101C  60         6               rts
+101D  AC 5A 03   4               ldy filename_len
+1020  A9 2C      2               lda #$2c
+1022  99 42 03   5               sta filename_buf,y
+1025  C8         2               iny
+1026  A9 53      2               lda #$53
+1028  99 42 03   5               sta filename_buf,y
+102B  C8         2               iny
+102C  A9 2C      2               lda #$2c
+102E  99 42 03   5               sta filename_buf,y
+1031  C8         2               iny
+1032  A9 52      2               lda #$52
+1034  99 42 03   5               sta filename_buf,y
+1037  C8         2               iny
+1038  8C 5B 03   4               sty filename_total_len
+103B  60         6               rts
+103C  A9 C7      2               lda #DOC_ROWS - 1
+103E  8D 95 03   4               sta doc_scan_row
+1041  AD 95 03   4               lda doc_scan_row
+1044  20 4A 09   6               jsr compute_row_offset_40
+1047  AD 92 03   4               lda doc_offset_lo
+104A  18         2               clc
+104B  69 00      2               adc #<DOC_BUF
+104D  85 03      3               sta copy_ptr
+104F  AD 93 03   4               lda doc_offset_hi
+1052  69 20      2               adc #>DOC_BUF
+1054  85 04      3               sta copy_ptr+1
+1056  A0 00      2               ldy #$00
+1058  B1 03      5/6             lda (copy_ptr),y
+105A  C9 20      2               cmp #$20
+105C  D0 10      2/3/4           bne __local63_row_has_content
+105E  C8         2               iny
+105F  C0 28      2               cpy #40
+1061  D0 F5      2/3/4           bne __local63_col_loop
+1063  AD 95 03   4               lda doc_scan_row
+1066  F0 06      2/3/4           beq __local63_row_has_content        ; row 0 itself is blank too -- still
+1068  CE 95 03   6               dec doc_scan_row
+106B  4C 41 10   3               jmp __local63_check_row
+106E  AD 95 03   4               lda doc_scan_row
+1071  18         2               clc
+1072  69 01      2               adc #$01
+1074  8D 96 03   4               sta doc_save_row_count       ; 1-based: rows 0..doc_scan_row
+1077  60         6               rts
+1078  A9 00      2               lda #<DOC_BUF
+107A  85 03      3               sta copy_ptr
+107C  A9 20      2               lda #>DOC_BUF
+107E  85 04      3               sta copy_ptr+1
+1080  A2 00      2               ldx #$00
+1082  EC 96 03   4               cpx doc_save_row_count
+1085  F0 1D      2/3/4           beq __local64_done
+1087  A0 00      2               ldy #$00
+1089  B1 03      5/6             lda (copy_ptr),y
+108B  20 D2 FF   6               jsr CHROUT
+108E  C8         2               iny
+108F  C0 28      2               cpy #40
+1091  D0 F6      2/3/4           bne __local64_col_loop
+1093  A5 03      3               lda copy_ptr
+1095  18         2               clc
+1096  69 28      2               adc #40
+1098  85 03      3               sta copy_ptr
+109A  A5 04      3               lda copy_ptr+1
+109C  69 00      2               adc #$00
+109E  85 04      3               sta copy_ptr+1
+10A0  E8         2               inx
+10A1  4C 82 10   3               jmp __local64_row_loop
+10A4  60         6               rts
+10A5  A9 00      2               lda #<DOC_BUF
+10A7  85 03      3               sta copy_ptr
+10A9  A9 20      2               lda #>DOC_BUF
+10AB  85 04      3               sta copy_ptr+1
+10AD  A2 00      2               ldx #$00
+10AF  A0 00      2               ldy #$00
+10B1  20 B7 FF   6               jsr READST
+10B4  29 40      2               and #$40
+10B6  D0 06      2/3/4           bne __local65_fill_space
+10B8  20 CF FF   6               jsr CHRIN
+10BB  4C C0 10   3               jmp __local65_store
+10BE  A9 20      2               lda #$20
+10C0  91 03      6               sta (copy_ptr),y
+10C2  C8         2               iny
+10C3  C0 28      2               cpy #40
+10C5  D0 EA      2/3/4           bne __local65_col_loop
+10C7  A5 03      3               lda copy_ptr
+10C9  18         2               clc
+10CA  69 28      2               adc #40
+10CC  85 03      3               sta copy_ptr
+10CE  A5 04      3               lda copy_ptr+1
+10D0  69 00      2               adc #$00
+10D2  85 04      3               sta copy_ptr+1
+10D4  E8         2               inx
+10D5  E0 C8      2               cpx #DOC_ROWS
+10D7  D0 D6      2/3/4           bne __local65_row_loop
+10D9  60         6               rts
+10DA  A9 00      2               lda #<DOC_BUF
+10DC  85 03      3               sta copy_ptr
+10DE  A9 20      2               lda #>DOC_BUF
+10E0  85 04      3               sta copy_ptr+1
+10E2  A2 00      2               ldx #$00
+10E4  A9 20      2               lda #$20
+10E6  A0 00      2               ldy #$00
+10E8  91 03      6               sta (copy_ptr),y
+10EA  C8         2               iny
+10EB  C0 28      2               cpy #40
+10ED  D0 F9      2/3/4           bne __local66_col_loop
+10EF  A5 03      3               lda copy_ptr
+10F1  18         2               clc
+10F2  69 28      2               adc #40
+10F4  85 03      3               sta copy_ptr
+10F6  A5 04      3               lda copy_ptr+1
+10F8  69 00      2               adc #$00
+10FA  85 04      3               sta copy_ptr+1
+10FC  E8         2               inx
+10FD  E0 C8      2               cpx #DOC_ROWS
+10FF  D0 E3      2/3/4           bne __local66_row_loop
+1101  60         6               rts
+1102  20 DA 10   6               jsr blank_doc_buf
+1105  A9 00      2               lda #$00
+1107  8D 3C 03   4               sta cursor_x
+110A  8D 3D 03   4               sta cursor_y
+110D  8D 8E 03   4               sta doc_top_row
+1110  8D 8D 03   4               sta current_filename_len   ; a new document has no name yet --
+1113  20 C1 09   6               jsr render_viewport
+1116  20 36 09   6               jsr recompute_screen_ptr
+1119  A9 94      2               lda #<new_msg
+111B  85 F9      3               sta msg_ptr
+111D  A9 0D      2               lda #>new_msg
+111F  85 FA      3               sta msg_ptr+1
+1121  20 BF 0E   6               jsr print_status
+1124  4C 76 08   3               jmp main_loop
+1127  A9 53      2               lda #$53                   ; 'S'
+1129  8D 66 03   4               sta scratch_cmd_buf
+112C  A9 30      2               lda #$30                   ; '0'
+112E  8D 67 03   4               sta scratch_cmd_buf+1
+1131  A9 3A      2               lda #$3a                    ; ':'
+1133  8D 68 03   4               sta scratch_cmd_buf+2
+1136  A0 00      2               ldy #$00
+1138  CC 5A 03   4               cpy filename_len
+113B  F0 0A      2/3/4           beq __local68_done
+113D  B9 42 03   4/5             lda filename_buf,y
+1140  99 69 03   5               sta scratch_cmd_buf+3,y
+1143  C8         2               iny
+1144  4C 38 11   3               jmp __local68_copy_loop
+1147  98         2               tya
+1148  18         2               clc
+1149  69 03      2               adc #$03
+114B  8D 7A 03   4               sta scratch_cmd_len
+114E  60         6               rts
+114F  20 27 11   6               jsr build_scratch_cmd
+1152  AD 7A 03   4               lda scratch_cmd_len
+1155  A2 66      2               ldx #<scratch_cmd_buf
+1157  A0 03      2               ldy #>scratch_cmd_buf
+1159  20 BD FF   6               jsr SETNAM
+115C  A9 0F      2               lda #$0f                   ; logical file 15
+115E  A2 08      2               ldx #$08                   ; device 8
+1160  A0 0F      2               ldy #$0f                    ; secondary address 15 = command
+1162  20 BA FF   6               jsr SETLFS
+1165  20 C0 FF   6               jsr OPEN
+1168  90 03      2/3/4           bcc __local69_open_ok
+116A  A9 00      2               lda #$00                    ; couldn't even open the command
+116C  60         6               rts                          ; channel -- treat as "nothing
+116D  A2 0F      2               ldx #$0f
+116F  20 C6 FF   6               jsr CHKIN
+1172  A2 00      2               ldx #$00                    ; comma counter
+1174  20 B7 FF   6               jsr READST
+1177  D0 35      2/3/4           bne __local69_nothing_found            ; response ended before reaching
+1179  20 CF FF   6               jsr CHRIN
+117C  C9 2C      2               cmp #$2c                       ; ','
+117E  D0 F4      2/3/4           bne __local69_skip_loop
+1180  E8         2               inx
+1181  E0 02      2               cpx #$02
+1183  D0 EF      2/3/4           bne __local69_skip_loop
+1185  20 B7 FF   6               jsr READST
+1188  D0 24      2/3/4           bne __local69_nothing_found
+118A  20 CF FF   6               jsr CHRIN
+118D  C9 30      2               cmp #$30                       ; '0' -- the count's first digit
+118F  D0 0F      2/3/4           bne __local69_something_found            ; nonzero first digit -- found
+1191  20 B7 FF   6               jsr READST
+1194  D0 18      2/3/4           bne __local69_nothing_found
+1196  20 CF FF   6               jsr CHRIN
+1199  C9 30      2               cmp #$30                        ; '0' -- the count's second digit;
+119B  D0 03      2/3/4           bne __local69_something_found             ; the real response always
+119D  4C AE 11   3               jmp __local69_nothing_found
+11A0  20 CC FF   6               jsr CLRCHN
+11A3  A9 0F      2               lda #$0f
+11A5  20 C3 FF   6               jsr CLOSE
+11A8  20 B7 FF   6               jsr READST                  ; clear any status left over from
+11AB  A9 01      2               lda #$01
+11AD  60         6               rts
+11AE  20 CC FF   6               jsr CLRCHN
+11B1  A9 0F      2               lda #$0f
+11B3  20 C3 FF   6               jsr CLOSE
+11B6  20 B7 FF   6               jsr READST
+11B9  A9 00      2               lda #$00
+11BB  60         6               rts
+11BC  A9 2A      2               lda #<delete_picker_title_msg
+11BE  A0 0D      2               ldy #>delete_picker_title_msg
+11C0  20 E1 14   6               jsr pick_file
+11C3  C9 00      2               cmp #$00
+11C5  D0 03      2/3/4           bne __local70_ask_confirm
+11C7  4C 09 12   3               jmp __local70_cancelled
+11CA  A9 7F      2               lda #<confirm_delete_msg
+11CC  85 F9      3               sta msg_ptr
+11CE  A9 0D      2               lda #>confirm_delete_msg
+11D0  85 FA      3               sta msg_ptr+1
+11D2  20 BF 0E   6               jsr print_status
+11D5  20 E4 FF   6               jsr GETIN
+11D8  F0 FB      2/3/4           beq __local70_confirm_wait
+11DA  C9 03      2               cmp #$03                    ; RUN/STOP -- cancel here too, same
+11DC  F0 2B      2/3/4           beq __local70_cancelled                ; as at the filename prompt itself
+11DE  C9 4E      2               cmp #$4e                    ; 'N'
+11E0  F0 27      2/3/4           beq __local70_cancelled
+11E2  C9 59      2               cmp #$59                     ; 'Y'
+11E4  D0 EF      2/3/4           bne __local70_confirm_wait             ; anything else -- keep waiting
+11E6  20 4F 11   6               jsr scratch_current_file
+11E9  C9 01      2               cmp #$01
+11EB  F0 0E      2/3/4           beq __local70_deleted
+11ED  A9 AF      2               lda #<not_found_msg
+11EF  85 F9      3               sta msg_ptr
+11F1  A9 0D      2               lda #>not_found_msg
+11F3  85 FA      3               sta msg_ptr+1
+11F5  20 BF 0E   6               jsr print_status
+11F8  4C 76 08   3               jmp main_loop
+11FB  A9 9E      2               lda #<deleted_msg
+11FD  85 F9      3               sta msg_ptr
+11FF  A9 0D      2               lda #>deleted_msg
+1201  85 FA      3               sta msg_ptr+1
+1203  20 BF 0E   6               jsr print_status
+1206  4C 76 08   3               jmp main_loop
+1209  A9 BF      2               lda #<cancelled_msg
+120B  85 F9      3               sta msg_ptr
+120D  A9 0D      2               lda #>cancelled_msg
+120F  85 FA      3               sta msg_ptr+1
+1211  20 BF 0E   6               jsr print_status
+1214  4C 76 08   3               jmp main_loop
+1217  20 3C 10   6               jsr compute_doc_save_row_count   ; doesn't depend on anything
+121A  20 4F 11   6               jsr scratch_current_file   ; must happen before
+121D  20 FE 0F   6               jsr append_write_suffix
+1220  AD 5B 03   4               lda filename_total_len
+1223  A2 42      2               ldx #<filename_buf
+1225  A0 03      2               ldy #>filename_buf
+1227  20 BD FF   6               jsr SETNAM
+122A  A9 01      2               lda #1                     ; logical file 1
+122C  A2 08      2               ldx #8                     ; device 8
+122E  A0 03      2               ldy #3                      ; secondary address 3 (write)
+1230  20 BA FF   6               jsr SETLFS
+1233  20 C0 FF   6               jsr OPEN
+1236  A2 01      2               ldx #1
+1238  20 C9 FF   6               jsr CHKOUT
+123B  20 78 10   6               jsr write_screen_to_file
+123E  20 CC FF   6               jsr CLRCHN
+1241  A9 01      2               lda #1
+1243  20 C3 FF   6               jsr CLOSE
+1246  A2 00      2               ldx #$00
+1248  EC 5A 03   4               cpx filename_len
+124B  F0 0A      2/3/4           beq __local71_remember_done
+124D  BD 42 03   4/5             lda filename_buf,x
+1250  9D 7D 03   5               sta current_filename_buf,x
+1253  E8         2               inx
+1254  4C 48 12   3               jmp __local71_remember_loop
+1257  8E 8D 03   4               stx current_filename_len
+125A  A9 8D      2               lda #<saved_msg
+125C  85 F9      3               sta msg_ptr
+125E  A9 0D      2               lda #>saved_msg
+1260  85 FA      3               sta msg_ptr+1
+1262  20 BF 0E   6               jsr print_status
+1265  4C 76 08   3               jmp main_loop
+1268  AD 8D 03   4               lda current_filename_len
+126B  D0 03      2/3/4           bne __local72_has_current_name
+126D  4C 87 12   3               jmp do_save_as
+1270  A2 00      2               ldx #$00
+1272  EC 8D 03   4               cpx current_filename_len
+1275  F0 0A      2/3/4           beq __local72_copy_done
+1277  BD 7D 03   4/5             lda current_filename_buf,x
+127A  9D 42 03   5               sta filename_buf,x
+127D  E8         2               inx
+127E  4C 72 12   3               jmp __local72_copy_loop
+1281  8E 5A 03   4               stx filename_len
+1284  4C 17 12   3               jmp perform_save
+1287  A9 09      2               lda #<save_prompt_msg
+1289  85 F9      3               sta msg_ptr
+128B  A9 0D      2               lda #>save_prompt_msg
+128D  85 FA      3               sta msg_ptr+1
+128F  20 92 0F   6               jsr prompt_filename
+1292  C9 00      2               cmp #$00
+1294  D0 03      2/3/4           bne __local73_proceed
+1296  4C 9C 12   3               jmp __local73_cancelled
+1299  4C 17 12   3               jmp perform_save
+129C  A9 BF      2               lda #<cancelled_msg
+129E  85 F9      3               sta msg_ptr
+12A0  A9 0D      2               lda #>cancelled_msg
+12A2  85 FA      3               sta msg_ptr+1
+12A4  20 BF 0E   6               jsr print_status
+12A7  4C 76 08   3               jmp main_loop
+12AA  A9 13      2               lda #<load_picker_title_msg
+12AC  A0 0D      2               ldy #>load_picker_title_msg
+12AE  20 E1 14   6               jsr pick_file
+12B1  C9 00      2               cmp #$00
+12B3  D0 03      2/3/4           bne __local74_proceed
+12B5  4C 34 13   3               jmp __local74_cancelled
+12B8  A2 00      2               ldx #$00
+12BA  EC 5A 03   4               cpx filename_len
+12BD  F0 0A      2/3/4           beq __local74_remember_done
+12BF  BD 42 03   4/5             lda filename_buf,x
+12C2  9D 7D 03   5               sta current_filename_buf,x
+12C5  E8         2               inx
+12C6  4C BA 12   3               jmp __local74_remember_loop
+12C9  8E 8D 03   4               stx current_filename_len
+12CC  20 1D 10   6               jsr append_read_suffix
+12CF  AD 5B 03   4               lda filename_total_len
+12D2  A2 42      2               ldx #<filename_buf
+12D4  A0 03      2               ldy #>filename_buf
+12D6  20 BD FF   6               jsr SETNAM
+12D9  A9 02      2               lda #2                     ; logical file 2
+12DB  A2 08      2               ldx #8                     ; device 8
+12DD  A0 02      2               ldy #2                      ; secondary address 2 (read)
+12DF  20 BA FF   6               jsr SETLFS
+12E2  20 C0 FF   6               jsr OPEN
+12E5  A2 02      2               ldx #2
+12E7  20 C6 FF   6               jsr CHKIN
+12EA  20 B7 FF   6               jsr READST
+12ED  29 40      2               and #$40
+12EF  F0 03      2/3/4           beq __local74_found
+12F1  4C 1E 13   3               jmp __local74_not_found
+12F4  20 A5 10   6               jsr read_file_to_screen
+12F7  20 CC FF   6               jsr CLRCHN
+12FA  A9 02      2               lda #2
+12FC  20 C3 FF   6               jsr CLOSE
+12FF  A9 00      2               lda #$00
+1301  8D 3C 03   4               sta cursor_x
+1304  8D 3D 03   4               sta cursor_y
+1307  8D 8E 03   4               sta doc_top_row              ; scroll back to the top of the
+130A  20 C1 09   6               jsr render_viewport
+130D  20 36 09   6               jsr recompute_screen_ptr
+1310  A9 A7      2               lda #<loaded_msg
+1312  85 F9      3               sta msg_ptr
+1314  A9 0D      2               lda #>loaded_msg
+1316  85 FA      3               sta msg_ptr+1
+1318  20 BF 0E   6               jsr print_status
+131B  4C 76 08   3               jmp main_loop
+131E  20 CC FF   6               jsr CLRCHN
+1321  A9 02      2               lda #2
+1323  20 C3 FF   6               jsr CLOSE
+1326  A9 AF      2               lda #<not_found_msg
+1328  85 F9      3               sta msg_ptr
+132A  A9 0D      2               lda #>not_found_msg
+132C  85 FA      3               sta msg_ptr+1
+132E  20 BF 0E   6               jsr print_status
+1331  4C 76 08   3               jmp main_loop
+1334  A9 BF      2               lda #<cancelled_msg
+1336  85 F9      3               sta msg_ptr
+1338  A9 0D      2               lda #>cancelled_msg
+133A  85 FA      3               sta msg_ptr+1
+133C  20 BF 0E   6               jsr print_status
+133F  4C 76 08   3               jmp main_loop
+1342  A9 00      2               lda #$00
+1344  8D 63 03   4               sta dec_started
+1347  A2 00      2               ldx #$00
+1349  A9 00      2               lda #$00
+134B  8D 62 03   4               sta dec_digit
+134E  AD 61 03   4               lda dec_hi
+1351  DD A0 13   4/5             cmp pow10_hi,x
+1354  90 23      2/3/4           bcc __local75_next_digit
+1356  D0 08      2/3/4           bne __local75_do_subtract
+1358  AD 60 03   4               lda dec_lo
+135B  DD 9B 13   4/5             cmp pow10_lo,x
+135E  90 19      2/3/4           bcc __local75_next_digit
+1360  AD 60 03   4               lda dec_lo
+1363  38         2               sec
+1364  FD 9B 13   4/5             sbc pow10_lo,x
+1367  8D 60 03   4               sta dec_lo
+136A  AD 61 03   4               lda dec_hi
+136D  FD A0 13   4/5             sbc pow10_hi,x
+1370  8D 61 03   4               sta dec_hi
+1373  EE 62 03   6               inc dec_digit
+1376  4C 4E 13   3               jmp __local75_subtract_loop
+1379  AD 62 03   4               lda dec_digit
+137C  D0 09      2/3/4           bne __local75_print_it
+137E  AD 63 03   4               lda dec_started
+1381  D0 04      2/3/4           bne __local75_print_it
+1383  E0 04      2               cpx #4
+1385  D0 0E      2/3/4           bne __local75_skip_print
+1387  A9 01      2               lda #$01
+1389  8D 63 03   4               sta dec_started
+138C  AD 62 03   4               lda dec_digit
+138F  18         2               clc
+1390  69 30      2               adc #$30
+1392  20 D2 FF   6               jsr CHROUT
+1395  E8         2               inx
+1396  E0 05      2               cpx #5
+1398  D0 AF      2/3/4           bne __local75_digit_loop
+139A  60         6               rts
+13A5  A9 00      2               lda #$00
+13A7  8D 7B 03   4               sta file_count
+13AA  A9 01      2               lda #$01
+13AC  A2 8E      2               ldx #<dirname
+13AE  A0 16      2               ldy #>dirname
+13B0  20 BD FF   6               jsr SETNAM
+13B3  A9 03      2               lda #3
+13B5  A2 08      2               ldx #8
+13B7  A0 00      2               ldy #$00
+13B9  20 BA FF   6               jsr SETLFS
+13BC  20 C0 FF   6               jsr OPEN
+13BF  90 01      2/3/4           bcc __local78_open_ok
+13C1  60         6               rts
+13C2  A2 03      2               ldx #3
+13C4  20 C6 FF   6               jsr CHKIN
+13C7  20 CF FF   6               jsr CHRIN
+13CA  20 CF FF   6               jsr CHRIN
+13CD  20 B7 FF   6               jsr READST
+13D0  F0 03      2/3/4           beq __local78_got_link_lo
+13D2  4C 7D 14   3               jmp __local78_close_and_done
+13D5  20 CF FF   6               jsr CHRIN
+13D8  8D 5C 03   4               sta dir_link_lo
+13DB  20 B7 FF   6               jsr READST
+13DE  F0 03      2/3/4           beq __local78_got_link_hi
+13E0  4C 7D 14   3               jmp __local78_close_and_done
+13E3  20 CF FF   6               jsr CHRIN
+13E6  8D 5D 03   4               sta dir_link_hi
+13E9  AD 5C 03   4               lda dir_link_lo
+13EC  0D 5D 03   4               ora dir_link_hi
+13EF  D0 03      2/3/4           bne __local78_got_link
+13F1  4C 7D 14   3               jmp __local78_close_and_done
+13F4  20 B7 FF   6               jsr READST
+13F7  F0 03      2/3/4           beq __local78_got_num_lo
+13F9  4C 7D 14   3               jmp __local78_close_and_done
+13FC  20 CF FF   6               jsr CHRIN
+13FF  8D 5E 03   4               sta dir_num_lo
+1402  20 B7 FF   6               jsr READST
+1405  F0 03      2/3/4           beq __local78_got_num_hi
+1407  4C 7D 14   3               jmp __local78_close_and_done
+140A  20 CF FF   6               jsr CHRIN
+140D  8D 5F 03   4               sta dir_num_hi
+1410  AD 5E 03   4               lda dir_num_lo
+1413  0D 5F 03   4               ora dir_num_hi
+1416  F0 55      2/3/4           beq __local78_consume_rest          ; line 0 -- disk name line, not a file
+1418  20 B7 FF   6               jsr READST
+141B  F0 03      2/3/4           beq __local78_got_char
+141D  4C 7D 14   3               jmp __local78_close_and_done
+1420  20 CF FF   6               jsr CHRIN
+1423  C9 20      2               cmp #$20                    ; ' ' -- real files are padded with
+1425  F0 F1      2/3/4           beq __local78_skip_leading_spaces       ; leading spaces before the
+1427  C9 22      2               cmp #$22                    ; '"'
+1429  F0 03      2/3/4           beq __local78_is_a_file
+142B  4C 6D 14   3               jmp __local78_consume_rest             ; some other non-space,
+142E  AD 7B 03   4               lda file_count
+1431  C9 0F      2               cmp #MAX_FILES
+1433  B0 38      2/3/4           bcs __local78_consume_rest            ; list already full -- don't
+1435  AD 7B 03   4               lda file_count
+1438  0A         2               asl a
+1439  0A         2               asl a
+143A  0A         2               asl a
+143B  0A         2               asl a
+143C  18         2               clc
+143D  69 00      2               adc #<FILE_LIST_BUF
+143F  85 03      3               sta copy_ptr
+1441  A9 C4      2               lda #>FILE_LIST_BUF
+1443  69 00      2               adc #$00
+1445  85 04      3               sta copy_ptr+1
+1447  A0 00      2               ldy #$00
+1449  A9 20      2               lda #$20
+144B  91 03      6               sta (copy_ptr),y
+144D  C8         2               iny
+144E  C0 10      2               cpy #16
+1450  D0 F9      2/3/4           bne __local78_blank_loop
+1452  A0 00      2               ldy #$00
+1454  20 B7 FF   6               jsr READST
+1457  D0 11      2/3/4           bne __local78_name_done
+1459  20 CF FF   6               jsr CHRIN
+145C  C9 22      2               cmp #$22                     ; closing quote -- name is done
+145E  F0 0A      2/3/4           beq __local78_name_done
+1460  C0 10      2               cpy #16
+1462  B0 06      2/3/4           bcs __local78_name_done                 ; safety cap -- shouldn't
+1464  91 03      6               sta (copy_ptr),y
+1466  C8         2               iny
+1467  4C 54 14   3               jmp __local78_copy_name_loop
+146A  EE 7B 03   6               inc file_count
+146D  20 B7 FF   6               jsr READST
+1470  F0 03      2/3/4           beq __local78_got_text_char
+1472  4C 7D 14   3               jmp __local78_close_and_done
+1475  20 CF FF   6               jsr CHRIN
+1478  D0 F3      2/3/4           bne __local78_consume_rest
+147A  4C CD 13   3               jmp __local78_entry_loop               ; $00 -- end of this line's text
+147D  20 CC FF   6               jsr CLRCHN
+1480  A9 03      2               lda #3
+1482  20 C3 FF   6               jsr CLOSE
+1485  20 B7 FF   6               jsr READST                 ; real READST's own status persists
+1488  60         6               rts
+1489  A2 00      2               ldx #$00
+148B  EC 7B 03   4               cpx file_count
+148E  F0 3A      2/3/4           beq __local80_done
+1490  8A         2               txa
+1491  18         2               clc
+1492  69 02      2               adc #$02
+1494  A8         2               tay
+1495  B9 8D 0E   4/5             lda screen_row_lo,y
+1498  18         2               clc
+1499  69 02      2               adc #$02                    ; +2 columns, past the selector gap
+149B  85 F9      3               sta msg_ptr
+149D  B9 A6 0E   4/5             lda screen_row_hi,y
+14A0  69 00      2               adc #$00
+14A2  85 FA      3               sta msg_ptr+1
+14A4  8A         2               txa
+14A5  0A         2               asl a
+14A6  0A         2               asl a
+14A7  0A         2               asl a
+14A8  0A         2               asl a
+14A9  18         2               clc
+14AA  69 00      2               adc #<FILE_LIST_BUF
+14AC  85 03      3               sta copy_ptr
+14AE  A9 C4      2               lda #>FILE_LIST_BUF
+14B0  69 00      2               adc #$00
+14B2  85 04      3               sta copy_ptr+1
+14B4  A0 00      2               ldy #$00
+14B6  B1 03      5/6             lda (copy_ptr),y
+14B8  C9 40      2               cmp #$40
+14BA  90 03      2/3/4           bcc __local80_char_unchanged
+14BC  38         2               sec
+14BD  E9 40      2               sbc #$40
+14BF  91 F9      6               sta (msg_ptr),y
+14C1  C8         2               iny
+14C2  C0 10      2               cpy #16
+14C4  D0 F0      2/3/4           bne __local80_char_loop
+14C6  E8         2               inx
+14C7  4C 8B 14   3               jmp __local80_row_loop
+14CA  60         6               rts
+14CB  48         3               pha
+14CC  8A         2               txa
+14CD  18         2               clc
+14CE  69 02      2               adc #$02
+14D0  A8         2               tay
+14D1  B9 8D 0E   4/5             lda screen_row_lo,y
+14D4  85 F9      3               sta msg_ptr
+14D6  B9 A6 0E   4/5             lda screen_row_hi,y
+14D9  85 FA      3               sta msg_ptr+1
+14DB  68         4               pla
+14DC  A0 00      2               ldy #$00
+14DE  91 F9      6               sta (msg_ptr),y
+14E0  60         6               rts
+14E1  48         3               pha
+14E2  98         2               tya
+14E3  48         3               pha
+14E4  A9 93      2               lda #$93
+14E6  20 D2 FF   6               jsr CHROUT
+14E9  68         4               pla
+14EA  A8         2               tay
+14EB  68         4               pla
+14EC  20 10 08   6               jsr print_msg
+14EF  A9 43      2               lda #<picker_instructions_msg
+14F1  A0 0D      2               ldy #>picker_instructions_msg
+14F3  20 10 08   6               jsr print_msg
+14F6  20 A5 13   6               jsr parse_directory_filenames
+14F9  AD 7B 03   4               lda file_count
+14FC  D0 1D      2/3/4           bne __local83_has_files
+14FE  A9 6C      2               lda #<picker_empty_msg
+1500  A0 0D      2               ldy #>picker_empty_msg
+1502  20 10 08   6               jsr print_msg
+1505  A9 63      2               lda #<press_key_msg
+1507  A0 0E      2               ldy #>press_key_msg
+1509  20 10 08   6               jsr print_msg
+150C  20 30 09   6               jsr wait_for_key
+150F  20 C1 09   6               jsr render_viewport
+1512  20 36 09   6               jsr recompute_screen_ptr
+1515  A9 00      2               lda #$00
+1517  8D 5A 03   4               sta filename_len
+151A  60         6               rts
+151B  20 89 14   6               jsr display_file_list
+151E  A9 00      2               lda #$00
+1520  8D 7C 03   4               sta file_selection
+1523  A9 3E      2               lda #$3e                    ; '>'
+1525  A2 00      2               ldx #$00
+1527  20 CB 14   6               jsr set_selector_char
+152A  20 E4 FF   6               jsr GETIN
+152D  F0 FB      2/3/4           beq __local83_select_loop
+152F  C9 03      2               cmp #$03                     ; RUN/STOP
+1531  D0 03      2/3/4           bne __local83_not_stop
+1533  4C BE 15   3               jmp __local83_cancelled
+1536  C9 0D      2               cmp #$0d                      ; RETURN
+1538  F0 47      2/3/4           beq __local83_selected
+153A  C9 11      2               cmp #$11                       ; cursor down
+153C  F0 07      2/3/4           beq __local83_move_down
+153E  C9 91      2               cmp #$91                        ; cursor up
+1540  F0 24      2/3/4           beq __local83_move_up
+1542  4C 2A 15   3               jmp __local83_select_loop
+1545  AD 7C 03   4               lda file_selection
+1548  18         2               clc
+1549  69 01      2               adc #$01
+154B  CD 7B 03   4               cmp file_count
+154E  B0 DA      2/3/4           bcs __local83_select_loop                 ; already at the last entry
+1550  A9 20      2               lda #$20
+1552  AE 7C 03   4               ldx file_selection
+1555  20 CB 14   6               jsr set_selector_char
+1558  EE 7C 03   6               inc file_selection
+155B  A9 3E      2               lda #$3e
+155D  AE 7C 03   4               ldx file_selection
+1560  20 CB 14   6               jsr set_selector_char
+1563  4C 2A 15   3               jmp __local83_select_loop
+1566  AD 7C 03   4               lda file_selection
+1569  F0 BF      2/3/4           beq __local83_select_loop                  ; already at the first entry
+156B  A9 20      2               lda #$20
+156D  AE 7C 03   4               ldx file_selection
+1570  20 CB 14   6               jsr set_selector_char
+1573  CE 7C 03   6               dec file_selection
+1576  A9 3E      2               lda #$3e
+1578  AE 7C 03   4               ldx file_selection
+157B  20 CB 14   6               jsr set_selector_char
+157E  4C 2A 15   3               jmp __local83_select_loop
+1581  AD 7C 03   4               lda file_selection
+1584  0A         2               asl a
+1585  0A         2               asl a
+1586  0A         2               asl a
+1587  0A         2               asl a
+1588  18         2               clc
+1589  69 00      2               adc #<FILE_LIST_BUF
+158B  85 03      3               sta copy_ptr
+158D  A9 C4      2               lda #>FILE_LIST_BUF
+158F  69 00      2               adc #$00
+1591  85 04      3               sta copy_ptr+1
+1593  A0 00      2               ldy #$00
+1595  B1 03      5/6             lda (copy_ptr),y
+1597  99 42 03   5               sta filename_buf,y
+159A  C8         2               iny
+159B  C0 10      2               cpy #16
+159D  D0 F6      2/3/4           bne __local83_copy_selected_loop
+159F  A0 10      2               ldy #16                       ; trim trailing spaces back off,
+15A1  88         2               dey                              ; filename would look like
+15A2  B9 42 03   4/5             lda filename_buf,y
+15A5  C9 20      2               cmp #$20
+15A7  D0 07      2/3/4           bne __local83_trim_done
+15A9  C0 00      2               cpy #$00
+15AB  F0 03      2/3/4           beq __local83_trim_done
+15AD  4C A1 15   3               jmp __local83_trim_loop
+15B0  C8         2               iny
+15B1  8C 5A 03   4               sty filename_len
+15B4  20 C1 09   6               jsr render_viewport
+15B7  20 36 09   6               jsr recompute_screen_ptr
+15BA  AD 5A 03   4               lda filename_len
+15BD  60         6               rts
+15BE  20 C1 09   6               jsr render_viewport
+15C1  20 36 09   6               jsr recompute_screen_ptr
+15C4  A9 00      2               lda #$00
+15C6  8D 5A 03   4               sta filename_len
+15C9  60         6               rts
+15CA  A9 93      2               lda #$93
+15CC  20 D2 FF   6               jsr CHROUT
+15CF  A9 F0      2               lda #<directory_title_msg
+15D1  A0 0D      2               ldy #>directory_title_msg
+15D3  20 10 08   6               jsr print_msg
+15D6  A9 01      2               lda #$01
+15D8  A2 8E      2               ldx #<dirname
+15DA  A0 16      2               ldy #>dirname
+15DC  20 BD FF   6               jsr SETNAM
+15DF  A9 03      2               lda #3                     ; logical file 3
+15E1  A2 08      2               ldx #8
+15E3  A0 00      2               ldy #$00                    ; secondary address -- must be 0 for
+15E5  20 BA FF   6               jsr SETLFS
+15E8  20 C0 FF   6               jsr OPEN
+15EB  90 03      2/3/4           bcc __local89_directory_open_ok
+15ED  4C 56 16   3               jmp directory_open_failed
+15F0  A2 03      2               ldx #3
+15F2  20 C6 FF   6               jsr CHKIN
+15F5  20 CF FF   6               jsr CHRIN                  ; skip the 2-byte fake load address
+15F8  20 CF FF   6               jsr CHRIN
+15FB  20 CF FF   6               jsr CHRIN
+15FE  8D 5C 03   4               sta dir_link_lo
+1601  20 CF FF   6               jsr CHRIN
+1604  8D 5D 03   4               sta dir_link_hi
+1607  AD 5C 03   4               lda dir_link_lo
+160A  0D 5D 03   4               ora dir_link_hi
+160D  F0 61      2/3/4           beq dir_done
+160F  20 CF FF   6               jsr CHRIN
+1612  8D 5E 03   4               sta dir_num_lo
+1615  20 CF FF   6               jsr CHRIN
+1618  8D 5F 03   4               sta dir_num_hi
+161B  AD 5E 03   4               lda dir_num_lo
+161E  0D 5F 03   4               ora dir_num_hi
+1621  F0 14      2/3/4           beq __local92_text_only
+1623  AD 5E 03   4               lda dir_num_lo
+1626  8D 60 03   4               sta dec_lo
+1629  AD 5F 03   4               lda dir_num_hi
+162C  8D 61 03   4               sta dec_hi
+162F  20 42 13   6               jsr print_decimal16
+1632  A9 20      2               lda #$20
+1634  20 D2 FF   6               jsr CHROUT
+1637  20 B7 FF   6               jsr READST
+163A  29 40      2               and #$40
+163C  D0 32      2/3/4           bne dir_done              ; the stream ended before a $00
+163E  20 CF FF   6               jsr CHRIN
+1641  F0 06      2/3/4           beq __local92_text_done
+1643  20 D2 FF   6               jsr CHROUT
+1646  4C 37 16   3               jmp __local92_text_loop
+1649  A9 92      2               lda #$92                  ; reverse off -- defensive: makes sure
+164B  20 D2 FF   6               jsr CHROUT
+164E  A9 0D      2               lda #13
+1650  20 D2 FF   6               jsr CHROUT
+1653  4C FB 15   3               jmp dir_loop
+1656  A9 1B      2               lda #<open_error_msg
+1658  A0 0E      2               ldy #>open_error_msg
+165A  20 10 08   6               jsr print_msg
+165D  A9 63      2               lda #<press_key_msg
+165F  A0 0E      2               ldy #>press_key_msg
+1661  20 10 08   6               jsr print_msg
+1664  20 30 09   6               jsr wait_for_key
+1667  20 C1 09   6               jsr render_viewport
+166A  20 36 09   6               jsr recompute_screen_ptr
+166D  4C 76 08   3               jmp main_loop
+1670  20 CC FF   6               jsr CLRCHN
+1673  A9 03      2               lda #3
+1675  20 C3 FF   6               jsr CLOSE
+1678  20 B7 FF   6               jsr READST                 ; clear any stale EOF status left by
+167B  A9 63      2               lda #<press_key_msg
+167D  A0 0E      2               ldy #>press_key_msg
+167F  20 10 08   6               jsr print_msg
+1682  20 30 09   6               jsr wait_for_key
+1685  20 C1 09   6               jsr render_viewport
+1688  20 36 09   6               jsr recompute_screen_ptr
+168B  4C 76 08   3               jmp main_loop
 
 Symbol table:
   BITMAP               = $2000
@@ -719,12 +1290,15 @@ Symbol table:
   CIA1_PRB             = $DC01
   CLOSE                = $FFC3
   CLRCHN               = $FFCC
+  DOC_BUF              = $2000
+  DOC_ROWS             = $00C8
+  FILE_LIST_BUF        = $C400
   GETIN                = $FFE4
+  MAX_FILES            = $000F
   MAX_ROW              = $0017
   OPEN                 = $FFC0
   READST               = $FFB7
   SCREEN               = $0400
-  SCREEN_BACKUP        = $C000
   SETLFS               = $FFBA
   SETNAM               = $FFBD
   SID_VOLUME           = $D418
@@ -758,161 +1332,263 @@ Symbol table:
   VOICE3_FREQ_HI       = $D40F
   VOICE3_FREQ_LO       = $D40E
   VOICE3_SR            = $D414
-  __local10_do_delete  = $08BB
-  __local10_do_delete_file = $08E2
-  __local10_do_directory = $08E8
-  __local10_do_down    = $08C1
-  __local10_do_left    = $08D3
-  __local10_do_load    = $08E5
-  __local10_do_new     = $08DC
-  __local10_do_quit    = $08D9
-  __local10_do_return  = $08B5
-  __local10_do_right   = $08CD
-  __local10_do_save    = $08DF
-  __local10_do_up      = $08C7
-  __local18_unchanged  = $092B
-  __local19_recompute  = $0942
+  __local10_do_delete  = $08E1
+  __local10_do_delete_file = $0914
+  __local10_do_directory = $091D
+  __local10_do_down    = $08E7
+  __local10_do_help    = $0920
+  __local10_do_left    = $08F9
+  __local10_do_load    = $0917
+  __local10_do_page_down = $0905
+  __local10_do_page_up = $08FF
+  __local10_do_return  = $08D9
+  __local10_do_right   = $08F3
+  __local10_do_save    = $0911
+  __local10_do_save_as = $091A
+  __local10_do_up      = $08ED
+  __local10_not_new    = $0891
+  __local10_not_quit   = $088A
+  __local10_update_row_status = $090B
+  __local16_shift_by_32 = $097C
+  __local16_shift_by_8 = $095A
+  __local18_char_unchanged = $09ED
+  __local18_col_loop   = $09E4
+  __local18_row_loop   = $09D8
   __local1_done        = $0820
   __local1_loop        = $0816
-  __local20_can_delete = $094F
-  __local20_nothing_to_delete = $0958
-  __local21_next_row   = $0968
-  __local21_same_row   = $0973
-  __local22_at_origin  = $098E
-  __local22_same_row   = $098F
-  __local23_no_move    = $09A2
-  __local24_no_move    = $09AE
+  __local21_cant_scroll = $0A28
+  __local22_cant_scroll = $0A37
+  __local23_use_new_value = $0A45
+  __local24_use_new_value = $0A58
+  __local25_room_to_advance = $0A9B
+  __local25_screen_code_ready1 = $0A8A
+  __local25_screen_code_ready2 = $0AAF
+  __local26_cant_advance = $0ACE
+  __local26_same_viewport = $0AE3
+  __local27_can_delete = $0AFF
+  __local27_nothing_to_delete = $0B0F
+  __local28_next_row   = $0B2C
+  __local28_same_row   = $0B37
+  __local28_stay_put   = $0B2B
+  __local29_at_origin  = $0B54
+  __local29_prev_row   = $0B55
+  __local29_same_row   = $0B60
   __local2_loop        = $0827
   __local2_no          = $0834
   __local2_yes         = $0837
-  __local45_copy_loop  = $0B99
-  __local45_done       = $0BBD
-  __local45_pad        = $0BAD
-  __local45_pad_loop   = $0BB2
-  __local45_unchanged  = $0BA4
-  __local47_cancel_via_stop = $0C2C
-  __local47_do_backspace = $0C13
-  __local47_done       = $0C31
-  __local47_sc_done    = $0C01
-  __local47_type_loop  = $0BD1
-  __local50_inner      = $0C7F
-  __local50_outer      = $0C7D
-  __local50_unchanged  = $0C8A
-  __local51_fill_space = $0CC6
-  __local51_inner      = $0CAF
-  __local51_outer      = $0CAD
-  __local51_sc_unchanged = $0CC3
-  __local51_store      = $0CC8
-  __local52_inner      = $0CEE
-  __local52_outer      = $0CEA
-  __local53_copy_loop  = $0D2F
-  __local53_done       = $0D3E
-  __local54_nothing_found = $0DA2
-  __local54_open_ok    = $0D64
-  __local54_skip_loop  = $0D6B
-  __local54_something_found = $0D97
-  __local55_ask_confirm = $0DBF
-  __local55_cancelled  = $0DFE
-  __local55_confirm_wait = $0DCA
-  __local55_deleted    = $0DF0
-  __local56_cancelled  = $0E58
-  __local56_proceed    = $0E1E
-  __local57_cancelled  = $0EDA
-  __local57_found      = $0EA0
-  __local57_not_found  = $0EC4
-  __local57_proceed    = $0E78
-  __local58_loop       = $0EEA
-  __local59_loop       = $0F08
-  __local60_digit_loop = $0F2B
-  __local60_do_subtract = $0F42
-  __local60_next_digit = $0F5B
-  __local60_print_it   = $0F69
-  __local60_skip_print = $0F77
-  __local60_subtract_loop = $0F30
-  __local63_directory_open_ok = $0FB0
-  __local66_text_done  = $1009
-  __local66_text_loop  = $0FF7
-  __local66_text_only  = $0FF7
-  append_read_suffix   = $0C54
-  append_write_suffix  = $0C35
-  build_scratch_cmd    = $0D1E
-  bye_msg              = $0A38
-  cancelled_msg        = $0ABD
+  __local30_no_move    = $0B75
+  __local30_same_viewport = $0B76
+  __local31_no_move    = $0B89
+  __local31_same_viewport = $0B8A
+  __local56_copy_loop  = $0EC1
+  __local56_done       = $0EE5
+  __local56_pad        = $0ED5
+  __local56_pad_loop   = $0EDA
+  __local56_unchanged  = $0ECC
+  __local58_force_tens = $0F60
+  __local58_hundreds_done = $0F11
+  __local58_hundreds_loop = $0F00
+  __local58_skip_hundreds = $0F56
+  __local58_skip_tens  = $0F6A
+  __local58_tens_done  = $0F27
+  __local58_tens_loop  = $0F16
+  __local60_cancel_via_stop = $0FF5
+  __local60_do_backspace = $0FDC
+  __local60_done       = $0FFA
+  __local60_sc_done    = $0FCA
+  __local60_type_loop  = $0F9A
+  __local63_check_row  = $1041
+  __local63_col_loop   = $1058
+  __local63_row_has_content = $106E
+  __local64_col_loop   = $1089
+  __local64_done       = $10A4
+  __local64_row_loop   = $1082
+  __local65_col_loop   = $10B1
+  __local65_fill_space = $10BE
+  __local65_row_loop   = $10AF
+  __local65_store      = $10C0
+  __local66_col_loop   = $10E8
+  __local66_row_loop   = $10E4
+  __local68_copy_loop  = $1138
+  __local68_done       = $1147
+  __local69_nothing_found = $11AE
+  __local69_open_ok    = $116D
+  __local69_skip_loop  = $1174
+  __local69_something_found = $11A0
+  __local70_ask_confirm = $11CA
+  __local70_cancelled  = $1209
+  __local70_confirm_wait = $11D5
+  __local70_deleted    = $11FB
+  __local71_remember_done = $1257
+  __local71_remember_loop = $1248
+  __local72_copy_done  = $1281
+  __local72_copy_loop  = $1272
+  __local72_has_current_name = $1270
+  __local73_cancelled  = $129C
+  __local73_proceed    = $1299
+  __local74_cancelled  = $1334
+  __local74_found      = $12F4
+  __local74_not_found  = $131E
+  __local74_proceed    = $12B8
+  __local74_remember_done = $12C9
+  __local74_remember_loop = $12BA
+  __local75_digit_loop = $1349
+  __local75_do_subtract = $1360
+  __local75_next_digit = $1379
+  __local75_print_it   = $1387
+  __local75_skip_print = $1395
+  __local75_subtract_loop = $134E
+  __local78_blank_loop = $144B
+  __local78_close_and_done = $147D
+  __local78_consume_rest = $146D
+  __local78_copy_name_loop = $1454
+  __local78_entry_loop = $13CD
+  __local78_got_char   = $1420
+  __local78_got_link   = $13F4
+  __local78_got_link_hi = $13E3
+  __local78_got_link_lo = $13D5
+  __local78_got_num_hi = $140A
+  __local78_got_num_lo = $13FC
+  __local78_got_text_char = $1475
+  __local78_is_a_file  = $142E
+  __local78_name_done  = $146A
+  __local78_open_ok    = $13C2
+  __local78_skip_leading_spaces = $1418
+  __local80_char_loop  = $14B6
+  __local80_char_unchanged = $14BF
+  __local80_done       = $14CA
+  __local80_row_loop   = $148B
+  __local83_cancelled  = $15BE
+  __local83_copy_selected_loop = $1595
+  __local83_has_files  = $151B
+  __local83_move_down  = $1545
+  __local83_move_up    = $1566
+  __local83_not_stop   = $1536
+  __local83_select_loop = $152A
+  __local83_selected   = $1581
+  __local83_trim_done  = $15B0
+  __local83_trim_loop  = $15A1
+  __local89_directory_open_ok = $15F0
+  __local92_text_done  = $1649
+  __local92_text_loop  = $1637
+  __local92_text_only  = $1637
+  append_read_suffix   = $101D
+  append_write_suffix  = $0FFE
+  blank_doc_buf        = $10DA
+  build_scratch_cmd    = $1127
+  bye_msg              = $0CB2
+  cancelled_msg        = $0DBF
   cmp_ptr              = $00FD
-  confirm_delete_msg   = $0A7D
-  continue_msg         = $0A1D
-  copy_ptr             = $00F5
+  compute_doc_ptr      = $0999
+  compute_doc_save_row_count = $103C
+  compute_row_offset_40 = $094A
+  confirm_delete_msg   = $0D7F
+  continue_msg         = $0C97
+  copy_ptr             = $0003
+  current_filename_buf = $037D
+  current_filename_len = $038D
   cursor_x             = $033C
   cursor_y             = $033D
   dec_digit            = $0362
   dec_hi               = $0361
   dec_lo               = $0360
   dec_started          = $0363
-  delete_prompt_msg    = $0A74
-  deleted_msg          = $0A9C
-  dir_done             = $1030
+  delete_picker_title_msg = $0D2A
+  deleted_msg          = $0D9E
+  dir_done             = $1670
   dir_link_hi          = $035D
   dir_link_lo          = $035C
-  dir_loop             = $0FBB
+  dir_loop             = $15FB
   dir_num_hi           = $035F
   dir_num_lo           = $035E
-  directory_open_failed = $1016
-  directory_title_msg  = $0AC8
-  dirname              = $104B
-  do_delete            = $0DAD
-  do_directory         = $0F87
-  do_load              = $0E66
-  do_new               = $0CE0
-  do_quit              = $08EB
-  do_save              = $0E0C
+  directory_open_failed = $1656
+  directory_title_msg  = $0DF0
+  dirname              = $168E
+  display_file_list    = $1489
+  do_delete            = $11BC
+  do_directory         = $15CA
+  do_help              = $0F84
+  do_load              = $12AA
+  do_new               = $1102
+  do_quit              = $0923
+  do_save              = $1268
+  do_save_as           = $1287
+  doc_offset_hi        = $0393
+  doc_offset_lo        = $0392
+  doc_save_row_count   = $0396
+  doc_scan_row         = $0395
+  doc_top_row          = $038E
+  document_full_msg    = $0DCA
+  file_count           = $037B
+  file_selection       = $037C
   filename_buf         = $0342
   filename_len         = $035A
   filename_total_len   = $035B
-  handle_delete        = $0945
-  handle_return        = $0933
-  help_status_msg      = $0A41
-  hide_cursor          = $091B
-  insert_char          = $0924
-  instructions_msg     = $09C3
+  fkey_help_msg        = $0CE0
+  handle_delete        = $0AF0
+  handle_page_down     = $0A39
+  handle_page_up       = $0A4E
+  handle_return        = $0AB8
+  help_status_msg      = $0CBB
+  hide_cursor          = $0A10
+  insert_char          = $0A61
+  insert_char_scratch  = $0394
+  instructions_msg     = $0BA4
   kw_ptr               = $0002
-  load_prompt_msg      = $0A6D
-  loaded_msg           = $0AA5
-  main_loop            = $086A
-  move_cursor_down     = $0995
-  move_cursor_left     = $0979
-  move_cursor_right    = $0959
-  move_cursor_up       = $09A3
+  load_picker_title_msg = $0D13
+  loaded_msg           = $0DA7
+  main_loop            = $0876
+  move_cursor_down     = $0B66
+  move_cursor_left     = $0B3D
+  move_cursor_right    = $0B10
+  move_cursor_up       = $0B7C
   msg_ptr              = $00F9
-  new_msg              = $0A92
-  not_found_msg        = $0AAD
-  open_error_msg       = $0AF3
-  pow10_hi             = $0F82
-  pow10_lo             = $0F7D
-  press_key_msg        = $0B3B
-  print_decimal16      = $0F24
+  mult40_row           = $038F
+  mult40_temp_hi       = $0391
+  mult40_temp_lo       = $0390
+  new_msg              = $0D94
+  not_found_msg        = $0DAF
+  open_error_msg       = $0E1B
+  parse_directory_filenames = $13A5
+  perform_save         = $1217
+  pick_file            = $14E1
+  picker_empty_msg     = $0D6C
+  picker_instructions_msg = $0D43
+  pow10_hi             = $13A0
+  pow10_lo             = $139B
+  press_key_msg        = $0E63
+  print_decimal16      = $1342
   print_msg            = $0810
-  print_status         = $0B97
-  prompt_filename      = $0BC9
+  print_status         = $0EBF
+  prompt_filename      = $0F92
   prompt_scratch       = $0365
-  read_file_to_screen  = $0CA3
-  recompute_screen_ptr = $08FE
-  restore_screen_backup = $0F06
-  save_prompt_msg      = $0A63
-  save_screen_backup   = $0EE8
-  saved_msg            = $0A8B
+  read_file_to_screen  = $10A5
+  recompute_screen_ptr = $0936
+  render_viewport      = $09C1
+  row_hundreds_digit   = $0398
+  row_num_value        = $0397
+  row_ones_digit       = $039A
+  row_status_buf       = $039B
+  row_tens_digit       = $0399
+  save_prompt_msg      = $0D09
+  saved_msg            = $0D8D
   scratch_cmd_buf      = $0366
   scratch_cmd_len      = $037A
-  scratch_current_file = $0D46
+  scratch_current_file = $114F
   screen_ptr           = $00F7
-  screen_row_hi        = $0B7E
-  screen_row_lo        = $0B65
-  show_cursor          = $0912
-  show_help_status     = $0BBE
+  screen_row_hi        = $0EA6
+  screen_row_lo        = $0E8D
+  set_selector_char    = $14CB
+  show_cursor          = $0A07
+  show_help_status     = $0EE6
+  show_row_status      = $0EF1
   start                = $083A
   status_msg_len       = $0364
   str_equal            = $0821
   str_ptr              = $00FB
-  title_msg            = $09AF
-  wait_for_key         = $08F8
-  wait_key             = $086D
-  write_screen_to_file = $0C73
+  title_msg            = $0B90
+  try_scroll_down      = $0A19
+  try_scroll_up        = $0A2A
+  wait_for_key         = $0930
+  wait_key             = $0879
+  write_screen_to_file = $1078
